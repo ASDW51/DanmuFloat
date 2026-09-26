@@ -4,7 +4,7 @@
 // - 右上角 + 添加主播，添加后立即落盘，冷启动或下拉刷新时重新读取
 // - 行内「刷新」拉一次房间信息，更新主播名 / 标题 / 开播状态
 // - 点击整行或行内「连接弹幕」= 单栏连接，进入 App 内弹幕页（页内可再开悬浮窗）
-// - 右上角多栏按钮 = 勾选主播后开 4 栏悬浮窗
+// - 右上角多栏按钮 = 勾选主播后开多栏悬浮窗（最多 9 栏，3×3）
 import 'dart:async';
 
 import 'package:danmu_float/app/overlay_bridge.dart';
@@ -12,9 +12,11 @@ import 'package:danmu_float/app/overlay_launcher.dart';
 import 'package:danmu_float/room/managed_room.dart';
 import 'package:danmu_float/room/room_info.dart';
 import 'package:danmu_float/room/room_info_client.dart';
+import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/ui/add_room_dialog.dart';
 import 'package:danmu_float/ui/danmu_page.dart';
+import 'package:danmu_float/ui/settings_page.dart';
 import 'package:flutter/material.dart';
 
 class HomePage extends StatefulWidget {
@@ -24,8 +26,9 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final RoomStore _store = RoomStore();
+  final OverlayPrefsStore _prefsStore = OverlayPrefsStore();
 
   /// 刷新房间信息用的客户端：复用同一个实例以共享 ttwid 缓存与连接池。
   final RoomInfoClient _roomInfoClient = RoomInfoClient();
@@ -36,18 +39,46 @@ class _HomePageState extends State<HomePage> {
   /// 正在刷新房间信息的直播间号（行内按钮转圈用）。
   final Set<String> _refreshing = <String>{};
 
+  /// 悬浮窗样式与分栏偏好（透明度、上次勾选的主播）。
+  OverlayPrefs _prefs = const OverlayPrefs();
+
   bool _overlayVisible = false;
+
+  /// 监听悬浮窗上报：权限被撤销时悬浮窗会自行断开，这里同步按钮状态。
+  StreamSubscription<OverlayStatus>? _overlaySubscription;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _overlaySubscription = overlayStatusStream.listen((OverlayStatus status) {
+      if (!status.permissionRevoked || !mounted) return;
+      setState(() => _overlayVisible = false);
+    });
     unawaited(_load());
+    unawaited(_loadPrefs());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _overlaySubscription?.cancel();
     _roomInfoClient.close();
     super.dispose();
+  }
+
+  /// 回到前台时核对一次悬浮窗是否仍然有效（不做系统回调，见 overlay_launcher）。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_checkOverlayAlive());
+  }
+
+  Future<void> _checkOverlayAlive() async {
+    if (!_overlayVisible) return;
+    if (await verifyOverlayPermission()) return;
+    if (!mounted) return;
+    setState(() => _overlayVisible = false);
+    _snack('悬浮窗已失效（权限被撤销或被系统移除），已关闭');
   }
 
   // ---------- 本地列表 ----------
@@ -60,6 +91,50 @@ class _HomePageState extends State<HomePage> {
       _rooms = rooms;
       _loading = false;
     });
+  }
+
+  Future<void> _loadPrefs() async {
+    final OverlayPrefs prefs = await _prefsStore.load();
+    if (!mounted) return;
+    setState(() => _prefs = prefs);
+  }
+
+  /// 设置页改样式：先更新内存并推给已开着的悬浮窗，需要落盘时才写文件。
+  void _onPrefsChanged(OverlayPrefs prefs, {required bool persist}) {
+    final bool sizeChanged = prefs.windowWidth != _prefs.windowWidth ||
+        prefs.windowHeight != _prefs.windowHeight;
+    setState(() => _prefs = prefs);
+    // 只推样式与尺寸：此时窗口里绑的是哪些房间由当前持有悬浮窗的页面决定，
+    // 重发 config 会把绑定冲掉。
+    //
+    // 这里不判断本页的开关状态：悬浮窗可能是在弹幕页开的，
+    // 窗口是否已开由 overlay_launcher 统一持有，没开时两处调用会静默忽略。
+    unawaited(
+      shareOverlayStyle(opacity: prefs.opacity, fontSize: prefs.fontSize),
+    );
+    if (sizeChanged) {
+      final Size screen = MediaQuery.sizeOf(context);
+      updateOverlaySize(
+        fitOverlaySize(
+          prefs.windowSize,
+          screenWidth: screen.width,
+          screenHeight: screen.height,
+        ),
+        devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+      );
+    }
+    if (persist) unawaited(_prefsStore.save(prefs));
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => SettingsPage(
+          prefs: _prefs,
+          onChanged: _onPrefsChanged,
+        ),
+      ),
+    );
   }
 
   Future<void> _add() async {
@@ -145,30 +220,47 @@ class _HomePageState extends State<HomePage> {
   // ---------- 多栏悬浮窗 ----------
 
   Future<void> _openMulti() async {
+    final Set<String> known =
+        _rooms.map((ManagedRoom room) => room.webRid).toSet();
     final List<ManagedRoom>? selected = await showDialog<List<ManagedRoom>>(
       context: context,
-      builder: (BuildContext context) => _MultiSelectDialog(rooms: _rooms),
+      builder: (BuildContext context) => _MultiSelectDialog(
+        rooms: _rooms,
+        // 带出上次的栏位绑定；期间被移除的主播不再预勾选。
+        initialSelection: _prefs.webRids
+            .where(known.contains)
+            .toList(growable: false),
+      ),
     );
     if (selected == null || selected.isEmpty || !mounted) return;
 
     final List<String> webRids =
         selected.map((ManagedRoom room) => room.webRid).toList(growable: false);
-    final OverlayConfig config = OverlayConfig(
-      webRids: webRids,
-      layout: OverlayLayout.fromRoomCount(webRids.length),
+    final OverlayConfig config = _prefs.toConfig(webRids);
+    final Size screen = MediaQuery.sizeOf(context);
+    // 窗口不能大于屏幕，否则会溢出。
+    final ({double width, double height}) size = fitOverlaySize(
+      _prefs.windowSize,
+      screenWidth: screen.width,
+      screenHeight: screen.height,
     );
     final double dpr = MediaQuery.devicePixelRatioOf(context);
 
-    if (_overlayVisible) {
-      // 已建窗：按新尺寸重排并重新下发房间，无需关闭重开。
-      await resizeOverlay(config, devicePixelRatio: dpr);
+    // 记住本次栏位绑定，下次打开多栏弹窗直接带出。
+    final OverlayPrefs nextPrefs = _prefs.copyWith(webRids: webRids);
+    setState(() => _prefs = nextPrefs);
+    unawaited(_prefsStore.save(nextPrefs));
+
+    if (overlayShown) {
+      // 已建窗（含在弹幕页开的单栏窗）：按新尺寸重排并重新下发房间，无需关闭重开。
+      await resizeOverlay(config, devicePixelRatio: dpr, size: size);
     } else {
       if (!await ensureOverlayPermission()) {
         if (!mounted) return;
         _snack('未授予悬浮窗权限，无法开启');
         return;
       }
-      await openOverlay(config, devicePixelRatio: dpr);
+      await openOverlay(config, devicePixelRatio: dpr, size: size);
     }
     if (!mounted) return;
     setState(() => _overlayVisible = true);
@@ -206,6 +298,11 @@ class _HomePageState extends State<HomePage> {
             tooltip: '添加主播',
             icon: const Icon(Icons.add),
             onPressed: _add,
+          ),
+          IconButton(
+            tooltip: '设置',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: _openSettings,
           ),
         ],
       ),
@@ -335,21 +432,28 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 多栏选择弹窗：勾选要连接的主播，确认后按 4 栏悬浮窗展示。
+/// 多栏选择弹窗：勾选要连接的主播，确认后开悬浮窗。
 class _MultiSelectDialog extends StatefulWidget {
-  const _MultiSelectDialog({required this.rooms});
+  const _MultiSelectDialog({required this.rooms, this.initialSelection = const <String>[]});
 
   final List<ManagedRoom> rooms;
+
+  /// 上次的栏位绑定，打开时预勾选（按传进来的顺序决定初始栏位顺序）。
+  final List<String> initialSelection;
 
   @override
   State<_MultiSelectDialog> createState() => _MultiSelectDialogState();
 }
 
 class _MultiSelectDialogState extends State<_MultiSelectDialog> {
-  /// 与悬浮窗 4 栏布局的栏位数一致。
-  static const int _maxSelectable = 4;
+  /// 与悬浮窗最大栏位数一致（3×3 网格）。
+  static const int _maxSelectable = 9;
 
-  final Set<String> _selected = <String>{};
+  late final Set<String> _selected = <String>{
+    for (final String webRid in widget.initialSelection)
+      if (widget.rooms.any((ManagedRoom room) => room.webRid == webRid))
+        webRid,
+  };
 
   @override
   Widget build(BuildContext context) {

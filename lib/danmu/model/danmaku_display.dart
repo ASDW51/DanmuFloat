@@ -32,6 +32,13 @@ String? danmakuTypeLabel(DanmakuKind kind) => switch (kind) {
 String formatOnlineCount(int value) =>
     value >= 10000 ? '${(value / 10000).toStringAsFixed(1)}万' : '$value';
 
+/// 次要文字（时间、等级、灯牌、状态、类型标记）相对正文缩小的字号，
+/// 并设 8 的下限，避免用户把基准字号调到很小后出现 0 或负数。
+double smallerFontSize(double base, double delta) {
+  final double value = base - delta;
+  return value < 8 ? 8 : value;
+}
+
 /// 弹幕时间：毫秒时间戳 → HH:mm:ss，无效时间戳给占位。
 String formatClock(int timeMs) {
   if (timeMs <= 0) return '--:--:--';

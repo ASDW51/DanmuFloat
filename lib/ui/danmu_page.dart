@@ -12,9 +12,9 @@ import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/danmu/sign/danmu_signature.dart';
 import 'package:danmu_float/room/room_info.dart';
+import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 
 /// 页面内保留的弹幕条数上限，与 design.md 第 8 章默认缓存一致。
 const int _displayLimit = 500;
@@ -32,9 +32,13 @@ class DanmuPage extends StatefulWidget {
   State<DanmuPage> createState() => _DanmuPageState();
 }
 
-class _DanmuPageState extends State<DanmuPage> {
+class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   final List<DanmakuEvent> _events = <DanmakuEvent>[];
   final ScrollController _scrollController = ScrollController();
+
+  /// 悬浮窗样式偏好：本页只用到透明度。
+  final OverlayPrefsStore _prefsStore = OverlayPrefsStore();
+  OverlayPrefs _prefs = const OverlayPrefs();
 
   LiveDanmuSession? _session;
   StreamSubscription<LiveSessionStage>? _stageSubscription;
@@ -53,29 +57,53 @@ class _DanmuPageState extends State<DanmuPage> {
 
   bool _overlayVisible = false;
   OverlayStatus? _overlayState;
-  StreamSubscription<dynamic>? _overlaySubscription;
+  StreamSubscription<OverlayStatus>? _overlaySubscription;
 
   @override
   void initState() {
     super.initState();
-    _overlaySubscription = FlutterScreenOverlay.overlayListener.listen(
-      (dynamic message) {
-        final OverlayStatus? state = OverlayStatus.tryParse(message);
-        if (state == null || !mounted) return;
-        setState(() => _overlayState = state);
-      },
-    );
+    WidgetsBinding.instance.addObserver(this);
+    _overlaySubscription = overlayStatusStream.listen((OverlayStatus state) {
+      if (!mounted) return;
+      setState(() {
+        _overlayState = state;
+        // 悬浮窗自查发现权限被撤销且已自行断开：按钮状态同步回未开启。
+        if (state.permissionRevoked) _overlayVisible = false;
+      });
+    });
+    unawaited(_loadPrefs());
     unawaited(_connect());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _overlaySubscription?.cancel();
     _stageSubscription?.cancel();
     _danmuSubscription?.cancel();
     _session?.stop();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadPrefs() async {
+    final OverlayPrefs prefs = await _prefsStore.load();
+    if (!mounted) return;
+    setState(() => _prefs = prefs);
+  }
+
+  /// 回到前台时核对一次悬浮窗是否仍然有效（不做系统回调，见 overlay_launcher）。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_checkOverlayAlive());
+  }
+
+  Future<void> _checkOverlayAlive() async {
+    if (!_overlayVisible) return;
+    if (await verifyOverlayPermission()) return;
+    if (!mounted) return;
+    setState(() => _overlayVisible = false);
+    _snack('悬浮窗已失效（权限被撤销或被系统移除），已关闭');
   }
 
   Future<void> _connect() async {
@@ -134,14 +162,21 @@ class _DanmuPageState extends State<DanmuPage> {
     }
 
     final double dpr = MediaQuery.devicePixelRatioOf(context);
+    final Size screen = MediaQuery.sizeOf(context);
     if (!await ensureOverlayPermission()) {
       if (!mounted) return;
       _snack('未授予悬浮窗权限，无法开启');
       return;
     }
     await openOverlay(
-      OverlayConfig(webRids: <String>[widget.webRid]),
+      _prefs.toConfig(<String>[widget.webRid]),
       devicePixelRatio: dpr,
+      // 窗口不能大于屏幕，否则会溢出。
+      size: fitOverlaySize(
+        _prefs.windowSize,
+        screenWidth: screen.width,
+        screenHeight: screen.height,
+      ),
     );
     if (!mounted) return;
     setState(() => _overlayVisible = true);
@@ -325,7 +360,7 @@ class _DanmuPageState extends State<DanmuPage> {
       ),
       child: Text.rich(
         TextSpan(
-          style: const TextStyle(fontSize: 13),
+          style: TextStyle(fontSize: smallerFontSize(_prefs.fontSize, 1)),
           children: <InlineSpan>[
             const TextSpan(
               text: '欢迎 ',
@@ -372,25 +407,38 @@ class _DanmuPageState extends State<DanmuPage> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Text.rich(
         TextSpan(
+          style: TextStyle(fontSize: _prefs.fontSize),
           children: <InlineSpan>[
             TextSpan(
               text: '${formatClock(event.timeMs)} ',
-              style: const TextStyle(color: Colors.grey, fontSize: 12),
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: smallerFontSize(_prefs.fontSize, 2),
+              ),
             ),
             if (mark != null && markColor != null)
               TextSpan(
                 text: '$mark ',
-                style: TextStyle(color: markColor, fontSize: 12),
+                style: TextStyle(
+                  color: markColor,
+                  fontSize: smallerFontSize(_prefs.fontSize, 2),
+                ),
               ),
             if (user.level > 0)
               TextSpan(
                 text: 'Lv.${user.level} ',
-                style: TextStyle(color: Colors.orange.shade800, fontSize: 12),
+                style: TextStyle(
+                  color: Colors.orange.shade800,
+                  fontSize: smallerFontSize(_prefs.fontSize, 2),
+                ),
               ),
             if (user.fanLevel > 0)
               TextSpan(
                 text: '灯牌${user.fanLevel} ',
-                style: TextStyle(color: Colors.purple.shade400, fontSize: 12),
+                style: TextStyle(
+                  color: Colors.purple.shade400,
+                  fontSize: smallerFontSize(_prefs.fontSize, 2),
+                ),
               ),
             if (user.nickName.isNotEmpty)
               TextSpan(

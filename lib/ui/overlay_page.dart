@@ -60,13 +60,18 @@ class _PaneReport {
 class _OverlayPageState extends State<OverlayPage> {
   StreamSubscription<dynamic>? _bridgeSubscription;
 
-  OverlayLayout _layout = OverlayLayout.single;
+  OverlayGrid _grid = const OverlayGrid(0);
   List<String> _webRids = const <String>[];
-  double _opacity = 0.8;
+  double _opacity = defaultOverlayOpacity;
+  double _fontSize = defaultDanmuFontSize;
 
   /// 各栏最新上报，用于向主 App 汇报整体状态（主 App 不展示逐栏明细）。
   final Map<int, _PaneReport> _reports = <int, _PaneReport>{};
   Timer? _reportTimer;
+
+  /// 权限被撤销后各栏已卸载，之后的上报统一按「权限已撤销」发送，
+  /// 免得又被后续的栏位上报覆盖回正常状态。
+  bool _permissionRevoked = false;
 
   @override
   void initState() {
@@ -94,14 +99,26 @@ class _OverlayPageState extends State<OverlayPage> {
       _reportState();
       return;
     }
+    // 纯样式调整：只改外观，各栏绑定与缓存都不动。
+    final OverlayStyle? style = OverlayStyle.tryParse(message);
+    if (style != null) {
+      setState(() {
+        _opacity = style.opacity;
+        _fontSize = style.fontSize;
+      });
+      return;
+    }
     final OverlayConfig? config = OverlayConfig.tryParse(message);
     if (config == null) return;
     setState(() {
-      _layout = config.layout;
       _webRids = config.webRids;
+      _grid = config.grid;
       _opacity = config.opacity;
+      _fontSize = config.fontSize;
       // 布局或房间变化会重建对应栏位，旧栏位的上报先作废。
       _reports.clear();
+      // 重新授权后主 App 会再下发一次配置，此时恢复正常上报。
+      _permissionRevoked = false;
     });
   }
 
@@ -113,7 +130,32 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 状态按秒节流上报，避免每条弹幕都发一次消息。
   void _scheduleReport() {
     if (_reportTimer?.isActive ?? false) return;
-    _reportTimer = Timer(const Duration(seconds: 1), _reportState);
+    _reportTimer = Timer(const Duration(seconds: 1), _onReportTick);
+  }
+
+  /// 节流到点：顺带核对一次权限，被撤销就卸载各栏断开全部连接。
+  ///
+  /// 悬浮窗跑在独立引擎里，权限查询通道未必注册到本引擎；查不到只当未知，
+  /// 不能因为一次查询失败就误关窗口。
+  Future<void> _onReportTick() async {
+    if (!_permissionRevoked && await _permissionGone()) {
+      if (!mounted) return;
+      setState(() {
+        _permissionRevoked = true;
+        // 清空各栏 → 各栏 dispose → 断开全部直播间连接。
+        _webRids = const <String>[];
+        _reports.clear();
+      });
+    }
+    _reportState();
+  }
+
+  Future<bool> _permissionGone() async {
+    try {
+      return !await FlutterScreenOverlay.isPermissionGranted();
+    } on Object {
+      return false;
+    }
   }
 
   /// 阶段聚合优先级：异常 / 未开播最需要用户注意，其次是连接成功，再是进行中。
@@ -128,6 +170,19 @@ class _OverlayPageState extends State<OverlayPage> {
   ];
 
   void _reportState() {
+    if (_permissionRevoked) {
+      unawaited(
+        FlutterScreenOverlay.shareData(
+          const OverlayStatus(
+            stage: LiveSessionStage.error,
+            received: 0,
+            error: '悬浮窗权限已被撤销，已断开全部连接',
+            permissionRevoked: true,
+          ).toJson(),
+        ),
+      );
+      return;
+    }
     int received = 0;
     String? error;
     String? webRid;
@@ -178,46 +233,58 @@ class _OverlayPageState extends State<OverlayPage> {
         ),
       );
 
-  /// 1 栏铺满；4 栏按 2×2 网格（prd F4），每栏为标题行 + 弹幕列表两层。
+  /// 按栏位数把窗口切成 rows × columns 网格（prd F4）：
+  /// 1 栏铺满；2~4 栏 2 列；5~9 栏 3 列。每格为标题行 + 弹幕列表两层。
   Widget _buildPanes() {
     String roomAt(int index) =>
         index < _webRids.length ? _webRids[index] : '';
+    final double paneFont = paneFontSize(_fontSize, _webRids.length);
 
-    if (_layout == OverlayLayout.single) {
-      return _buildPane(index: 0, webRid: roomAt(0));
+    if (_grid.isSingle) {
+      return _buildPane(index: 0, webRid: roomAt(0), fontSize: paneFont);
     }
     return Column(
       children: <Widget>[
-        Expanded(
-          child: Row(
-            children: <Widget>[
-              Expanded(child: _buildPane(index: 0, webRid: roomAt(0))),
-              const VerticalDivider(width: 1, thickness: 1, color: Colors.white24),
-              Expanded(child: _buildPane(index: 1, webRid: roomAt(1))),
-            ],
+        for (int row = 0; row < _grid.rows; row++) ...<Widget>[
+          if (row > 0)
+            const Divider(height: 1, thickness: 1, color: Colors.white24),
+          Expanded(
+            child: Row(
+              children: <Widget>[
+                for (int column = 0; column < _grid.columns; column++) ...<Widget>[
+                  if (column > 0)
+                    const VerticalDivider(
+                      width: 1,
+                      thickness: 1,
+                      color: Colors.white24,
+                    ),
+                  Expanded(
+                    child: _buildPane(
+                      index: row * _grid.columns + column,
+                      webRid: roomAt(row * _grid.columns + column),
+                      fontSize: paneFont,
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-        ),
-        const Divider(height: 1, thickness: 1, color: Colors.white24),
-        Expanded(
-          child: Row(
-            children: <Widget>[
-              Expanded(child: _buildPane(index: 2, webRid: roomAt(2))),
-              const VerticalDivider(width: 1, thickness: 1, color: Colors.white24),
-              Expanded(child: _buildPane(index: 3, webRid: roomAt(3))),
-            ],
-          ),
-        ),
+        ],
       ],
     );
   }
 
   /// 栏位按「序号 + 房间」作 key：换房间即重建该栏，其它栏不受影响。
-  Widget _buildPane({required int index, required String webRid}) =>
+  Widget _buildPane({
+    required int index,
+    required String webRid,
+    required double fontSize,
+  }) =>
       _OverlayPane(
         key: ValueKey<String>('$index:$webRid'),
         index: index,
         webRid: webRid,
-        compact: _layout != OverlayLayout.single,
+        fontSize: fontSize,
         onReport: _onPaneReport,
       );
 }
@@ -228,7 +295,7 @@ class _OverlayPane extends StatefulWidget {
     super.key,
     required this.index,
     required this.webRid,
-    required this.compact,
+    required this.fontSize,
     required this.onReport,
   });
 
@@ -237,8 +304,8 @@ class _OverlayPane extends StatefulWidget {
   /// 本栏绑定的直播间号，空串表示未绑定房间。
   final String webRid;
 
-  /// 4 栏时为 true，字号相应缩小，保证小格子里仍看得清。
-  final bool compact;
+  /// 本栏实际使用的正文字号（dp）：用户设定的基准字号已按栏数缩小过。
+  final double fontSize;
 
   final void Function(int index, _PaneReport report) onReport;
 
@@ -374,7 +441,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
     final String owner = _session?.room?.owner ?? '';
     final TextStyle labelStyle = TextStyle(
       color: Colors.white70,
-      fontSize: widget.compact ? 10 : 11,
+      fontSize: smallerFontSize(widget.fontSize, 2),
     );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -395,7 +462,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Colors.white,
-                fontSize: widget.compact ? 10 : 12,
+                fontSize: smallerFontSize(widget.fontSize, 1),
               ),
             ),
           ),
@@ -430,7 +497,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white54,
-              fontSize: widget.compact ? 10 : 12,
+              fontSize: smallerFontSize(widget.fontSize, 1),
             ),
           ),
         ),
@@ -456,7 +523,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
       ),
       child: Text.rich(
         TextSpan(
-          style: TextStyle(fontSize: widget.compact ? 10 : 11),
+          style: TextStyle(fontSize: smallerFontSize(widget.fontSize, 2)),
           children: <InlineSpan>[
             const TextSpan(
               text: '欢迎 ',
@@ -502,27 +569,33 @@ class _OverlayPaneState extends State<_OverlayPane> {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       child: Text.rich(
         TextSpan(
-          style: TextStyle(fontSize: widget.compact ? 11 : 13),
+          style: TextStyle(fontSize: widget.fontSize),
           children: <InlineSpan>[
             if (mark != null && markColor != null)
               TextSpan(
                 text: '$mark ',
-                style: TextStyle(color: markColor, fontSize: 10),
+                style: TextStyle(
+                  color: markColor,
+                  fontSize: smallerFontSize(widget.fontSize, 2),
+                ),
               ),
             // 等级与灯牌前置到昵称前，昵称后紧跟弹幕内容。
             if (user.level > 0)
               TextSpan(
                 // 荣誉等级：level > 0 才显示（大量用户无荣誉等级）
                 text: 'Lv.${user.level} ',
-                style: const TextStyle(color: Colors.amber, fontSize: 11),
+                style: TextStyle(
+                  color: Colors.amber,
+                  fontSize: smallerFontSize(widget.fontSize, 2),
+                ),
               ),
             if (user.fanLevel > 0)
               TextSpan(
                 // 灯牌等级：优先取 user.fans_club.data.level
                 text: '灯牌${user.fanLevel} ',
-                style: const TextStyle(
+                style: TextStyle(
                   color: Colors.purpleAccent,
-                  fontSize: 11,
+                  fontSize: smallerFontSize(widget.fontSize, 2),
                 ),
               ),
             if (user.nickName.isNotEmpty)
