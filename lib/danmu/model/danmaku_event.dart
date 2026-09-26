@@ -39,7 +39,10 @@ class DanmakuUser {
   final String nickName;
   final String avatarUrl;
 
-  /// 用户等级（user.level）
+  /// 荣誉等级（user.pay_grade.level），即抖音弹幕昵称旁展示的等级。
+  ///
+  /// 不能用 user.level（字段 6）：抓包样本中该用户 user.level=1，
+  /// 而 pay_grade.level=35 且勋章文案为「荣誉等级35级勋章」。
   final int level;
 
   /// 粉丝团（灯牌）等级，0 表示未加入粉丝团
@@ -84,6 +87,29 @@ class DanmakuEvent {
 
   /// 礼物钻石价值
   final int amount;
+
+  /// 是否适合在弹幕列表里展示。
+  ///
+  /// 未登记 method 会落到 [DanmakuKind.other]，其 [text] 是 method 名占位
+  /// （真实抓包里约 38 种 method，本链路只覆盖 prd 第 125 行列出的类型），
+  /// 只用于埋点归类，不应出现在展示列表里。
+  bool get isDisplayable => kind != DanmakuKind.other;
+
+  /// 在线观众数，只取「xxx在线观众」房间统计消息（`WebcastRoomStatsMessage`）。
+  ///
+  /// 抓包：`displayLong="1927在线观众"`，`display_value` / `total` 均为 1927，
+  /// 与抖音客户端口径一致且推送及时。
+  /// 房间用户序列（`WebcastRoomUserSeqMessage`）虽也带在线人数，但更新滞后
+  /// （表现为右上角「慢一拍」），故不再作为在线人数来源。
+  int get onlineCount {
+    if (kind != DanmakuKind.roomStats) return 0;
+    // 只在文案确实是「在线观众」时取值，避免把点赞数等其它统计当成在线人数。
+    if (!text.contains('在线观众')) return 0;
+    if (total > 0) return total;
+    // 兜底：从「1927在线观众」文案里取数字
+    final match = RegExp(r'\d+').firstMatch(text);
+    return match == null ? 0 : (int.tryParse(match.group(0)!) ?? 0);
+  }
 }
 
 /// 时间戳统一为毫秒：源字段 source 为秒，按 1e11 阈值区分秒与毫秒。
@@ -184,10 +210,11 @@ String _composeText(String method, Map<String, Object?> body, DanmakuUser user) 
     case 'WebcastSocialMessage':
       return asInt(body['action']) == 1 ? '关注了主播' : '分享了直播间';
     case 'WebcastRoomUserSeqMessage':
-      final totalUserStr = asString(body['total_user_str']);
-      if (totalUserStr.isNotEmpty) return '在线 $totalUserStr';
-      final totalUser = asInt(body['total_user']);
-      return totalUser > 0 ? '在线 $totalUser' : '';
+      // total/total_str 是在线人数；total_user/total_user_str 是累计观看人次（抓包为「3万+」）。
+      final totalStr = asString(body['total_str']);
+      if (totalStr.isNotEmpty) return '在线 $totalStr';
+      final total = asInt(body['total']);
+      return total > 0 ? '在线 $total' : '';
     case 'WebcastRoomStatsMessage':
       for (final key in const ['display_long', 'display_middle', 'display_short']) {
         final value = asString(body[key]);
@@ -220,9 +247,13 @@ int _totalOf(String method, Map<String, Object?> body) {
     case 'WebcastLikeMessage':
       return asInt(body['total']);
     case 'WebcastRoomUserSeqMessage':
-      return asInt(body['total_user']);
-    case 'WebcastRoomStatsMessage':
+      // total 为在线人数（抓包 1971，与 online_user_for_anchor 一致）；
+      // total_user 为累计观看人次（抓包 39408 / 「3万+」），不能用于在线人数展示。
       return asInt(body['total']);
+    case 'WebcastRoomStatsMessage':
+      // display_value 是展示文案对应的数值（display_type=1 时即「在线观众」数，抓包 1927）
+      final displayValue = asInt(body['display_value']);
+      return displayValue > 0 ? displayValue : asInt(body['total']);
   }
   return 0;
 }
@@ -233,6 +264,9 @@ int _totalOf(String method, Map<String, Object?> body) {
 const Set<int> _fansClubBadgeTypes = {7, 51};
 
 /// 从 user.badge_image_list 提取粉丝团（灯牌）等级。
+///
+/// 仅作兜底：进场等消息的 badge_image_list 只带荣誉等级勋章（image_type=1），
+/// 不含灯牌勋章，此时取值为 0。
 int extractFanLevel(Object? badgeImageList) {
   if (badgeImageList is! List) return 0;
   for (final badge in badgeImageList) {
@@ -245,15 +279,25 @@ int extractFanLevel(Object? badgeImageList) {
   return 0;
 }
 
+/// 从 user.fans_club.data.level 提取灯牌等级（灯牌的权威来源，各类型消息都带）。
+int extractFansClubLevel(Object? fansClub) =>
+    asInt(asMessage(asMessage(fansClub)?['data'])?['level']);
+
+/// 从 user.pay_grade.level 提取荣誉等级（弹幕昵称旁展示的等级）。
+int extractHonorLevel(Object? payGrade) =>
+    asInt(asMessage(payGrade)?['level']);
+
 DanmakuUser toDanmakuUser(Map<String, Object?>? user) {
   if (user == null) return DanmakuUser.empty;
   final id = asInt(user['id']);
+  final fansClubLevel = extractFansClubLevel(user['fans_club']);
   return DanmakuUser(
     userId: id != 0 ? '$id' : asString(user['id_str']),
     nickName: asString(user['nickname']),
     avatarUrl: firstImageUrl(user['avatar_thumb']),
-    level: asInt(user['level']),
-    fanLevel: extractFanLevel(user['badge_image_list']),
+    level: extractHonorLevel(user['pay_grade']),
+    fanLevel:
+        fansClubLevel > 0 ? fansClubLevel : extractFanLevel(user['badge_image_list']),
   );
 }
 

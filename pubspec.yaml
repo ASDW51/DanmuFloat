@@ -17,6 +17,8 @@ dependencies:
   http: ^1.2.2
   # X-MS-STUB 的 md5 计算
   crypto: ^3.0.6
+  # 悬浮窗：覆盖在其他 App 之上，前台服务保活（prd F2 / 4.11）
+  flutter_screen_overlay: ^1.0.7
 
 dev_dependencies:
   flutter_test:

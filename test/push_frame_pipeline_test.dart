@@ -135,6 +135,16 @@ Map<String, Object?> chatBody({String content = '来了来了'}) => <String, Obj
             },
           },
         ],
+        // 荣誉等级：展示用等级，取 pay_grade.level（=35），非 user.level（=1）
+        'pay_grade': <String, Object?>{'level': 35},
+        // 灯牌等级：以 fans_club.data.level 为准
+        'fans_club': <String, Object?>{
+          'data': <String, Object?>{
+            'club_name': '柱子z',
+            'level': 16,
+            'user_fans_club_status': 1,
+          },
+        },
       },
       'content': content,
       'event_time': 1758900005,
@@ -175,6 +185,7 @@ void main() {
       expect(output.events, hasLength(1));
       final event = output.events.single;
       expect(event.kind, DanmakuKind.chat);
+      expect(event.isDisplayable, isTrue);
       expect(event.text, '来了来了');
       expect(event.method, 'WebcastChatMessage');
       expect(event.msgId, 7686421297371468806);
@@ -183,12 +194,118 @@ void main() {
       expect(event.timeMs, 1758900005 * 1000);
       expect(event.user.userId, '58702042894');
       expect(event.user.nickName, '🤍方');
-      expect(event.user.level, 1);
+      // 等级取荣誉等级 pay_grade.level（35），不是 user.level（抓包为 1）
+      expect(event.user.level, 35);
       expect(event.user.avatarUrl, 'https://p3.douyinpic.com/aweme/100x100/avatar.jpeg');
-      // image_type 1 是荣誉等级（35），粉丝团等级应取 image_type 7 的 16
+      // 灯牌等级取 fans_club.data.level（16），勋章 image_type 7 的 16 亦一致
       expect(event.user.fanLevel, 16);
       expect(output.ackFrame, isNull);
       expect(pipeline.parseFailures, 0);
+    });
+
+    test('在线人数取 total，不取累计观看 total_user', () {
+      final output = PushFramePipeline().process(buildFrame(
+        method: 'WebcastRoomUserSeqMessage',
+        body: <String, Object?>{
+          'common': <String, Object?>{
+            'msg_id': 20001,
+            'room_id': 7686413720435657482,
+            'create_time': 1789634426,
+          },
+          // 真实抓包：total=1971 为在线人数，total_user=39408 为累计观看人次
+          'total': 1971,
+          'total_user': 39408,
+          'total_user_str': '3万+',
+          'total_str': '1971',
+          'online_user_for_anchor': '1971',
+        },
+      ));
+
+      final event = output.events.single;
+      expect(event.kind, DanmakuKind.roomUserSeq);
+      expect(event.total, 1971);
+      expect(event.text, '在线 1971');
+      // 房间用户序列不再作为在线人数来源（更新滞后，表现为「慢一拍」）
+      expect(event.onlineCount, 0);
+    });
+
+    test('在线人数只取 RoomStatsMessage 的「xxx在线观众」统计', () {
+      final output = PushFramePipeline().process(buildFrame(
+        method: 'WebcastRoomStatsMessage',
+        body: <String, Object?>{
+          'common': <String, Object?>{
+            'msg_id': 20002,
+            'room_id': 7686413720435657482,
+            'create_time': 1789634432,
+          },
+          // 真实抓包：displayLong="1927在线观众"，display_value / total 均为 1927
+          'display_short': '1927',
+          'display_middle': '1927',
+          'display_long': '1927在线观众',
+          'display_value': 1927,
+          'total': 1927,
+          'display_type': 1,
+        },
+      ));
+
+      final event = output.events.single;
+      expect(event.kind, DanmakuKind.roomStats);
+      expect(event.text, '1927在线观众');
+      expect(event.onlineCount, 1927);
+    });
+
+    test('非「在线观众」统计不当作在线人数', () {
+      final output = PushFramePipeline().process(buildFrame(
+        method: 'WebcastRoomStatsMessage',
+        body: <String, Object?>{
+          'common': <String, Object?>{'msg_id': 20003, 'create_time': 1789634433},
+          'display_long': '本周点赞 1.2万',
+          'total': 12000,
+          'display_type': 3,
+        },
+      ));
+
+      expect(output.events.single.onlineCount, 0);
+    });
+
+    test('进场消息：灯牌取 fans_club.data.level，无灯牌勋章时仍可展示', () {
+      final output = PushFramePipeline().process(buildFrame(
+        method: 'WebcastMemberMessage',
+        body: <String, Object?>{
+          'common': <String, Object?>{
+            'msg_id': 30001,
+            'room_id': 7686413720435657482,
+            'create_time': 1789634430,
+          },
+          'user': <String, Object?>{
+            'id': 764889724895437,
+            'nickname': '双笙本家',
+            'pay_grade': <String, Object?>{'level': 3},
+            'fans_club': <String, Object?>{
+              'data': <String, Object?>{'level': 3, 'user_fans_club_status': 1},
+            },
+            // 关键：进场消息的勋章列表只有荣誉等级勋章，没有 image_type 7/51 的灯牌勋章
+            'badge_image_list': <Object?>[
+              <String, Object?>{
+                'image_type': 1,
+                'content': <String, Object?>{
+                  'level': 3,
+                  'alternative_text': '荣誉等级3级勋章',
+                },
+              },
+            ],
+          },
+          'member_count': 1993,
+        },
+      ));
+
+      final event = output.events.single;
+      expect(event.kind, DanmakuKind.member);
+      expect(event.user.nickName, '双笙本家');
+      expect(event.user.level, 3);
+      // 勋章列表里没有灯牌勋章，仍应从 fans_club.data.level 取到 3
+      expect(event.user.fanLevel, 3);
+      expect(event.text, '进入直播间');
     });
 
     test('need_ack 为真时回执帧带回 LogID 与 internal_ext', () {
@@ -242,7 +359,7 @@ void main() {
       expect(event.amount, 1);
     });
 
-    test('超过 1KB 的单条消息整条丢弃', () {
+    test('超过阈值体积的单条消息整条丢弃', () {
       final pipeline = PushFramePipeline(maxMessageBytes: 16);
       final output = pipeline.process(
         buildFrame(method: 'WebcastChatMessage', body: chatBody(content: '很长的弹幕内容' * 20)),
@@ -250,6 +367,12 @@ void main() {
 
       expect(output.events, isEmpty);
       expect(pipeline.oversizedDropped, 1);
+    });
+
+    test('默认阈值取 256KB，不拦真实弹幕体积', () {
+      // 抖音真实弹幕带完整 user 对象，抓包样本字符串总量 3.6KB、最大类型约 20KB。
+      // 阈值过小会把正常弹幕全部丢掉（曾用 1KB）。
+      expect(PushFramePipeline().maxMessageBytes, 256 * 1024);
     });
 
     test('未登记 method 透传为 other，不报错', () {
@@ -264,6 +387,9 @@ void main() {
       expect(event.kind, DanmakuKind.other);
       expect(event.method, 'WebcastLinkMicMethod');
       expect(event.msgId, 555);
+      // text 是 method 名占位，只用于埋点归类，不进展示列表
+      expect(event.text, 'WebcastLinkMicMethod');
+      expect(event.isDisplayable, isFalse);
     });
 
     test('脏帧只计数不抛异常', () {

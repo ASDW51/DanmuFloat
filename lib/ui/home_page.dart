@@ -4,11 +4,13 @@
 import 'dart:async';
 
 import 'package:danmu_float/app/live_danmu_session.dart';
+import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/danmu/sign/danmu_signature.dart';
 import 'package:danmu_float/room/room_info.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 
 /// 界面内保留的弹幕条数上限，与 design.md 第 8 章默认缓存一致。
 const int _displayLimit = 500;
@@ -34,8 +36,26 @@ class _HomePageState extends State<HomePage> {
   bool _autoScroll = true;
   int _received = 0;
 
+  bool _overlayVisible = false;
+  OverlayStatus? _overlayState;
+  StreamSubscription<dynamic>? _overlaySubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    // 悬浮窗在独立引擎里跑连接链路，状态只能经消息通道回传。
+    _overlaySubscription = FlutterScreenOverlay.overlayListener.listen(
+      (dynamic message) {
+        final OverlayStatus? state = OverlayStatus.tryParse(message);
+        if (state == null || !mounted) return;
+        setState(() => _overlayState = state);
+      },
+    );
+  }
+
   @override
   void dispose() {
+    _overlaySubscription?.cancel();
     _stageSubscription?.cancel();
     _danmuSubscription?.cancel();
     _session?.stop();
@@ -63,7 +83,9 @@ class _HomePageState extends State<HomePage> {
     _stageSubscription = session.stages.listen((LiveSessionStage stage) {
       if (mounted) setState(() => _stage = stage);
     });
-    _danmuSubscription = session.danmu.listen((DanmakuEvent event) {
+    _danmuSubscription = session.danmu
+        .where((DanmakuEvent event) => event.isDisplayable)
+        .listen((DanmakuEvent event) {
       if (!mounted) return;
       setState(() {
         _events.add(event);
@@ -142,6 +164,56 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 开启 / 关闭悬浮窗。连接链路跑在悬浮窗引擎里，此处只下发房间配置。
+  Future<void> _toggleOverlay() async {
+    if (_overlayVisible) {
+      await FlutterScreenOverlay.closeOverlay();
+      if (!mounted) return;
+      setState(() => _overlayVisible = false);
+      return;
+    }
+
+    final String webRid = _webRidController.text.trim();
+    if (webRid.isEmpty) {
+      _snack('请先输入 webRid，再开启悬浮窗');
+      return;
+    }
+    final double dpr = MediaQuery.devicePixelRatioOf(context);
+
+    bool granted = await FlutterScreenOverlay.isPermissionGranted();
+    if (!granted) {
+      granted = await FlutterScreenOverlay.requestPermission() ?? false;
+    }
+    if (!granted) {
+      if (!mounted) return;
+      _snack('未授予悬浮窗权限，无法开启');
+      return;
+    }
+
+    // 单栏布局最小尺寸 200×150 dp（prd F4），这里取略大的默认值；
+    // 插件按物理像素设置窗口，故需乘设备像素比。
+    await FlutterScreenOverlay.showOverlay(
+      width: (240 * dpr).round(),
+      height: (320 * dpr).round(),
+      alignment: OverlayAlignment.centerRight,
+      enableDrag: true,
+      positionGravity: PositionGravity.auto,
+      overlayTitle: 'DanmuFloat',
+      overlayContent: '正在显示弹幕悬浮窗',
+    );
+    // 窗口建立后下发房间配置：此时悬浮窗引擎已随主 App 启动预热完毕。
+    await FlutterScreenOverlay.shareData(
+      OverlayConfig(webRid: webRid).toJson(),
+    );
+    if (!mounted) return;
+    setState(() => _overlayVisible = true);
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final RoomInfo? room = _session?.room;
@@ -149,6 +221,15 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('弹幕链路验证'),
         actions: <Widget>[
+          IconButton(
+            tooltip: _overlayVisible ? '关闭悬浮窗' : '开启悬浮窗',
+            icon: Icon(
+              _overlayVisible
+                  ? Icons.picture_in_picture_alt
+                  : Icons.picture_in_picture_alt_outlined,
+            ),
+            onPressed: _toggleOverlay,
+          ),
           IconButton(
             tooltip: '复制错误信息',
             icon: const Icon(Icons.copy_all),
@@ -253,6 +334,15 @@ class _HomePageState extends State<HomePage> {
             Text(
               '连接错误: ${_session!.socketError}',
               style: const TextStyle(color: Colors.red, fontSize: 12),
+            ),
+          ],
+          if (_overlayState != null) ...<Widget>[
+            const SizedBox(height: 6),
+            Text(
+              '悬浮窗: ${_stageLabel(_overlayState!.stage)} · '
+              '已收 ${_overlayState!.received} 条'
+              '${_overlayState!.error == null ? '' : ' · ${_overlayState!.error}'}',
+              style: const TextStyle(color: Colors.blueGrey, fontSize: 12),
             ),
           ],
         ],

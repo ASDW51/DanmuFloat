@@ -21,12 +21,16 @@ class PipelineOutput {
 ///
 /// 全程不涉及网络与平台能力，可离线单测（design.md 第 4 章步骤 8~11）。
 class PushFramePipeline {
-  PushFramePipeline({MsgIdDeduplicator? deduplicator, this.maxMessageBytes = 1024})
+  PushFramePipeline({MsgIdDeduplicator? deduplicator, this.maxMessageBytes = 256 * 1024})
       : deduplicator = deduplicator ?? MsgIdDeduplicator();
 
   final MsgIdDeduplicator deduplicator;
 
-  /// 单条消息丢弃阈值：超过整条丢弃，不做部分保留（prd.md F1）
+  /// 单条消息丢弃阈值：超过整条丢弃，不做部分保留（prd.md F1）。
+  ///
+  /// 抖音真实弹幕带完整 user 对象（勋章列表、粉丝团、publicAreaBadgeInfo、
+  /// rtf_content 内嵌用户），抓包样本的字符串总量已达 3.6KB，最大类型约 20KB，
+  /// 故阈值取 256KB——只用于拦截异常大包，不作为正常消息的过滤条件。
   final int maxMessageBytes;
 
   // 埋点计数（design.md 第 10 章，仅内存统计）

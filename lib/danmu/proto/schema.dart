@@ -90,6 +90,8 @@ final Map<String, MessageSchema> imSchemas = <String, MessageSchema>{
     6: FieldSpec('level', FieldKind.varint),
     9: FieldSpec('avatar_thumb', FieldKind.message, messageType: 'Image'),
     21: FieldSpec('badge_image_list', FieldKind.message, messageType: 'Image', repeated: true),
+    23: FieldSpec('pay_grade', FieldKind.message, messageType: 'PayGrade'),
+    24: FieldSpec('fans_club', FieldKind.message, messageType: 'FansClub'),
     38: FieldSpec('display_id', FieldKind.string),
     46: FieldSpec('sec_uid', FieldKind.string),
     67: FieldSpec('web_rid', FieldKind.string),
@@ -112,6 +114,24 @@ final Map<String, MessageSchema> imSchemas = <String, MessageSchema>{
     2: FieldSpec('font_color', FieldKind.string),
     3: FieldSpec('level', FieldKind.varint),
     4: FieldSpec('alternative_text', FieldKind.string),
+  }),
+
+  // 荣誉等级：抖音弹幕昵称旁的「等级」即此处的 level，
+  // 依据 data/messages/messages_WebcastChatMessage.json：payGrade.level=35，
+  // 对应勋章 image_type=1 的「荣誉等级35级勋章」。
+  'PayGrade': const MessageSchema('PayGrade', {
+    6: FieldSpec('level', FieldKind.varint),
+  }),
+
+  // 粉丝团（灯牌）：level 与 user_fans_club_status 是灯牌展示的权威来源，
+  // badge_image_list 仅部分消息带 image_type 7/51 的灯牌勋章，故仅作兜底。
+  'FansClub': const MessageSchema('FansClub', {
+    1: FieldSpec('data', FieldKind.message, messageType: 'FansClubData'),
+  }),
+  'FansClubData': const MessageSchema('FansClubData', {
+    1: FieldSpec('club_name', FieldKind.string),
+    2: FieldSpec('level', FieldKind.varint),
+    3: FieldSpec('user_fans_club_status', FieldKind.varint),
   }),
 
   'ChatMessage': const MessageSchema('ChatMessage', {
