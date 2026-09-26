@@ -1,0 +1,30 @@
+name: danmu_float
+description: "dy多直播间弹幕悬浮窗（DanmuFloat）。纯弹幕查看器，仅 Android。"
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.10.9
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # 弹幕签名（通道 A）：本地 webmssdk.js + QuickJS
+  flutter_js: ^0.8.5
+  # 每直播间一条 WebSocket 连接
+  web_socket_channel: ^3.0.1
+  # 房间信息 Web API / ttwid 获取
+  http: ^1.2.2
+  # X-MS-STUB 的 md5 计算
+  crypto: ^3.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    # 通道 A 弹幕签名资源（design.md 11.3：随 App 打包，不走热更新）
+    - assets/webmssdk.js
