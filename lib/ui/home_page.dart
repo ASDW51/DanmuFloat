@@ -37,6 +37,7 @@ class _HomePageState extends State<HomePage> {
   int _received = 0;
 
   bool _overlayVisible = false;
+  OverlayLayout _layout = OverlayLayout.single;
   OverlayStatus? _overlayState;
   StreamSubscription<dynamic>? _overlaySubscription;
 
@@ -135,7 +136,8 @@ class _HomePageState extends State<HomePage> {
     final RoomInfo? room = _session?.room;
     final StringBuffer buffer = StringBuffer()
       ..writeln('阶段: ${_stageLabel(_stage)}')
-      ..writeln('webRid: ${_webRidController.text.trim()}')
+      ..writeln('布局: ${_layout == OverlayLayout.quad ? '4 栏' : '1 栏'}')
+      ..writeln('webRids: ${_parseWebRids().join(', ')}')
       ..writeln('已收条数: $_received')
       ..writeln('连接状态: ${_session?.connectionState.name ?? '未连接'}');
     if (room != null) {
@@ -164,17 +166,55 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 开启 / 关闭悬浮窗。连接链路跑在悬浮窗引擎里，此处只下发房间配置。
+  /// 输入框支持换行或逗号分隔多个直播间号，最多取当前布局的栏位数。
+  List<String> _parseWebRids() => _webRidController.text
+      .split(RegExp(r'[,\s]+'))
+      .map((String value) => value.trim())
+      .where((String value) => value.isNotEmpty)
+      .take(_layout.paneCount)
+      .toList(growable: false);
+
+  /// 悬浮窗窗口尺寸（dp）：单栏最小 200×150、4 栏最小 320×240（prd 4.2），
+  /// 这里取便于阅读的默认值；插件按物理像素设置窗口，调用处需乘设备像素比。
+  ({double width, double height}) get _overlaySize =>
+      _layout == OverlayLayout.quad
+          ? (width: 400, height: 560)
+          : (width: 240, height: 320);
+
+  /// 把当前布局与各栏房间下发给悬浮窗引擎。
+  Future<void> _sendConfig() async {
+    await FlutterScreenOverlay.shareData(
+      OverlayConfig(webRids: _parseWebRids(), layout: _layout).toJson(),
+    );
+  }
+
+  /// 切换布局：悬浮窗已开启时按新尺寸重排并重新下发房间，无需关闭重开。
+  Future<void> _changeLayout(OverlayLayout layout) async {
+    setState(() => _layout = layout);
+    if (!_overlayVisible) return;
+    final double dpr = MediaQuery.devicePixelRatioOf(context);
+    final ({double width, double height}) size = _overlaySize;
+    await FlutterScreenOverlay.resizeOverlay(
+      (size.width * dpr).round(),
+      (size.height * dpr).round(),
+      true,
+    );
+    await _sendConfig();
+  }
+
+  /// 开启 / 关闭悬浮窗。连接链路跑在悬浮窗引擎里，此处只下发布局与房间配置。
   Future<void> _toggleOverlay() async {
     if (_overlayVisible) {
+      // 先让悬浮窗卸载各栏（断开全部连接、清空内存缓存）再关窗口：
+      // 插件关闭窗口不会销毁缓存的引擎，只靠 dispose 收不到释放时机。
+      await FlutterScreenOverlay.shareData(buildOverlayCloseMessage());
       await FlutterScreenOverlay.closeOverlay();
       if (!mounted) return;
       setState(() => _overlayVisible = false);
       return;
     }
 
-    final String webRid = _webRidController.text.trim();
-    if (webRid.isEmpty) {
+    if (_parseWebRids().isEmpty) {
       _snack('请先输入 webRid，再开启悬浮窗');
       return;
     }
@@ -190,21 +230,18 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    // 单栏布局最小尺寸 200×150 dp（prd F4），这里取略大的默认值；
-    // 插件按物理像素设置窗口，故需乘设备像素比。
+    final ({double width, double height}) size = _overlaySize;
     await FlutterScreenOverlay.showOverlay(
-      width: (240 * dpr).round(),
-      height: (320 * dpr).round(),
+      width: (size.width * dpr).round(),
+      height: (size.height * dpr).round(),
       alignment: OverlayAlignment.centerRight,
       enableDrag: true,
       positionGravity: PositionGravity.auto,
       overlayTitle: 'DanmuFloat',
       overlayContent: '正在显示弹幕悬浮窗',
     );
-    // 窗口建立后下发房间配置：此时悬浮窗引擎已随主 App 启动预热完毕。
-    await FlutterScreenOverlay.shareData(
-      OverlayConfig(webRid: webRid).toJson(),
-    );
+    // 窗口建立后下发配置：此时悬浮窗引擎已随主 App 启动预热完毕。
+    await _sendConfig();
     if (!mounted) return;
     setState(() => _overlayVisible = true);
   }
@@ -253,6 +290,7 @@ class _HomePageState extends State<HomePage> {
       body: Column(
         children: <Widget>[
           _buildInputRow(),
+          _buildLayoutRow(),
           _buildStatusBar(room),
           const Divider(height: 1),
           Expanded(child: _buildEventList()),
@@ -271,14 +309,44 @@ class _HomePageState extends State<HomePage> {
         child: TextField(
           controller: _webRidController,
           enabled: _session == null,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'webRid（直播间号）',
+          keyboardType: TextInputType.multiline,
+          maxLines: 3,
+          minLines: 1,
+          // 悬浮窗按此列表绑定各栏房间：换行或逗号分隔，最多取当前布局的栏位数。
+          decoration: InputDecoration(
+            labelText: 'webRid（每行一个，最多 ${_layout.paneCount} 个）',
             hintText: '例如 7350000000000000001',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
             isDense: true,
           ),
           onSubmitted: (_) => _toggle(),
+        ),
+      );
+
+  /// 分栏布局切换（prd F3 / F4：P0 只做 1 栏与 4 栏）。
+  Widget _buildLayoutRow() => Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+        child: Row(
+          children: <Widget>[
+            const Text('分栏', style: TextStyle(fontSize: 13)),
+            const SizedBox(width: 12),
+            SegmentedButton<OverlayLayout>(
+              segments: const <ButtonSegment<OverlayLayout>>[
+                ButtonSegment<OverlayLayout>(
+                  value: OverlayLayout.single,
+                  label: Text('1 栏'),
+                ),
+                ButtonSegment<OverlayLayout>(
+                  value: OverlayLayout.quad,
+                  label: Text('4 栏'),
+                ),
+              ],
+              selected: <OverlayLayout>{_layout},
+              onSelectionChanged: (Set<OverlayLayout> selection) {
+                unawaited(_changeLayout(selection.first));
+              },
+            ),
+          ],
         ),
       );
 

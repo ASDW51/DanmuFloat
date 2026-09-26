@@ -12,37 +12,80 @@ Object? roundTrip(Map<String, Object?> message) =>
 
 void main() {
   group('OverlayConfig', () {
-    test('经 JSON 往返后保留 webRid 与 opacity', () {
+    test('经 JSON 往返后保留各栏房间、布局与 opacity', () {
       final OverlayConfig? parsed = OverlayConfig.tryParse(
-        roundTrip(const OverlayConfig(webRid: '7350000000000000001', opacity: 0.6)
-            .toJson()),
+        roundTrip(const OverlayConfig(
+          webRids: <String>['735', '736', '737', '738'],
+          layout: OverlayLayout.quad,
+          opacity: 0.6,
+        ).toJson()),
       );
       expect(parsed, isNotNull);
-      expect(parsed!.webRid, '7350000000000000001');
+      expect(parsed!.webRids, <String>['735', '736', '737', '738']);
+      expect(parsed.layout, OverlayLayout.quad);
       expect(parsed.opacity, 0.6);
     });
 
-    test('缺省 opacity 回落为 0.8', () {
+    test('缺省 layout 按房间数推断为 4 栏，缺省 opacity 回落为 0.8', () {
       final OverlayConfig? parsed = OverlayConfig.tryParse(
-        roundTrip(<String, Object?>{'type': 'config', 'webRid': '123'}),
+        roundTrip(<String, Object?>{
+          'type': 'config',
+          'webRids': <String>['1', '2', '3', '4'],
+        }),
       );
       expect(parsed, isNotNull);
-      expect(parsed!.opacity, 0.8);
+      expect(parsed!.layout, OverlayLayout.quad);
+      expect(parsed.opacity, 0.8);
     });
 
-    test('非 config 消息、webRid 为空、非 Map 均返回 null', () {
+    test('空白房间号被剔除，单栏布局只绑定一个房间', () {
+      final OverlayConfig? parsed = OverlayConfig.tryParse(
+        roundTrip(<String, Object?>{
+          'type': 'config',
+          'webRids': <String>[' 123 ', '', '  '],
+          'layout': 'single',
+        }),
+      );
+      expect(parsed, isNotNull);
+      expect(parsed!.webRids, <String>['123']);
+      expect(parsed.layout, OverlayLayout.single);
+    });
+
+    test('非 config 消息、无 webRids、无有效房间、非 Map 均返回 null', () {
       expect(
         OverlayConfig.tryParse(roundTrip(<String, Object?>{'type': 'state'})),
         isNull,
       );
       expect(
         OverlayConfig.tryParse(
-          roundTrip(<String, Object?>{'type': 'config', 'webRid': ''}),
+          roundTrip(<String, Object?>{
+            'type': 'config',
+            'webRids': <String>[],
+          }),
+        ),
+        isNull,
+      );
+      expect(
+        OverlayConfig.tryParse(
+          roundTrip(<String, Object?>{
+            'type': 'config',
+            'webRids': <String>[''],
+          }),
         ),
         isNull,
       );
       expect(OverlayConfig.tryParse('config'), isNull);
       expect(OverlayConfig.tryParse(null), isNull);
+    });
+  });
+
+  group('OverlayLayout', () {
+    test('栏位数与按房间数的回落规则', () {
+      expect(OverlayLayout.single.paneCount, 1);
+      expect(OverlayLayout.quad.paneCount, 4);
+      expect(OverlayLayout.fromRoomCount(1), OverlayLayout.single);
+      expect(OverlayLayout.fromRoomCount(2), OverlayLayout.single);
+      expect(OverlayLayout.fromRoomCount(4), OverlayLayout.quad);
     });
   });
 
@@ -80,7 +123,8 @@ void main() {
     });
   });
 
-  test('close 指令识别', () {
+  test('close 指令识别，主 App 构造的关闭载荷可被悬浮窗识别', () {
+    expect(isOverlayCloseMessage(roundTrip(buildOverlayCloseMessage())), isTrue);
     expect(isOverlayCloseMessage(roundTrip(<String, Object?>{'type': 'close'})),
         isTrue);
     expect(
