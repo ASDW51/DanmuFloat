@@ -27,6 +27,25 @@ void main() {
         isFalse,
       );
     });
+
+    test('分组缺失或为空串时按未分组处理（prd F14）', () {
+      expect(ManagedRoom.tryParse(<String, Object?>{'room_id': '1'})!.group, '');
+      expect(
+        ManagedRoom.tryParse(<String, Object?>{'room_id': '1', 'group': '  '})!
+            .group,
+        '',
+      );
+      expect(
+        ManagedRoom.tryParse(<String, Object?>{'room_id': '1', 'group': ' 比赛 '})!
+            .group,
+        '比赛',
+      );
+    });
+
+    test('copyWith 可写入 / 清空分组', () {
+      expect(_room().copyWith(group: '关注').group, '关注');
+      expect(_room().copyWith(group: '关注').copyWith(group: '').group, '');
+    });
   });
 
   group('encodeRooms / decodeRooms', () {
@@ -43,6 +62,15 @@ void main() {
       expect(decoded.first.title, '今晚八点');
       expect(decoded.first.living, isTrue);
       expect(decoded.last.living, isNull);
+    });
+
+    test('分组随房间记录一起落盘，缺失时回落未分组（prd F14）', () {
+      final List<ManagedRoom> decoded = decodeRooms(encodeRooms(<ManagedRoom>[
+        _room(group: '比赛'),
+        _room(webRid: '736'),
+      ]));
+      expect(decoded.first.group, '比赛');
+      expect(decoded.last.group, '');
     });
 
     test('空内容、非 JSON、结构不符一律按空列表处理', () {
@@ -103,6 +131,7 @@ ManagedRoom _room({
   String name = '',
   String owner = '',
   String title = '',
+  String group = '',
   bool? living,
 }) =>
     ManagedRoom(
@@ -110,6 +139,7 @@ ManagedRoom _room({
       name: name,
       owner: owner,
       title: title,
+      group: group,
       living: living,
       addedAt: 1700000000,
     );

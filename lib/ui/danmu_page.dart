@@ -8,16 +8,25 @@ import 'dart:async';
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
+import 'package:danmu_float/danmu/auto_scroll.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/danmu/sign/danmu_signature.dart';
 import 'package:danmu_float/room/room_info.dart';
+import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 /// 页面内保留的弹幕条数上限，与 design.md 第 8 章默认缓存一致。
 const int _displayLimit = 500;
+
+/// 高亮片段样式（prd F11）：浅色页面用黄底深字。
+const TextStyle _highlightStyle = TextStyle(
+  color: Color(0xFF7A5B00),
+  fontWeight: FontWeight.bold,
+  backgroundColor: Color(0x66FFEB3B),
+);
 
 class DanmuPage extends StatefulWidget {
   const DanmuPage({super.key, required this.webRid, this.title});
@@ -33,12 +42,20 @@ class DanmuPage extends StatefulWidget {
 }
 
 class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
-  final List<DanmakuEvent> _events = <DanmakuEvent>[];
+  /// 本页收到的全部相关弹幕（未过滤）。展示与否在 build 时按过滤口径派生，
+  /// 这样从设置页改了屏蔽词 / 类型后重进本页能立刻按新口径显示。
+  final List<DanmakuEvent> _raw = <DanmakuEvent>[];
   final ScrollController _scrollController = ScrollController();
+  late final DanmakuAutoScroller _autoScroller =
+      DanmakuAutoScroller(_scrollController);
 
-  /// 悬浮窗样式偏好：本页只用到透明度。
+  /// 悬浮窗样式偏好：本页用到字号与滚动速度。
   final OverlayPrefsStore _prefsStore = OverlayPrefsStore();
   OverlayPrefs _prefs = const OverlayPrefs();
+
+  /// 全局过滤偏好（prd F10 / F11 / F13）。
+  final FilterStore _filterStore = FilterStore();
+  FilterPrefs _filter = const FilterPrefs();
 
   LiveDanmuSession? _session;
   StreamSubscription<LiveSessionStage>? _stageSubscription;
@@ -47,7 +64,12 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   LiveSessionStage _stage = LiveSessionStage.idle;
   String? _errorMessage;
   int _received = 0;
-  bool _autoScroll = true;
+
+  /// 是否已暂停跟随（prd F9）：暂停时不自动滚动，但新弹幕仍写入缓存。
+  bool _paused = false;
+
+  /// 是否处于回溯态（prd F12）：暂停后向上翻看缓存时置位，显示「回到最新」。
+  bool _backtracking = false;
 
   /// 在线人数，只取「xxx在线观众」房间统计消息（prd F6）。
   int _online = 0;
@@ -62,6 +84,8 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // 监听滚动位置以感知「向上回溯」（prd F12）：只在暂停态生效，见 _onScroll。
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addObserver(this);
     _overlaySubscription = overlayStatusStream.listen((OverlayStatus state) {
       if (!mounted) return;
@@ -72,6 +96,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       });
     });
     unawaited(_loadPrefs());
+    unawaited(_loadFilter());
     unawaited(_connect());
   }
 
@@ -82,6 +107,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     _stageSubscription?.cancel();
     _danmuSubscription?.cancel();
     _session?.stop();
+    _autoScroller.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -90,6 +116,45 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     final OverlayPrefs prefs = await _prefsStore.load();
     if (!mounted) return;
     setState(() => _prefs = prefs);
+    _autoScroller.speed = prefs.scrollSpeed;
+  }
+
+  Future<void> _loadFilter() async {
+    final FilterPrefs filter = await _filterStore.load();
+    if (!mounted) return;
+    setState(() => _filter = filter);
+  }
+
+  /// 暂停态下离底超过阈值即进入回溯；回到底部则退出（prd F12 状态流转）。
+  void _onScroll() {
+    if (!_paused || !_scrollController.hasClients) return;
+    // 自动滚动动画自身造成的位移不算用户回溯。
+    if (_autoScroller.animating) return;
+    final ScrollPosition position = _scrollController.position;
+    final bool atBottom = position.maxScrollExtent - position.pixels <= 24;
+    if (!atBottom && !_backtracking) {
+      setState(() => _backtracking = true);
+    } else if (atBottom && _backtracking) {
+      setState(() => _backtracking = false);
+    }
+  }
+
+  /// 暂停 / 继续跟随（prd F9）；继续时平滑追到最新一条。
+  void _togglePaused() {
+    setState(() {
+      _paused = !_paused;
+      _backtracking = false;
+    });
+    if (!_paused) _autoScroller.schedule();
+  }
+
+  /// 回溯态下的「回到最新」：跳到最新并恢复实时（prd F12）。
+  void _backToLatest() {
+    setState(() {
+      _paused = false;
+      _backtracking = false;
+    });
+    _autoScroller.jumpToLatest();
   }
 
   /// 回到前台时核对一次悬浮窗是否仍然有效（不做系统回调，见 overlay_launcher）。
@@ -134,23 +199,31 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       if (online > 0) _online = online;
       _received++;
       if (event.kind == DanmakuKind.member) {
-        _latestEntry = event;
-      } else if (isChatKind(event.kind)) {
-        _events.add(event);
-        if (_events.length > _displayLimit) {
-          _events.removeRange(0, _events.length - _displayLimit);
+        // 被屏蔽用户的进场也不展示（prd F10 全局生效）。
+        if (isBlockedBy(event, _filter)) {
+          if (_latestEntry?.user.userId == event.user.userId) {
+            _latestEntry = null;
+          }
+        } else {
+          _latestEntry = event;
+        }
+      } else if (event.kind != DanmakuKind.roomStats) {
+        // 其余相关弹幕先全部入缓存，展示与否在 build 时按过滤口径派生。
+        _raw.add(event);
+        if (_raw.length > _displayLimit) {
+          _raw.removeRange(0, _raw.length - _displayLimit);
         }
       }
     });
-    if (_autoScroll) _scrollToBottom();
+    if (!_paused) _autoScroller.schedule();
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-    });
-  }
+  /// 按当前过滤口径派生的可见列表（prd F10 / F13）。
+  List<DanmakuEvent> get _visible => <DanmakuEvent>[
+        for (final DanmakuEvent event in _raw)
+          if (isListKind(event.kind, _filter) && !isBlockedBy(event, _filter))
+            event,
+      ];
 
   /// 开启 / 关闭本房间的单栏悬浮窗。
   Future<void> _toggleOverlay() async {
@@ -169,7 +242,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       return;
     }
     await openOverlay(
-      _prefs.toConfig(<String>[widget.webRid]),
+      _prefs.toConfig(<String>[widget.webRid], filter: _filter),
       devicePixelRatio: dpr,
       // 窗口不能大于屏幕，否则会溢出。
       size: fitOverlaySize(
@@ -243,15 +316,15 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
             onPressed: _copyDiagnostics,
           ),
           IconButton(
-            tooltip: _autoScroll ? '关闭自动滚动' : '开启自动滚动',
-            icon: Icon(_autoScroll ? Icons.vertical_align_bottom : Icons.pause),
-            onPressed: () => setState(() => _autoScroll = !_autoScroll),
+            tooltip: _paused ? '继续（跳到最新）' : '暂停',
+            icon: Icon(_paused ? Icons.play_arrow : Icons.pause),
+            onPressed: _togglePaused,
           ),
           IconButton(
             tooltip: '清空',
             icon: const Icon(Icons.delete_outline),
             onPressed: () => setState(() {
-              _events.clear();
+              _raw.clear();
               _received = 0;
             }),
           ),
@@ -335,16 +408,49 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       };
 
   Widget _buildEventList() {
-    if (_events.isEmpty) {
+    final List<DanmakuEvent> visible = _visible;
+    if (visible.isEmpty) {
       return Center(
         child: Text(_errorMessage ?? '暂无弹幕', textAlign: TextAlign.center),
       );
     }
-    return ListView.builder(
-      controller: _scrollController,
-      itemCount: _events.length,
-      itemBuilder: (BuildContext context, int index) =>
-          _buildEventTile(_events[index]),
+    return Stack(
+      children: <Widget>[
+        ListView.builder(
+          controller: _scrollController,
+          itemCount: visible.length,
+          itemBuilder: (BuildContext context, int index) =>
+              _buildEventTile(visible[index]),
+        ),
+        // 回溯态下的「回到最新」（prd F12）。
+        if (_backtracking)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 8,
+            child: Center(
+              child: Material(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: _backToLatest,
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    child: Text(
+                      '回到最新',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: smallerFontSize(_prefs.fontSize, 2),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -401,6 +507,11 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     final Color? markColor = switch (event.kind) {
       DanmakuKind.screenChat => Colors.orange.shade800,
       DanmakuKind.privilegeScreenChat => Colors.green.shade700,
+      DanmakuKind.gift => Colors.pink.shade700,
+      DanmakuKind.member => Colors.teal.shade700,
+      DanmakuKind.like => Colors.red.shade700,
+      DanmakuKind.social => Colors.blue.shade700,
+      DanmakuKind.roomRank => Colors.amber.shade800,
       _ => null,
     };
     return Padding(
@@ -448,10 +559,17 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-            TextSpan(
-              text: event.text,
-              style: TextStyle(color: markColor),
-            ),
+            // 正文按高亮词切分（prd F11）：命中片段用高亮样式。
+            for (final HighlightSegment segment in splitHighlights(
+              event.text,
+              _filter.highlightKeywords,
+            ))
+              TextSpan(
+                text: segment.text,
+                style: segment.highlighted
+                    ? _highlightStyle
+                    : TextStyle(color: markColor),
+              ),
           ],
         ),
       ),

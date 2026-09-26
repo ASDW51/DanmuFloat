@@ -61,4 +61,10 @@ class RoomStore {
     await file.parent.create(recursive: true);
     await file.writeAsString(encodeRooms(rooms), flush: true);
   }
+
+  /// 删除列表文件（「清除所有本地数据」用，见 prd F26）。
+  Future<void> clear() async {
+    final File file = await _file();
+    if (await file.exists()) await file.delete();
+  }
 }

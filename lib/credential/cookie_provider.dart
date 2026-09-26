@@ -29,6 +29,23 @@ String joinCookieValues(Iterable<String> setCookieValues) {
   return pairs.join('; ');
 }
 
+/// 手动粘贴的凭证（prd F27 的兜底路径）：一旦设置就优先于匿名自动获取。
+///
+/// 明文只在内存中持有，密文由 CredentialStore 负责加密落盘；
+/// 悬浮窗跑在独立引擎里，主 App 通过消息通道把它同步过去（见 overlay_launcher）。
+String? _manualCookies;
+
+/// 当前生效的手动凭证；null 表示走匿名自动获取。
+///
+/// 主 App 建窗、重排窗口时用它把凭证一并下发给悬浮窗引擎。
+String? get manualCookies => _manualCookies;
+
+/// 设置或清除手动凭证（传 null / 空串即回到匿名自动获取）。
+void setManualCookies(String? cookies) {
+  final String value = cookies?.trim() ?? '';
+  _manualCookies = value.isEmpty ? null : value;
+}
+
 /// 提供匿名 Cookie 串（含 ttwid）。
 class CookieProvider {
   CookieProvider({
@@ -51,6 +68,10 @@ class CookieProvider {
 
   /// 取得 Cookie 串。失败时抛 [CookieFetchException]。
   Future<String> getCookies() async {
+    // 手动粘贴的凭证优先（prd F27）：用户已经明确指定，不再走匿名自动获取。
+    final String? manual = _manualCookies;
+    if (manual != null) return manual;
+
     final DateTime now = _now();
     final String? cached = _cachedCookies;
     final DateTime? cachedAt = _cachedAt;

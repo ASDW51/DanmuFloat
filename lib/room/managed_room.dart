@@ -8,6 +8,7 @@ class ManagedRoom {
     this.name = '',
     this.owner = '',
     this.title = '',
+    this.group = '',
     this.living,
     required this.addedAt,
   });
@@ -30,6 +31,12 @@ class ManagedRoom {
   /// 最近一次刷新的开播状态；null 表示尚未刷新过。
   final bool? living;
 
+  /// 所属分组（prd F14）；空串表示未分组。
+  ///
+  /// 分组名跟着房间记录一起落盘，因此「分组结构」本身就持久化在 rooms.json 里，
+  /// 不额外维护一份分组表——空分组没有意义，不保留。
+  final String group;
+
   /// 添加时间（epoch 秒）。
   final int addedAt;
 
@@ -41,6 +48,7 @@ class ManagedRoom {
     String? name,
     String? owner,
     String? title,
+    String? group,
     bool? living,
   }) =>
       ManagedRoom(
@@ -48,6 +56,7 @@ class ManagedRoom {
         name: name ?? this.name,
         owner: owner ?? this.owner,
         title: title ?? this.title,
+        group: group ?? this.group,
         living: living ?? this.living,
         addedAt: addedAt,
       );
@@ -57,6 +66,7 @@ class ManagedRoom {
         'room_name': name,
         'owner': owner,
         'title': title,
+        'group': group,
         if (living != null) 'living': living,
         'added_at': addedAt,
       };
@@ -72,6 +82,7 @@ class ManagedRoom {
       name: _asString(raw['room_name']),
       owner: _asString(raw['owner']),
       title: _asString(raw['title']),
+      group: _asString(raw['group']).trim(),
       living: living is bool ? living : null,
       addedAt: _asInt(raw['added_at']),
     );

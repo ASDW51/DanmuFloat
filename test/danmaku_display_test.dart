@@ -27,7 +27,8 @@ void main() {
     expect(danmakuTypeLabel(DanmakuKind.screenChat), '飘屏');
     expect(danmakuTypeLabel(DanmakuKind.privilegeScreenChat), '特权');
     expect(danmakuTypeLabel(DanmakuKind.chat), isNull);
-    expect(danmakuTypeLabel(DanmakuKind.gift), isNull);
+    // F13 起礼物可作为可选展示类型，带「礼物」前缀。
+    expect(danmakuTypeLabel(DanmakuKind.gift), '礼物');
   });
 
   test('在线人数过万折算为 x.x万', () {
@@ -42,5 +43,33 @@ void main() {
     expect(formatClock(-1), '--:--:--');
     final int ms = DateTime(2026, 1, 2, 3, 4, 5).millisecondsSinceEpoch;
     expect(formatClock(ms), '03:04:05');
+  });
+
+  test('滚动速度越界收敛，NaN 回落默认值', () {
+    expect(clampDanmuScrollSpeed(0.1), minDanmuScrollSpeed);
+    expect(clampDanmuScrollSpeed(9), maxDanmuScrollSpeed);
+    expect(clampDanmuScrollSpeed(1.25), 1.25);
+    expect(clampDanmuScrollSpeed(double.nan), defaultDanmuScrollSpeed);
+  });
+
+  test('滚动动画时长与距离成正比：距离越大时长越长', () {
+    // 900 距离 ÷ 900px/s = 1s。
+    expect(danmuScrollDuration(900, 1), const Duration(seconds: 1));
+    expect(
+      danmuScrollDuration(1800, 1).inMilliseconds,
+      greaterThan(danmuScrollDuration(900, 1).inMilliseconds),
+    );
+  });
+
+  test('滚动速度越大时长越短，但被收敛在上下限内', () {
+    expect(
+      danmuScrollDuration(900, 3).inMilliseconds,
+      lessThan(danmuScrollDuration(900, 0.5).inMilliseconds),
+    );
+    // 距离为 0 或非法时仍给一个最小可见时长，不会是 0。
+    expect(danmuScrollDuration(0, 1).inMilliseconds, 80);
+    expect(danmuScrollDuration(double.nan, 1).inMilliseconds, 80);
+    // 超长距离封顶，避免动画明显落后于直播。
+    expect(danmuScrollDuration(100000, 0.5).inMilliseconds, 1200);
   });
 }

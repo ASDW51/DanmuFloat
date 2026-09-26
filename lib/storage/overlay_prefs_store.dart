@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:danmu_float/app/overlay_bridge.dart';
+import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// 分栏配置文件名。
@@ -19,8 +20,13 @@ class OverlayPrefs {
     this.webRids = const <String>[],
     this.opacity = defaultOverlayOpacity,
     this.fontSize = defaultDanmuFontSize,
+    this.scrollSpeed = defaultDanmuScrollSpeed,
     this.windowWidth = defaultOverlayWidth,
     this.windowHeight = defaultOverlayHeight,
+    this.paneStyles = const <String, PaneStyle>{},
+    this.lightTheme = false,
+    this.showTitleBar = true,
+    this.focusBehavior = defaultFocusBehavior,
   });
 
   /// 上次勾选的主播，按栏位顺序排列（下次打开多栏弹窗时据此预勾选）。
@@ -32,11 +38,26 @@ class OverlayPrefs {
   /// 弹幕基准字号（dp）：单栏直接使用，多栏按栏数缩小。
   final double fontSize;
 
+  /// 弹幕自动滚动速度倍数（prd F2「滚动速度」）。
+  final double scrollSpeed;
+
   /// 悬浮窗窗口宽度（dp）。
   final double windowWidth;
 
   /// 悬浮窗窗口高度（dp）。
   final double windowHeight;
+
+  /// 各栏样式覆盖（prd F5），按 webRid 索引。
+  final Map<String, PaneStyle> paneStyles;
+
+  /// 悬浮窗是否为浅色皮肤（prd F20 样式预设）；false 为默认深色。
+  final bool lightTheme;
+
+  /// 是否显示栏目标识行（prd F6）。
+  final bool showTitleBar;
+
+  /// 焦点模式下其余栏的处理方式（prd F7）。
+  final String focusBehavior;
 
   /// 窗口尺寸，供建窗 / 重排窗口时使用。
   ({double width, double height}) get windowSize => (
@@ -48,32 +69,73 @@ class OverlayPrefs {
     List<String>? webRids,
     double? opacity,
     double? fontSize,
+    double? scrollSpeed,
     double? windowWidth,
     double? windowHeight,
+    Map<String, PaneStyle>? paneStyles,
+    bool? lightTheme,
+    bool? showTitleBar,
+    String? focusBehavior,
   }) =>
       OverlayPrefs(
         webRids: webRids ?? this.webRids,
         opacity: opacity ?? this.opacity,
         fontSize: fontSize ?? this.fontSize,
+        scrollSpeed: scrollSpeed ?? this.scrollSpeed,
         windowWidth: windowWidth ?? this.windowWidth,
         windowHeight: windowHeight ?? this.windowHeight,
+        paneStyles: paneStyles ?? this.paneStyles,
+        lightTheme: lightTheme ?? this.lightTheme,
+        showTitleBar: showTitleBar ?? this.showTitleBar,
+        focusBehavior: focusBehavior ?? this.focusBehavior,
       );
 
   /// 组装成下发给悬浮窗的配置。
-  OverlayConfig toConfig(List<String> rooms) => OverlayConfig(
+  ///
+  /// [filter] 来自独立的过滤偏好存储（prd F10/F11/F13），随配置一起下发，
+  /// 保证新开的窗口立刻带上当前的屏蔽与高亮口径。
+  /// [roomOptions] 是可在栏内快速切换的候选房间（prd F14 / F15），
+  /// 由首页从本地主播列表生成。
+  OverlayConfig toConfig(
+    List<String> rooms, {
+    FilterPrefs filter = const FilterPrefs(),
+    List<RoomOption> roomOptions = const <RoomOption>[],
+  }) =>
+      OverlayConfig(
         webRids: rooms,
         opacity: clampOverlayOpacity(opacity),
         fontSize: clampDanmuFontSize(fontSize),
+        scrollSpeed: clampDanmuScrollSpeed(scrollSpeed),
+        filter: filter,
+        paneStyles: _stylesFor(rooms),
+        roomOptions: roomOptions,
+        lightTheme: lightTheme,
+        showTitleBar: showTitleBar,
+        focusBehavior: clampFocusBehavior(focusBehavior),
       );
 
+  /// 只保留当前绑定的房间的样式，避免下发时带上已解绑房间的冗余覆盖。
+  Map<String, PaneStyle> _stylesFor(List<String> rooms) => <String, PaneStyle>{
+        for (final String room in rooms)
+          if (paneStyles[room] != null) room: paneStyles[room]!,
+      };
+
   Map<String, Object?> toJson() => <String, Object?>{
-        // 按 design.md 2.3 的 panes 结构存放，后续每栏颜色等也挂在这里。
+        // 按 design.md 2.3 的 panes 结构存放：每栏的房间与样式（prd F5）写在一起。
         'panes': <Map<String, Object?>>[
           for (int index = 0; index < webRids.length; index++)
-            <String, Object?>{'index': index, 'room_id': webRids[index]},
+            <String, Object?>{
+              'index': index,
+              'room_id': webRids[index],
+              ...?paneStyles[webRids[index]]?.toJson(),
+            },
         ],
         'opacity': clampOverlayOpacity(opacity),
         'fontSize': clampDanmuFontSize(fontSize),
+        'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed),
+        'lightTheme': lightTheme,
+        'showTitleBar': showTitleBar,
+        'focusBehavior': clampFocusBehavior(focusBehavior),
         'window': <String, Object?>{
           'width': clampOverlayWidth(windowWidth),
           'height': clampOverlayHeight(windowHeight),
@@ -86,23 +148,31 @@ class OverlayPrefs {
     final Object? panes = raw['panes'];
     final Object? opacity = raw['opacity'];
     final Object? fontSize = raw['fontSize'];
+    final Object? scrollSpeed = raw['scrollSpeed'];
     final Object? window = raw['window'];
     final Object? width = window is Map ? window['width'] : null;
     final Object? height = window is Map ? window['height'] : null;
     return OverlayPrefs(
       webRids: panes is List ? _parsePanes(panes) : const <String>[],
+      paneStyles: panes is List ? _parsePaneStyles(panes) : const <String, PaneStyle>{},
       opacity: opacity is num
           ? clampOverlayOpacity(opacity.toDouble())
           : defaultOverlayOpacity,
       fontSize: fontSize is num
           ? clampDanmuFontSize(fontSize.toDouble())
           : defaultDanmuFontSize,
+      scrollSpeed: scrollSpeed is num
+          ? clampDanmuScrollSpeed(scrollSpeed.toDouble())
+          : defaultDanmuScrollSpeed,
       windowWidth: width is num
           ? clampOverlayWidth(width.toDouble())
           : defaultOverlayWidth,
       windowHeight: height is num
           ? clampOverlayHeight(height.toDouble())
           : defaultOverlayHeight,
+      lightTheme: raw['lightTheme'] == true,
+      showTitleBar: raw['showTitleBar'] != false,
+      focusBehavior: clampFocusBehavior(raw['focusBehavior']),
     );
   }
 
@@ -130,6 +200,19 @@ class OverlayPrefs {
       for (final ({int index, String roomId}) item in indexed) item.roomId,
       ...unindexed,
     ];
+  }
+
+  /// 从 panes 里还原各栏样式覆盖（prd F5）：没有样式字段的记录直接跳过。
+  static Map<String, PaneStyle> _parsePaneStyles(List<Object?> panes) {
+    final Map<String, PaneStyle> styles = <String, PaneStyle>{};
+    for (final Object? pane in panes) {
+      if (pane is! Map) continue;
+      final Object? roomId = pane['room_id'];
+      if (roomId is! String || roomId.trim().isEmpty) continue;
+      final PaneStyle? style = PaneStyle.tryParse(pane);
+      if (style != null) styles[roomId.trim()] = style;
+    }
+    return styles;
   }
 
   @override
@@ -178,5 +261,11 @@ class OverlayPrefsStore {
     final File file = await _file();
     await file.parent.create(recursive: true);
     await file.writeAsString(encodeOverlayPrefs(prefs), flush: true);
+  }
+
+  /// 删除偏好文件（「清除所有本地数据」用，见 prd F26）。
+  Future<void> clear() async {
+    final File file = await _file();
+    if (await file.exists()) await file.delete();
   }
 }

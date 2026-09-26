@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <!-- Android 13+ 前台服务常驻通知 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- 首次启动引导里的「电池优化白名单」（prd 4.10）：
+         申请加入白名单需要声明该权限，否则系统会拒绝该 Intent。 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <application
         android:label="danmu_float"
         android:name="${applicationName}"

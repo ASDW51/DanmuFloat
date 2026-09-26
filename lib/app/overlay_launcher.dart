@@ -3,6 +3,8 @@
 import 'dart:async';
 
 import 'package:danmu_float/app/overlay_bridge.dart';
+import 'package:danmu_float/credential/cookie_provider.dart';
+import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 
@@ -20,10 +22,28 @@ bool _overlayShown = false;
 /// 窗口当前是否已建立（供调用方决定走建窗还是重排）。
 bool get overlayShown => _overlayShown;
 
+/// 只查询悬浮窗权限，不发起申请（首页常驻 banner 用）。
+///
+/// 通道不可用（非 Android 运行）或查询抛错时按「未授予」处理：首页只会多显示
+/// 一条可关闭的提示，不会误导用户以为悬浮窗可用。
+Future<bool> isOverlayPermissionGranted() async {
+  try {
+    return await FlutterScreenOverlay.isPermissionGranted();
+  } on Object catch (exception) {
+    debugPrint('查询悬浮窗权限失败: $exception');
+    return false;
+  }
+}
+
 /// 确保悬浮窗权限；用户拒绝时返回 false。
 Future<bool> ensureOverlayPermission() async {
-  if (await FlutterScreenOverlay.isPermissionGranted()) return true;
-  return await FlutterScreenOverlay.requestPermission() ?? false;
+  if (await isOverlayPermissionGranted()) return true;
+  try {
+    return await FlutterScreenOverlay.requestPermission() ?? false;
+  } on Object catch (exception) {
+    debugPrint('申请悬浮窗权限失败: $exception');
+    return false;
+  }
 }
 
 /// 只调整窗口尺寸，不下发配置：设置页改大小时走这里，
@@ -73,6 +93,8 @@ Future<void> resizeOverlay(
 }) async {
   _overlayShown = true;
   await resizeOverlayWindow(size, devicePixelRatio: devicePixelRatio);
+  // 凭证先于配置下发：新栏位在收到 config 后立刻开始连接，先到才能生效。
+  await shareOverlayCredential(manualCookies);
   await shareOverlayConfig(config);
 }
 
@@ -93,23 +115,85 @@ Future<void> openOverlay(
   );
   _overlayShown = true;
   // 窗口建立后下发配置：此时悬浮窗引擎已随主 App 启动预热完毕。
+  await shareOverlayCredential(manualCookies);
   await shareOverlayConfig(config);
+}
+
+/// 把手动粘贴的凭证同步给悬浮窗引擎（prd F27）；null 表示回到匿名自动获取。
+///
+/// 窗口没开时静默忽略：消息通道另一端没有监听者，下次建窗会随配置补发。
+Future<void> shareOverlayCredential(String? cookies) async {
+  if (!_overlayShown) return;
+  await FlutterScreenOverlay.shareData(OverlayCredential(cookies).toJson());
 }
 
 Future<void> shareOverlayConfig(OverlayConfig config) =>
     FlutterScreenOverlay.shareData(config.toJson());
 
-/// 只推样式（透明度 + 字号），不动各栏已绑定的房间：设置页调样式走这里。
+/// 只推样式（透明度 + 字号 + 滚动速度 + 各栏覆盖 + 皮肤 / 标识 / 焦点行为），
+/// 不动各栏已绑定的房间：设置页调样式走这里。
 ///
 /// 窗口没开时直接忽略：消息通道另一端没有监听者。
 Future<void> shareOverlayStyle({
   required double opacity,
   required double fontSize,
+  required double scrollSpeed,
+  Map<String, PaneStyle> paneStyles = const <String, PaneStyle>{},
+  bool lightTheme = false,
+  bool showTitleBar = true,
+  String focusBehavior = defaultFocusBehavior,
 }) async {
   if (!_overlayShown) return;
   await FlutterScreenOverlay.shareData(
-    OverlayStyle(opacity: opacity, fontSize: fontSize).toJson(),
+    OverlayStyle(
+      opacity: opacity,
+      fontSize: fontSize,
+      scrollSpeed: scrollSpeed,
+      paneStyles: paneStyles,
+      lightTheme: lightTheme,
+      showTitleBar: showTitleBar,
+      focusBehavior: focusBehavior,
+    ).toJson(),
   );
+}
+
+/// 临时开关窗口拖动（prd F21「滑动调透明度」）。
+///
+/// 插件在 `OverlayService.onTouch` 里把任何位移超过 5px 的滑动都用来移动窗口，
+/// 与悬浮窗内的滑动手势冲突，因此在长按调透明度期间先关掉它，松手再恢复。
+/// 插件只在 resizeOverlay 里写这个开关，所以这里按当前尺寸原样重发一次，
+/// 只为了改开关（尺寸不变，窗口不会跳动）。
+///
+/// 不判断 [overlayShown]：本函数也由悬浮窗引擎调用，而那个引擎里的
+/// [_overlayShown] 是另一份全局变量（两个引擎不共享内存），恒为 false。
+Future<void> setOverlayDragEnabled(
+  bool enabled, {
+  required int width,
+  required int height,
+}) async {
+  try {
+    await FlutterScreenOverlay.resizeOverlay(width, height, enabled);
+  } on Object catch (exception) {
+    debugPrint('切换窗口拖动失败: $exception');
+  }
+}
+
+/// 只推过滤偏好（屏蔽词 / 屏蔽用户 / 高亮词 / 类型筛选），不动各栏已绑定的房间：
+/// 设置页改屏蔽与高亮走这里（prd F10 / F11 / F13）。
+///
+/// 窗口没开时直接忽略：消息通道另一端没有监听者，下次建窗会随 config 补发。
+Future<void> shareOverlayFilter(FilterPrefs prefs) async {
+  if (!_overlayShown) return;
+  await FlutterScreenOverlay.shareData(OverlayFilter(prefs).toJson());
+}
+
+/// 只推候选房间列表（prd F14 分组 / F15 快速切换），不动各栏已绑定的房间：
+/// 首页增删主播或改分组走这里。
+///
+/// 窗口没开时直接忽略：消息通道另一端没有监听者，下次建窗会随 config 补发。
+Future<void> shareOverlayRooms(List<RoomOption> options) async {
+  if (!_overlayShown) return;
+  await FlutterScreenOverlay.shareData(OverlayRooms(options).toJson());
 }
 
 /// 悬浮窗上报的状态流（已解析、广播）。

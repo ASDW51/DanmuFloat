@@ -2,6 +2,7 @@
 import 'dart:io';
 
 import 'package:danmu_float/app/overlay_bridge.dart';
+import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -19,12 +20,13 @@ void main() {
   });
 
   group('OverlayPrefs', () {
-    test('经 JSON 往返后保留栏位绑定顺序、透明度、字号与窗口尺寸', () {
+    test('经 JSON 往返后保留栏位绑定顺序、透明度、字号、滚动速度与窗口尺寸', () {
       final OverlayPrefs? parsed = OverlayPrefs.tryParse(
         const OverlayPrefs(
           webRids: <String>['735', '736', '737'],
           opacity: 0.6,
           fontSize: 18,
+          scrollSpeed: 2.25,
           windowWidth: 640,
           windowHeight: 720,
         ).toJson(),
@@ -34,16 +36,19 @@ void main() {
       expect(parsed!.webRids, <String>['735', '736', '737']);
       expect(parsed.opacity, 0.6);
       expect(parsed.fontSize, 18);
+      expect(parsed.scrollSpeed, 2.25);
       expect(parsed.windowSize, (width: 640.0, height: 720.0));
     });
 
-    test('越界的字号与尺寸在写文件前就被收敛', () {
+    test('越界的字号、滚动速度与尺寸在写文件前就被收敛', () {
       final Map<String, Object?> json = const OverlayPrefs(
         fontSize: 100,
+        scrollSpeed: 10,
         windowWidth: 10,
         windowHeight: 9000,
       ).toJson();
       expect(json['fontSize'], maxDanmuFontSize);
+      expect(json['scrollSpeed'], maxDanmuScrollSpeed);
 
       final OverlayPrefs? parsed = OverlayPrefs.tryParse(json);
       expect(parsed!.windowSize, (
@@ -82,17 +87,92 @@ void main() {
     });
 
     test('组装下发给悬浮窗的配置：网格按房间数推断、透明度与字号收敛', () {
-      final OverlayConfig single =
-          const OverlayPrefs(opacity: 0.3, fontSize: 21).toConfig(<String>['735']);
+      final OverlayConfig single = const OverlayPrefs(
+        opacity: 0.3,
+        fontSize: 21,
+        scrollSpeed: 2,
+      ).toConfig(<String>['735']);
       expect(single.grid.isSingle, isTrue);
       expect(single.opacity, 0.3);
       expect(single.fontSize, 21);
+      expect(single.scrollSpeed, 2);
 
       final OverlayConfig quad = const OverlayPrefs()
           .toConfig(<String>['735', '736', '737']);
       expect(quad.grid.columns, 2);
       expect(quad.grid.rows, 2);
       expect(quad.opacity, defaultOverlayOpacity);
+    });
+
+    test('单栏样式按 webRid 写进 panes，往返后仍跟着房间走', () {
+      const OverlayPrefs prefs = OverlayPrefs(
+        webRids: <String>['735', '736'],
+        paneStyles: <String, PaneStyle>{
+          '735': PaneStyle(fontSize: 20, textColor: 0xFFFFEB3B),
+          '736': PaneStyle(opacity: 0.3),
+        },
+      );
+      final OverlayPrefs? parsed = OverlayPrefs.tryParse(prefs.toJson());
+      expect(parsed!.paneStyles['735']!.fontSize, 20);
+      expect(parsed.paneStyles['735']!.textColor, 0xFFFFEB3B);
+      expect(parsed.paneStyles['736']!.opacity, 0.3);
+
+      // 换栏位顺序不影响样式归属：覆盖键是房间号而不是序号。
+      final OverlayPrefs? reordered = OverlayPrefs.tryParse(
+        const OverlayPrefs(
+          webRids: <String>['736', '735'],
+          paneStyles: <String, PaneStyle>{
+            '735': PaneStyle(fontSize: 20),
+            '736': PaneStyle(opacity: 0.3),
+          },
+        ).toJson(),
+      );
+      expect(reordered!.webRids, <String>['736', '735']);
+      expect(reordered.paneStyles['735']!.fontSize, 20);
+      expect(reordered.paneStyles['736']!.opacity, 0.3);
+    });
+
+    test('toConfig 只下发当前绑定房间的样式，解绑房间的覆盖被剔除', () {
+      const OverlayPrefs prefs = OverlayPrefs(
+        paneStyles: <String, PaneStyle>{
+          '735': PaneStyle(fontSize: 20),
+          '999': PaneStyle(fontSize: 22),
+        },
+      );
+      final OverlayConfig config = prefs.toConfig(<String>['735']);
+      expect(config.paneStyles.keys, <String>['735']);
+      expect(config.paneStyles.containsKey('999'), isFalse);
+    });
+
+    test('皮肤、栏目标识与焦点模式经 JSON 往返后保留，缺省回落默认值', () {
+      final OverlayPrefs? parsed = OverlayPrefs.tryParse(
+        const OverlayPrefs(
+          lightTheme: true,
+          showTitleBar: false,
+          focusBehavior: focusBehaviorHide,
+        ).toJson(),
+      );
+      expect(parsed!.lightTheme, isTrue);
+      expect(parsed.showTitleBar, isFalse);
+      expect(parsed.focusBehavior, focusBehaviorHide);
+      // 焦点模式也随 config 下发给悬浮窗。
+      final OverlayConfig config = parsed.toConfig(<String>['735']);
+      expect(config.lightTheme, isTrue);
+      expect(config.showTitleBar, isFalse);
+      expect(config.focusBehavior, focusBehaviorHide);
+
+      final OverlayPrefs? legacy =
+          OverlayPrefs.tryParse(const OverlayPrefs().toJson());
+      expect(legacy!.lightTheme, isFalse);
+      expect(legacy.showTitleBar, isTrue);
+      expect(legacy.focusBehavior, defaultFocusBehavior);
+      // 非法取值在写文件/发消息前就被收敛。
+      expect(
+        OverlayPrefs.tryParse(
+          const OverlayPrefs(focusBehavior: 'no_such').toJson(),
+        )!.focusBehavior,
+        defaultFocusBehavior,
+      );
     });
   });
 
@@ -137,6 +217,19 @@ void main() {
       loaded = await prefsStore.load();
       expect(loaded.webRids, <String>['737']);
       expect(loaded.opacity, defaultOverlayOpacity);
+    });
+
+    test('皮肤与栏位偏好落盘后可重新读出', () async {
+      final OverlayPrefsStore prefsStore = store();
+      await prefsStore.save(const OverlayPrefs(
+        lightTheme: true,
+        showTitleBar: false,
+        focusBehavior: focusBehaviorHide,
+      ));
+      final OverlayPrefs loaded = await prefsStore.load();
+      expect(loaded.lightTheme, isTrue);
+      expect(loaded.showTitleBar, isFalse);
+      expect(loaded.focusBehavior, focusBehaviorHide);
     });
 
     test('文件内容损坏时按默认偏好处理，不抛异常', () async {
