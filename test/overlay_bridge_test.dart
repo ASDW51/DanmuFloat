@@ -83,8 +83,9 @@ void main() {
     test('栏位数与按房间数的回落规则', () {
       expect(OverlayLayout.single.paneCount, 1);
       expect(OverlayLayout.quad.paneCount, 4);
+      // 单栏只有一格，2 个及以上房间必须按 4 栏展示，否则多出的房间看不到。
       expect(OverlayLayout.fromRoomCount(1), OverlayLayout.single);
-      expect(OverlayLayout.fromRoomCount(2), OverlayLayout.single);
+      expect(OverlayLayout.fromRoomCount(2), OverlayLayout.quad);
       expect(OverlayLayout.fromRoomCount(4), OverlayLayout.quad);
     });
   });

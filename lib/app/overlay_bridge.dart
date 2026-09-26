@@ -23,9 +23,10 @@ enum OverlayLayout {
   /// 该布局的栏位数，也是每栏可绑定房间数的上限。
   final int paneCount;
 
-  /// 由房间数回落布局：P0 只认 1 / 4，其余一律按单栏处理。
+  /// 由房间数回落布局：2 个及以上按 4 栏展示（单栏只有一格，多出的房间会丢），
+  /// 仅 1 个房间时用单栏铺满。
   static OverlayLayout fromRoomCount(int count) =>
-      count >= 4 ? OverlayLayout.quad : OverlayLayout.single;
+      count >= 2 ? OverlayLayout.quad : OverlayLayout.single;
 }
 
 /// 主 App 下发的连接配置。

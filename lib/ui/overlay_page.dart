@@ -8,6 +8,7 @@ import 'dart:async';
 
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
+import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
@@ -15,18 +16,11 @@ import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 /// 每栏保留的弹幕条数上限，与 design.md 第 8 章默认缓存一致。
 const int _displayLimit = 500;
 
-/// 弹幕列表只保留聊天内容：普通弹幕、飘屏弹幕、特权弹幕。
-/// 进场固定在底部单行；礼物 / 点赞 / 关注 / 榜单只用于状态与埋点。
-bool _isChatKind(DanmakuKind kind) =>
-    kind == DanmakuKind.chat ||
-    kind == DanmakuKind.screenChat ||
-    kind == DanmakuKind.privilegeScreenChat;
-
-/// 聊天类内部的外观区分（P0 的弹幕类型区分）：返回类型前缀与配色。
-/// 普通弹幕无前缀、正文白色；飘屏与特权弹幕各自带标记并整体着色。
-(String, Color)? _typeMark(DanmakuKind kind) => switch (kind) {
-      DanmakuKind.screenChat => ('飘屏', Colors.orangeAccent),
-      DanmakuKind.privilegeScreenChat => ('特权', Colors.lightGreenAccent),
+/// 聊天类在深色背景上的配色（列表过滤与类型前缀文案见 danmaku_display.dart）：
+/// 普通弹幕正文白色；飘屏橙黄、特权浅绿，前缀与正文同色。
+Color? _typeColor(DanmakuKind kind) => switch (kind) {
+      DanmakuKind.screenChat => Colors.orangeAccent,
+      DanmakuKind.privilegeScreenChat => Colors.lightGreenAccent,
       _ => null,
     };
 
@@ -307,10 +301,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
     // 房间统计只用来更新在线人数、不进列表，因此过滤时不能挡掉。
     _danmuSubscription = session.danmu
         .where((DanmakuEvent event) =>
-            event.isDisplayable &&
-            (event.kind == DanmakuKind.member ||
-                event.kind == DanmakuKind.roomStats ||
-                _isChatKind(event.kind)))
+            event.isDisplayable && isStreamRelevant(event.kind))
         .listen(_onEvent);
     await session.start();
     if (!mounted) return;
@@ -329,7 +320,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
       // 房间统计只贡献在线人数，同样不进列表。
       if (event.kind == DanmakuKind.member) {
         _latestEntry = event;
-      } else if (_isChatKind(event.kind)) {
+      } else if (isChatKind(event.kind)) {
         _events.add(event);
         if (_events.length > _displayLimit) {
           _events.removeRange(0, _events.length - _displayLimit);
@@ -410,17 +401,13 @@ class _OverlayPaneState extends State<_OverlayPane> {
           ),
           Text(
             // 已连上且有在线数据时右上是人数；否则退回连接状态，保证能看出当前所处阶段。
-            _online > 0 ? '在线 ${_formatCount(_online)}' : _stageText(_stage),
+            _online > 0 ? '在线 ${formatOnlineCount(_online)}' : _stageText(_stage),
             style: labelStyle,
           ),
         ],
       ),
     );
   }
-
-  /// 在线人数：过万折算为「x.x万」，与平台展示口径一致。
-  String _formatCount(int value) =>
-      value >= 10000 ? '${(value / 10000).toStringAsFixed(1)}万' : '$value';
 
   /// 连接状态的短文本（prd F6：栏目标识需含连接状态）。
   String _stageText(LiveSessionStage stage) => switch (stage) {
@@ -509,17 +496,18 @@ class _OverlayPaneState extends State<_OverlayPane> {
   /// 飘屏 / 特权弹幕带类型前缀并整体着色，与普通弹幕区分。
   Widget _buildEventTile(DanmakuEvent event) {
     final DanmakuUser user = event.user;
-    final (String, Color)? mark = _typeMark(event.kind);
+    final String? mark = danmakuTypeLabel(event.kind);
+    final Color? markColor = _typeColor(event.kind);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       child: Text.rich(
         TextSpan(
           style: TextStyle(fontSize: widget.compact ? 11 : 13),
           children: <InlineSpan>[
-            if (mark != null)
+            if (mark != null && markColor != null)
               TextSpan(
-                text: '${mark.$1} ',
-                style: TextStyle(color: mark.$2, fontSize: 10),
+                text: '$mark ',
+                style: TextStyle(color: markColor, fontSize: 10),
               ),
             // 等级与灯牌前置到昵称前，昵称后紧跟弹幕内容。
             if (user.level > 0)
@@ -547,7 +535,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
               ),
             TextSpan(
               text: event.text,
-              style: TextStyle(color: mark?.$2 ?? Colors.white),
+              style: TextStyle(color: markColor ?? Colors.white),
             ),
           ],
         ),

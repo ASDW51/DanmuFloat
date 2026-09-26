@@ -1,19 +1,21 @@
-// 最小可观测界面（P0 第一步验收载体）：
-// 输入 webRid → 解析房间信息 → 建立弹幕连接 → 实时滚动展示弹幕。
-// 这里只做链路验证，正式的悬浮窗 UI（GridView + 每格 ListView）后续实现。
+// 首页 = 主播管理：添加 / 持久化 / 刷新 / 连接弹幕。
+//
+// 交互约定（本轮确认）：
+// - 右上角 + 添加主播，添加后立即落盘，冷启动或下拉刷新时重新读取
+// - 行内「刷新」拉一次房间信息，更新主播名 / 标题 / 开播状态
+// - 点击整行或行内「连接弹幕」= 单栏连接，进入 App 内弹幕页（页内可再开悬浮窗）
+// - 右上角多栏按钮 = 勾选主播后开 4 栏悬浮窗
 import 'dart:async';
 
-import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
-import 'package:danmu_float/danmu/model/danmaku_event.dart';
-import 'package:danmu_float/danmu/sign/danmu_signature.dart';
+import 'package:danmu_float/app/overlay_launcher.dart';
+import 'package:danmu_float/room/managed_room.dart';
 import 'package:danmu_float/room/room_info.dart';
+import 'package:danmu_float/room/room_info_client.dart';
+import 'package:danmu_float/storage/room_store.dart';
+import 'package:danmu_float/ui/add_room_dialog.dart';
+import 'package:danmu_float/ui/danmu_page.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
-
-/// 界面内保留的弹幕条数上限，与 design.md 第 8 章默认缓存一致。
-const int _displayLimit = 500;
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -23,227 +25,159 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final TextEditingController _webRidController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-  final List<DanmakuEvent> _events = <DanmakuEvent>[];
+  final RoomStore _store = RoomStore();
 
-  LiveDanmuSession? _session;
-  StreamSubscription<LiveSessionStage>? _stageSubscription;
-  StreamSubscription<DanmakuEvent>? _danmuSubscription;
+  /// 刷新房间信息用的客户端：复用同一个实例以共享 ttwid 缓存与连接池。
+  final RoomInfoClient _roomInfoClient = RoomInfoClient();
 
-  LiveSessionStage _stage = LiveSessionStage.idle;
-  String? _errorMessage;
-  bool _autoScroll = true;
-  int _received = 0;
+  List<ManagedRoom> _rooms = const <ManagedRoom>[];
+  bool _loading = true;
+
+  /// 正在刷新房间信息的直播间号（行内按钮转圈用）。
+  final Set<String> _refreshing = <String>{};
 
   bool _overlayVisible = false;
-  OverlayLayout _layout = OverlayLayout.single;
-  OverlayStatus? _overlayState;
-  StreamSubscription<dynamic>? _overlaySubscription;
 
   @override
   void initState() {
     super.initState();
-    // 悬浮窗在独立引擎里跑连接链路，状态只能经消息通道回传。
-    _overlaySubscription = FlutterScreenOverlay.overlayListener.listen(
-      (dynamic message) {
-        final OverlayStatus? state = OverlayStatus.tryParse(message);
-        if (state == null || !mounted) return;
-        setState(() => _overlayState = state);
-      },
-    );
+    unawaited(_load());
   }
 
   @override
   void dispose() {
-    _overlaySubscription?.cancel();
-    _stageSubscription?.cancel();
-    _danmuSubscription?.cancel();
-    _session?.stop();
-    _webRidController.dispose();
-    _scrollController.dispose();
+    _roomInfoClient.close();
     super.dispose();
   }
 
-  Future<void> _toggle() async {
-    if (_session != null) {
-      await _disconnect();
-      return;
-    }
+  // ---------- 本地列表 ----------
 
-    final String webRid = _webRidController.text.trim();
-    if (webRid.isEmpty) {
-      setState(() {
-        _stage = LiveSessionStage.error;
-        _errorMessage = '请输入 webRid（直播间号）';
-      });
-      return;
-    }
-
-    final LiveDanmuSession session = LiveDanmuSession(webRid: webRid);
-    _stageSubscription = session.stages.listen((LiveSessionStage stage) {
-      if (mounted) setState(() => _stage = stage);
-    });
-    _danmuSubscription = session.danmu
-        .where((DanmakuEvent event) => event.isDisplayable)
-        .listen((DanmakuEvent event) {
-      if (!mounted) return;
-      setState(() {
-        _events.add(event);
-        _received++;
-        if (_events.length > _displayLimit) {
-          _events.removeRange(0, _events.length - _displayLimit);
-        }
-      });
-      if (_autoScroll) _scrollToBottom();
-    });
-    setState(() {
-      _session = session;
-      _events.clear();
-      _received = 0;
-      _errorMessage = null;
-      _stage = LiveSessionStage.resolvingRoom;
-    });
-    await session.start();
-    if (!mounted) return;
-    setState(() => _errorMessage = session.errorMessage);
-  }
-
-  Future<void> _disconnect() async {
-    final LiveDanmuSession? session = _session;
-    _session = null;
-    await _danmuSubscription?.cancel();
-    _danmuSubscription = null;
-    await _stageSubscription?.cancel();
-    _stageSubscription = null;
-    await session?.stop();
+  /// 读取本地保存的主播（首次打开与下拉刷新都走这里）。
+  Future<void> _load() async {
+    final List<ManagedRoom> rooms = await _store.load();
     if (!mounted) return;
     setState(() {
-      _stage = LiveSessionStage.idle;
-      _errorMessage = null;
+      _rooms = rooms;
+      _loading = false;
     });
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-    });
+  Future<void> _add() async {
+    final ManagedRoom? room = await showAddRoomDialog(
+      context,
+      existingWebRids:
+          _rooms.map((ManagedRoom item) => item.webRid).toSet(),
+    );
+    if (room == null || !mounted) return;
+
+    final List<ManagedRoom> next = <ManagedRoom>[..._rooms, room];
+    setState(() => _rooms = next);
+    await _store.save(next);
+    // 新加的主播还没有主播名与开播状态，顺手刷一次让行内立刻可读。
+    unawaited(_refreshRoom(room.webRid));
   }
 
-  /// 汇总当前诊断信息，供用户一键复制反馈（真机问题排查用）。
-  String _buildDiagnostics() {
-    final RoomInfo? room = _session?.room;
-    final StringBuffer buffer = StringBuffer()
-      ..writeln('阶段: ${_stageLabel(_stage)}')
-      ..writeln('布局: ${_layout == OverlayLayout.quad ? '4 栏' : '1 栏'}')
-      ..writeln('webRids: ${_parseWebRids().join(', ')}')
-      ..writeln('已收条数: $_received')
-      ..writeln('连接状态: ${_session?.connectionState.name ?? '未连接'}');
-    if (room != null) {
-      buffer
-        ..writeln('主播: ${room.owner}')
-        ..writeln('liveId: ${room.liveId}')
-        ..writeln('标题: ${room.title}');
-    }
-    if (_errorMessage != null) {
-      buffer.writeln('错误: $_errorMessage');
-    }
-    if (_session?.signatureDegraded ?? false) {
-      buffer.writeln('签名降级为 $fallbackDanmuSignature: ${_session!.signatureWarning}');
-    }
-    if (_session?.socketError != null) {
-      buffer.writeln('连接错误: ${_session!.socketError}');
-    }
-    return buffer.toString().trimRight();
+  Future<void> _remove(ManagedRoom room) async {
+    final List<ManagedRoom> next = _rooms
+        .where((ManagedRoom item) => item.webRid != room.webRid)
+        .toList(growable: false);
+    setState(() => _rooms = next);
+    await _store.save(next);
+    if (mounted) _snack('已移除 ${room.displayName}');
   }
 
-  Future<void> _copyDiagnostics() async {
-    await Clipboard.setData(ClipboardData(text: _buildDiagnostics()));
+  // ---------- 单个主播 ----------
+
+  /// 拉取一次房间信息，更新主播名 / 标题 / 开播状态并落盘。
+  Future<void> _refreshRoom(String webRid) async {
+    final ManagedRoom? current = _roomOf(webRid);
+    if (current == null || _refreshing.contains(webRid)) return;
+    setState(() => _refreshing.add(webRid));
+
+    ManagedRoom? updated;
+    String? error;
+    try {
+      final RoomInfo info = await _roomInfoClient.fetchByWebRid(webRid);
+      updated = current.copyWith(
+        // 未开播时接口不返回昵称/标题，保留上一次的缓存值。
+        owner: info.owner.isNotEmpty ? info.owner : null,
+        title: info.title.isNotEmpty ? info.title : null,
+        living: info.living,
+      );
+    } on Object catch (exception) {
+      error = '$exception';
+    }
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已复制诊断信息')),
+    setState(() => _refreshing.remove(webRid));
+
+    if (updated == null) {
+      _snack('刷新失败：$error');
+      return;
+    }
+    final ManagedRoom target = updated;
+    final List<ManagedRoom> next = _rooms
+        .map((ManagedRoom item) => item.webRid == webRid ? target : item)
+        .toList(growable: false);
+    setState(() => _rooms = next);
+    await _store.save(next);
+    if (mounted) _snack('已刷新 ${target.displayName}');
+  }
+
+  ManagedRoom? _roomOf(String webRid) {
+    for (final ManagedRoom item in _rooms) {
+      if (item.webRid == webRid) return item;
+    }
+    return null;
+  }
+
+  /// 单栏连接：进入 App 内弹幕页（页内可再开悬浮窗）。
+  void _connectSingle(ManagedRoom room) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => DanmuPage(
+          webRid: room.webRid,
+          title: room.displayName,
+        ),
+      ),
     );
   }
 
-  /// 输入框支持换行或逗号分隔多个直播间号，最多取当前布局的栏位数。
-  List<String> _parseWebRids() => _webRidController.text
-      .split(RegExp(r'[,\s]+'))
-      .map((String value) => value.trim())
-      .where((String value) => value.isNotEmpty)
-      .take(_layout.paneCount)
-      .toList(growable: false);
+  // ---------- 多栏悬浮窗 ----------
 
-  /// 悬浮窗窗口尺寸（dp）：单栏最小 200×150、4 栏最小 320×240（prd 4.2），
-  /// 这里取便于阅读的默认值；插件按物理像素设置窗口，调用处需乘设备像素比。
-  ({double width, double height}) get _overlaySize =>
-      _layout == OverlayLayout.quad
-          ? (width: 400, height: 560)
-          : (width: 240, height: 320);
-
-  /// 把当前布局与各栏房间下发给悬浮窗引擎。
-  Future<void> _sendConfig() async {
-    await FlutterScreenOverlay.shareData(
-      OverlayConfig(webRids: _parseWebRids(), layout: _layout).toJson(),
+  Future<void> _openMulti() async {
+    final List<ManagedRoom>? selected = await showDialog<List<ManagedRoom>>(
+      context: context,
+      builder: (BuildContext context) => _MultiSelectDialog(rooms: _rooms),
     );
-  }
+    if (selected == null || selected.isEmpty || !mounted) return;
 
-  /// 切换布局：悬浮窗已开启时按新尺寸重排并重新下发房间，无需关闭重开。
-  Future<void> _changeLayout(OverlayLayout layout) async {
-    setState(() => _layout = layout);
-    if (!_overlayVisible) return;
+    final List<String> webRids =
+        selected.map((ManagedRoom room) => room.webRid).toList(growable: false);
+    final OverlayConfig config = OverlayConfig(
+      webRids: webRids,
+      layout: OverlayLayout.fromRoomCount(webRids.length),
+    );
     final double dpr = MediaQuery.devicePixelRatioOf(context);
-    final ({double width, double height}) size = _overlaySize;
-    await FlutterScreenOverlay.resizeOverlay(
-      (size.width * dpr).round(),
-      (size.height * dpr).round(),
-      true,
-    );
-    await _sendConfig();
-  }
 
-  /// 开启 / 关闭悬浮窗。连接链路跑在悬浮窗引擎里，此处只下发布局与房间配置。
-  Future<void> _toggleOverlay() async {
     if (_overlayVisible) {
-      // 先让悬浮窗卸载各栏（断开全部连接、清空内存缓存）再关窗口：
-      // 插件关闭窗口不会销毁缓存的引擎，只靠 dispose 收不到释放时机。
-      await FlutterScreenOverlay.shareData(buildOverlayCloseMessage());
-      await FlutterScreenOverlay.closeOverlay();
-      if (!mounted) return;
-      setState(() => _overlayVisible = false);
-      return;
+      // 已建窗：按新尺寸重排并重新下发房间，无需关闭重开。
+      await resizeOverlay(config, devicePixelRatio: dpr);
+    } else {
+      if (!await ensureOverlayPermission()) {
+        if (!mounted) return;
+        _snack('未授予悬浮窗权限，无法开启');
+        return;
+      }
+      await openOverlay(config, devicePixelRatio: dpr);
     }
-
-    if (_parseWebRids().isEmpty) {
-      _snack('请先输入 webRid，再开启悬浮窗');
-      return;
-    }
-    final double dpr = MediaQuery.devicePixelRatioOf(context);
-
-    bool granted = await FlutterScreenOverlay.isPermissionGranted();
-    if (!granted) {
-      granted = await FlutterScreenOverlay.requestPermission() ?? false;
-    }
-    if (!granted) {
-      if (!mounted) return;
-      _snack('未授予悬浮窗权限，无法开启');
-      return;
-    }
-
-    final ({double width, double height}) size = _overlaySize;
-    await FlutterScreenOverlay.showOverlay(
-      width: (size.width * dpr).round(),
-      height: (size.height * dpr).round(),
-      alignment: OverlayAlignment.centerRight,
-      enableDrag: true,
-      positionGravity: PositionGravity.auto,
-      overlayTitle: 'DanmuFloat',
-      overlayContent: '正在显示弹幕悬浮窗',
-    );
-    // 窗口建立后下发配置：此时悬浮窗引擎已随主 App 启动预热完毕。
-    await _sendConfig();
     if (!mounted) return;
     setState(() => _overlayVisible = true);
+  }
+
+  Future<void> _closeOverlay() async {
+    await closeOverlayWindow();
+    if (!mounted) return;
+    setState(() => _overlayVisible = false);
   }
 
   void _snack(String message) {
@@ -253,228 +187,240 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final RoomInfo? room = _session?.room;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('弹幕链路验证'),
+        title: const Text('主播管理'),
         actions: <Widget>[
-          IconButton(
-            tooltip: _overlayVisible ? '关闭悬浮窗' : '开启悬浮窗',
-            icon: Icon(
-              _overlayVisible
-                  ? Icons.picture_in_picture_alt
-                  : Icons.picture_in_picture_alt_outlined,
+          if (_overlayVisible)
+            IconButton(
+              tooltip: '关闭悬浮窗',
+              icon: const Icon(Icons.close),
+              onPressed: _closeOverlay,
             ),
-            onPressed: _toggleOverlay,
+          IconButton(
+            tooltip: '多栏连接',
+            icon: const Icon(Icons.grid_view),
+            onPressed: _rooms.isEmpty ? null : _openMulti,
           ),
           IconButton(
-            tooltip: '复制错误信息',
-            icon: const Icon(Icons.copy_all),
-            onPressed: _copyDiagnostics,
-          ),
-          IconButton(
-            tooltip: _autoScroll ? '关闭自动滚动' : '开启自动滚动',
-            icon: Icon(_autoScroll ? Icons.vertical_align_bottom : Icons.pause),
-            onPressed: () => setState(() => _autoScroll = !_autoScroll),
-          ),
-          IconButton(
-            tooltip: '清空',
-            icon: const Icon(Icons.delete_outline),
-            onPressed: () => setState(() {
-              _events.clear();
-              _received = 0;
-            }),
+            tooltip: '添加主播',
+            icon: const Icon(Icons.add),
+            onPressed: _add,
           ),
         ],
       ),
-      body: Column(
-        children: <Widget>[
-          _buildInputRow(),
-          _buildLayoutRow(),
-          _buildStatusBar(room),
-          const Divider(height: 1),
-          Expanded(child: _buildEventList()),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _toggle,
-        tooltip: _session == null ? '连接' : '断开',
-        child: Icon(_session == null ? Icons.play_arrow : Icons.stop),
-      ),
+      body: _buildBody(),
     );
   }
 
-  Widget _buildInputRow() => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-        child: TextField(
-          controller: _webRidController,
-          enabled: _session == null,
-          keyboardType: TextInputType.multiline,
-          maxLines: 3,
-          minLines: 1,
-          // 悬浮窗按此列表绑定各栏房间：换行或逗号分隔，最多取当前布局的栏位数。
-          decoration: InputDecoration(
-            labelText: 'webRid（每行一个，最多 ${_layout.paneCount} 个）',
-            hintText: '例如 7350000000000000001',
-            border: const OutlineInputBorder(),
-            isDense: true,
-          ),
-          onSubmitted: (_) => _toggle(),
-        ),
-      );
-
-  /// 分栏布局切换（prd F3 / F4：P0 只做 1 栏与 4 栏）。
-  Widget _buildLayoutRow() => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-        child: Row(
+  Widget _buildBody() {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_rooms.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           children: <Widget>[
-            const Text('分栏', style: TextStyle(fontSize: 13)),
-            const SizedBox(width: 12),
-            SegmentedButton<OverlayLayout>(
-              segments: const <ButtonSegment<OverlayLayout>>[
-                ButtonSegment<OverlayLayout>(
-                  value: OverlayLayout.single,
-                  label: Text('1 栏'),
+            SizedBox(
+              height: MediaQuery.sizeOf(context).height * 0.55,
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text('还没有主播'),
+                    SizedBox(height: 8),
+                    Text(
+                      '点击右上角 + 添加直播间号 / 链接 / 抖音号',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ],
                 ),
-                ButtonSegment<OverlayLayout>(
-                  value: OverlayLayout.quad,
-                  label: Text('4 栏'),
-                ),
-              ],
-              selected: <OverlayLayout>{_layout},
-              onSelectionChanged: (Set<OverlayLayout> selection) {
-                unawaited(_changeLayout(selection.first));
-              },
+              ),
             ),
           ],
         ),
       );
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: _rooms.length,
+        separatorBuilder: (BuildContext context, int index) =>
+            const Divider(height: 1),
+        itemBuilder: (BuildContext context, int index) =>
+            _buildRoomTile(_rooms[index]),
+      ),
+    );
+  }
 
-  Widget _buildStatusBar(RoomInfo? room) {
-    final Color color = switch (_stage) {
-      LiveSessionStage.live => Colors.green,
-      LiveSessionStage.offline => Colors.orange,
-      LiveSessionStage.error => Colors.red,
-      LiveSessionStage.idle => Colors.grey,
-      _ => Colors.blue,
-    };
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-      child: Column(
+  /// 单行主播：整行点击 = 单栏连接；行内提供「刷新」「连接弹幕」，长按移除。
+  Widget _buildRoomTile(ManagedRoom room) {
+    final bool refreshing = _refreshing.contains(room.webRid);
+    final bool? living = room.living;
+    return ListTile(
+      onTap: () => _connectSingle(room),
+      onLongPress: () => _confirmRemove(room),
+      leading: CircleAvatar(
+        backgroundColor: living == true ? Colors.green : Colors.grey.shade400,
+        child: Text(
+          room.displayName.characters.first,
+          style: const TextStyle(color: Colors.white),
+        ),
+      ),
+      title: Text(room.displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 6),
-              Text(_stageLabel(_stage), style: TextStyle(color: color)),
-              const SizedBox(width: 12),
-              Text('已收 $_received 条'),
-              if (_session != null) ...<Widget>[
-                const SizedBox(width: 12),
-                Text('连接: ${_session!.connectionState.name}'),
-              ],
-            ],
+          Text(
+            '${room.webRid} · ${_livingLabel(living)}',
+            style: const TextStyle(fontSize: 12),
           ),
-          if (room != null) ...<Widget>[
-            const SizedBox(height: 6),
-            Text('主播: ${room.owner}  |  liveId: ${room.liveId}'),
-            if (room.title.isNotEmpty)
-              Text(room.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ],
-          if (_errorMessage != null) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
-          ],
-          if (_session?.signatureDegraded ?? false) ...<Widget>[
-            const SizedBox(height: 6),
+          if (room.title.isNotEmpty)
             Text(
-              '签名已降级为 $fallbackDanmuSignature：${_session!.signatureWarning}',
-              style: const TextStyle(color: Colors.orange, fontSize: 12),
+              room.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12),
             ),
-          ],
-          if (_session?.socketError != null) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(
-              '连接错误: ${_session!.socketError}',
-              style: const TextStyle(color: Colors.red, fontSize: 12),
-            ),
-          ],
-          if (_overlayState != null) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(
-              '悬浮窗: ${_stageLabel(_overlayState!.stage)} · '
-              '已收 ${_overlayState!.received} 条'
-              '${_overlayState!.error == null ? '' : ' · ${_overlayState!.error}'}',
-              style: const TextStyle(color: Colors.blueGrey, fontSize: 12),
-            ),
-          ],
+        ],
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          TextButton(
+            onPressed: refreshing ? null : () => _refreshRoom(room.webRid),
+            child: refreshing
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('刷新'),
+          ),
+          TextButton(
+            onPressed: () => _connectSingle(room),
+            child: const Text('连接弹幕'),
+          ),
         ],
       ),
     );
   }
 
-  String _stageLabel(LiveSessionStage stage) => switch (stage) {
-        LiveSessionStage.idle => '未连接',
-        LiveSessionStage.resolvingRoom => '解析房间信息…',
-        LiveSessionStage.signing => '生成签名…',
-        LiveSessionStage.connecting => '连接中…',
-        LiveSessionStage.live => '已连接',
-        LiveSessionStage.offline => '主播未开播',
-        LiveSessionStage.error => '异常',
+  String _livingLabel(bool? living) => switch (living) {
+        true => '直播中',
+        false => '未开播',
+        null => '未刷新',
       };
 
-  Widget _buildEventList() {
-    if (_events.isEmpty) {
-      return const Center(child: Text('暂无弹幕'));
-    }
-    return ListView.builder(
-      controller: _scrollController,
-      itemCount: _events.length,
-      itemBuilder: (BuildContext context, int index) =>
-          _buildEventTile(_events[index]),
-    );
-  }
-
-  Widget _buildEventTile(DanmakuEvent event) {
-    final DanmakuUser user = event.user;
-    final List<InlineSpan> spans = <InlineSpan>[
-      TextSpan(
-        text: '${_timeLabel(event.timeMs)} ',
-        style: const TextStyle(color: Colors.grey, fontSize: 12),
+  Future<void> _confirmRemove(ManagedRoom room) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('移除主播'),
+        content: Text('确定从列表移除「${room.displayName}」？'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('移除'),
+          ),
+        ],
       ),
-      if (user.nickName.isNotEmpty)
-        TextSpan(
-          text: user.nickName,
-          style: const TextStyle(fontWeight: FontWeight.bold),
+    );
+    if (confirmed ?? false) await _remove(room);
+  }
+}
+
+/// 多栏选择弹窗：勾选要连接的主播，确认后按 4 栏悬浮窗展示。
+class _MultiSelectDialog extends StatefulWidget {
+  const _MultiSelectDialog({required this.rooms});
+
+  final List<ManagedRoom> rooms;
+
+  @override
+  State<_MultiSelectDialog> createState() => _MultiSelectDialogState();
+}
+
+class _MultiSelectDialogState extends State<_MultiSelectDialog> {
+  /// 与悬浮窗 4 栏布局的栏位数一致。
+  static const int _maxSelectable = 4;
+
+  final Set<String> _selected = <String>{};
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('多栏连接'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              '最多选择 $_maxSelectable 个主播，按选择顺序分配到各栏',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: ListView(
+                shrinkWrap: true,
+                children: widget.rooms.map(_buildTile).toList(growable: false),
+              ),
+            ),
+          ],
         ),
-      if (user.level > 0)
-        TextSpan(
-          text: ' Lv.${user.level}',
-          style: const TextStyle(color: Colors.blueGrey, fontSize: 12),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
         ),
-      if (user.fanLevel > 0)
-        TextSpan(
-          text: ' 灯牌${user.fanLevel}',
-          style: const TextStyle(color: Colors.deepPurple, fontSize: 12),
+        FilledButton(
+          onPressed: _selected.isEmpty ? null : _confirm,
+          child: const Text('开启悬浮窗'),
         ),
-      const TextSpan(text: '\n'),
-      TextSpan(text: event.text),
-    ];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Text.rich(TextSpan(children: spans)),
+      ],
     );
   }
 
-  String _timeLabel(int timeMs) {
-    if (timeMs <= 0) return '--:--:--';
-    final DateTime time = DateTime.fromMillisecondsSinceEpoch(timeMs);
-    String two(int value) => value.toString().padLeft(2, '0');
-    return '${two(time.hour)}:${two(time.minute)}:${two(time.second)}';
+  Widget _buildTile(ManagedRoom room) {
+    final bool checked = _selected.contains(room.webRid);
+    // 已达上限时禁用未勾选项，避免"选了却没生效"。
+    final bool selectable = checked || _selected.length < _maxSelectable;
+    return CheckboxListTile(
+      dense: true,
+      value: checked,
+      title: Text(room.displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(room.webRid, style: const TextStyle(fontSize: 12)),
+      onChanged: selectable
+          ? (bool? value) => setState(() {
+                if (value ?? false) {
+                  _selected.add(room.webRid);
+                } else {
+                  _selected.remove(room.webRid);
+                }
+              })
+          : null,
+    );
+  }
+
+  /// 确认时按勾选先后顺序返回，与「按选择顺序分配到各栏」的提示一致。
+  void _confirm() {
+    final List<ManagedRoom> ordered = <ManagedRoom>[];
+    for (final String webRid in _selected) {
+      for (final ManagedRoom room in widget.rooms) {
+        if (room.webRid == webRid) {
+          ordered.add(room);
+          break;
+        }
+      }
+    }
+    Navigator.of(context).pop(ordered);
   }
 }
