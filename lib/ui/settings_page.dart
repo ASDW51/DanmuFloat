@@ -113,7 +113,8 @@ class _SettingsPageState extends State<SettingsPage> {
             value: _prefs.opacity,
             min: minOverlayOpacity,
             max: maxOverlayOpacity,
-            divisions: 12,
+            // 0~1 之间按 0.05 一档，默认值 0.8 正好落在刻度上。
+            divisions: 20,
             onChanged: (double value) => _apply(
               _prefs.copyWith(opacity: value),
               persist: false,
@@ -1033,7 +1034,7 @@ class _PaneStyleDialogState extends State<_PaneStyleDialog> {
               value: _opacity,
               min: minOverlayOpacity,
               max: maxOverlayOpacity,
-              divisions: 12,
+              divisions: 20,
               onChanged:
                   _useOpacity ? (double value) => setState(() => _opacity = value) : null,
             ),

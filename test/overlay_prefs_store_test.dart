@@ -9,9 +9,16 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('clampOverlayOpacity', () {
     test('超出范围的取值被收敛到上下界', () {
-      expect(clampOverlayOpacity(0.1), minOverlayOpacity);
-      expect(clampOverlayOpacity(0.95), maxOverlayOpacity);
+      expect(clampOverlayOpacity(-0.5), minOverlayOpacity);
+      expect(clampOverlayOpacity(1.5), maxOverlayOpacity);
       expect(clampOverlayOpacity(0.5), 0.5);
+    });
+
+    test('0 与 1 是合法取值，不再被夹到 0.2 / 0.8', () {
+      expect(minOverlayOpacity, 0.0);
+      expect(maxOverlayOpacity, 1.0);
+      expect(clampOverlayOpacity(0.0), 0.0);
+      expect(clampOverlayOpacity(1.0), 1.0);
     });
 
     test('NaN 回落默认值，避免写进渲染层报错', () {

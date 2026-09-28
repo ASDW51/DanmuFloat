@@ -204,9 +204,16 @@ void main() {
       expect(parsed.fontSize, 20);
       expect(parsed.scrollSpeed, 2.5);
 
+      // 透明度范围放宽到 0~1 后，0.1 是合法值，只有真正越界才被夹回边界。
       expect(
         OverlayStyle.tryParse(
           roundTrip(const OverlayStyle(opacity: 0.1).toJson()),
+        )!.opacity,
+        0.1,
+      );
+      expect(
+        OverlayStyle.tryParse(
+          roundTrip(const OverlayStyle(opacity: -1.0).toJson()),
         )!.opacity,
         minOverlayOpacity,
       );
@@ -256,7 +263,7 @@ void main() {
 
       // 越界值在写文件/发消息前就被收敛，避免渲染层拿到非法值。
       final PaneStyle clamped = PaneStyle.tryParse(
-        const PaneStyle(fontSize: 100, opacity: 0.95).toJson(),
+        const PaneStyle(fontSize: 100, opacity: 1.5).toJson(),
       )!;
       expect(clamped.fontSize, maxDanmuFontSize);
       expect(clamped.opacity, maxOverlayOpacity);

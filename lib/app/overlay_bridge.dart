@@ -20,10 +20,10 @@ const String overlayCredentialType = 'credential';
 const String overlayCloseType = 'close';
 const String overlayStateType = 'state';
 
-/// 弹幕背景蒙版不透明度的可调范围（prd F2）：低于 0.2 看不清弹幕，
-/// 高于 0.8 会挡住直播画面。注意作用对象是蒙版，不是窗口整体。
-const double minOverlayOpacity = 0.2;
-const double maxOverlayOpacity = 0.8;
+/// 弹幕背景蒙版不透明度的可调范围（prd F2）：0 为全透明（只见弹幕文字）、
+/// 1 为完全不透明（完全遮住直播画面）。注意作用对象是蒙版，不是窗口整体。
+const double minOverlayOpacity = 0.0;
+const double maxOverlayOpacity = 1.0;
 const double defaultOverlayOpacity = 0.8;
 
 /// 把透明度收敛到可调范围；NaN 等非法值回落默认值，
