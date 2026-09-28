@@ -28,15 +28,15 @@ bool isStreamRelevant(DanmakuKind kind) =>
 ///
 /// 前缀与正文同色（见各页面配色），类型由 [danmakuKindLabel] 给出中文名。
 String? danmakuTypeLabel(DanmakuKind kind) => switch (kind) {
-      DanmakuKind.screenChat => '飘屏',
-      DanmakuKind.privilegeScreenChat => '特权',
-      DanmakuKind.gift => '礼物',
-      DanmakuKind.member => '进场',
-      DanmakuKind.like => '点赞',
-      DanmakuKind.social => '关注',
-      DanmakuKind.roomRank => '榜单',
-      _ => null,
-    };
+  DanmakuKind.screenChat => '飘屏',
+  DanmakuKind.privilegeScreenChat => '特权',
+  DanmakuKind.gift => '礼物',
+  DanmakuKind.member => '进场',
+  DanmakuKind.like => '点赞',
+  DanmakuKind.social => '关注',
+  DanmakuKind.roomRank => '榜单',
+  _ => null,
+};
 
 /// 列表默认可入列的类型：聊天类（普通 / 飘屏 / 特权）。
 const Set<DanmakuKind> defaultListKinds = <DanmakuKind>{
@@ -61,18 +61,18 @@ const List<DanmakuKind> selectableListKinds = <DanmakuKind>[
 
 /// 类型的中文名，设置页的类型多选项用。
 String danmakuKindLabel(DanmakuKind kind) => switch (kind) {
-      DanmakuKind.chat => '普通弹幕',
-      DanmakuKind.screenChat => '飘屏弹幕',
-      DanmakuKind.privilegeScreenChat => '特权弹幕',
-      DanmakuKind.gift => '礼物',
-      DanmakuKind.member => '进场',
-      DanmakuKind.like => '点赞',
-      DanmakuKind.social => '关注/分享',
-      DanmakuKind.roomRank => '榜单',
-      DanmakuKind.roomStats => '房间统计',
-      DanmakuKind.roomUserSeq => '在线人数',
-      DanmakuKind.other => '其它',
-    };
+  DanmakuKind.chat => '普通弹幕',
+  DanmakuKind.screenChat => '飘屏弹幕',
+  DanmakuKind.privilegeScreenChat => '特权弹幕',
+  DanmakuKind.gift => '礼物',
+  DanmakuKind.member => '进场',
+  DanmakuKind.like => '点赞',
+  DanmakuKind.social => '关注/分享',
+  DanmakuKind.roomRank => '榜单',
+  DanmakuKind.roomStats => '房间统计',
+  DanmakuKind.roomUserSeq => '在线人数',
+  DanmakuKind.other => '其它',
+};
 
 /// 弹幕过滤偏好（prd F10 屏蔽 / F11 高亮 / F13 只看特定类型）。
 ///
@@ -120,28 +120,28 @@ class FilterPrefs {
     List<String>? highlightKeywords,
     Set<DanmakuKind>? visibleKinds,
     bool? regexEnabled,
-  }) =>
-      FilterPrefs(
-        blockedKeywords: blockedKeywords ?? this.blockedKeywords,
-        blockedUsers: blockedUsers ?? this.blockedUsers,
-        highlightKeywords: highlightKeywords ?? this.highlightKeywords,
-        visibleKinds: visibleKinds ?? this.visibleKinds,
-        regexEnabled: regexEnabled ?? this.regexEnabled,
-      );
+  }) => FilterPrefs(
+    blockedKeywords: blockedKeywords ?? this.blockedKeywords,
+    blockedUsers: blockedUsers ?? this.blockedUsers,
+    highlightKeywords: highlightKeywords ?? this.highlightKeywords,
+    visibleKinds: visibleKinds ?? this.visibleKinds,
+    regexEnabled: regexEnabled ?? this.regexEnabled,
+  );
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'blockedKeywords': blockedKeywords,
-        'blockedUsers': blockedUsers,
-        'highlightKeywords': highlightKeywords,
-        'visibleKinds': <String>[
-          for (final DanmakuKind kind in selectableListKinds)
-            if (visibleKinds.contains(kind)) kind.name,
-        ],
-        'regexEnabled': regexEnabled,
-      };
+    'blockedKeywords': blockedKeywords,
+    'blockedUsers': blockedUsers,
+    'highlightKeywords': highlightKeywords,
+    'visibleKinds': <String>[
+      for (final DanmakuKind kind in selectableListKinds)
+        if (visibleKinds.contains(kind)) kind.name,
+    ],
+    'regexEnabled': regexEnabled,
+  };
 
   @override
-  String toString() => 'FilterPrefs(blocked: ${blockedKeywords.length}, '
+  String toString() =>
+      'FilterPrefs(blocked: ${blockedKeywords.length}, '
       'users: ${blockedUsers.length}, highlight: ${highlightKeywords.length}, '
       'kinds: ${visibleKinds.length}, regex: $regexEnabled)';
 }
@@ -166,6 +166,28 @@ List<String> normalizeKeywordList(List<Object?> raw) {
 bool isListKind(DanmakuKind kind, FilterPrefs prefs) =>
     prefs.visibleKinds.contains(kind);
 
+/// 把一段文本加进屏蔽词（prd F10）：去空白、已在名单里则不重复添加。
+///
+/// 列表项点击菜单的「加入屏蔽词」与设置页手输共用同一套去重口径。
+FilterPrefs withBlockedKeyword(FilterPrefs prefs, String keyword) =>
+    prefs.copyWith(
+      blockedKeywords: normalizeKeywordList(<Object?>[
+        ...prefs.blockedKeywords,
+        keyword,
+      ]),
+    );
+
+/// 把某个用户加进屏蔽名单（prd F10）：按 userId 精确匹配，已在名单里不重复添加。
+///
+/// userId 为空时（部分消息不带用户标识）原样返回，避免写进一条匹配不到任何人的空规则。
+FilterPrefs withBlockedUser(FilterPrefs prefs, String userId) {
+  final String value = userId.trim();
+  if (value.isEmpty) return prefs;
+  return prefs.copyWith(
+    blockedUsers: normalizeKeywordList(<Object?>[...prefs.blockedUsers, value]),
+  );
+}
+
 /// 把一条过滤规则编译成正则（不区分大小写）。
 ///
 /// 空规则或写法非法（如括号不闭合、`[` 未配对）时返回 null，由调用方跳过；
@@ -182,9 +204,9 @@ RegExp? compileFilterRule(String rule) {
 
 /// 规则列表里是否有写法非法的正则（设置页提示用，prd F10）。
 List<String> invalidFilterRules(List<String> rules) => <String>[
-      for (final String rule in rules)
-        if (rule.trim().isNotEmpty && compileFilterRule(rule) == null) rule,
-    ];
+  for (final String rule in rules)
+    if (rule.trim().isNotEmpty && compileFilterRule(rule) == null) rule,
+];
 
 /// 是否被屏蔽（prd F10）：命中屏蔽词或屏蔽用户。
 ///
@@ -249,8 +271,10 @@ List<HighlightSegment> splitHighlights(
   if (ranges.isEmpty) {
     return <HighlightSegment>[HighlightSegment(text, highlighted: false)];
   }
-  ranges.sort((({int start, int end}) a, ({int start, int end}) b) =>
-      a.start.compareTo(b.start));
+  ranges.sort(
+    (({int start, int end}) a, ({int start, int end}) b) =>
+        a.start.compareTo(b.start),
+  );
 
   // 合并重叠 / 相邻区间。
   final List<({int start, int end})> merged = <({int start, int end})>[];
@@ -267,11 +291,17 @@ List<HighlightSegment> splitHighlights(
   for (final ({int start, int end}) range in merged) {
     if (range.start > cursor) {
       segments.add(
-        HighlightSegment(text.substring(cursor, range.start), highlighted: false),
+        HighlightSegment(
+          text.substring(cursor, range.start),
+          highlighted: false,
+        ),
       );
     }
     segments.add(
-      HighlightSegment(text.substring(range.start, range.end), highlighted: true),
+      HighlightSegment(
+        text.substring(range.start, range.end),
+        highlighted: true,
+      ),
     );
     cursor = range.end;
   }

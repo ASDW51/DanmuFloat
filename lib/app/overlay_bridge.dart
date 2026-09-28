@@ -20,6 +20,15 @@ const String overlayCredentialType = 'credential';
 const String overlayCloseType = 'close';
 const String overlayStateType = 'state';
 
+/// 悬浮窗 → 主 App：请求把一段文本写进系统剪贴板。
+///
+/// 悬浮窗跑在独立引擎里，没有注册平台插件，`Clipboard.setData` 在那边不可用；
+/// 复制动作只能请主 App（有 Activity）代劳。
+const String overlayClipboardType = 'clipboard';
+
+/// 原生 → 悬浮窗：通知栏「关闭点击穿透」按钮触发，让悬浮窗把本地开关同步回关闭。
+const String overlayClickThroughType = 'clickThrough';
+
 /// 弹幕背景蒙版不透明度的可调范围（prd F2）：0 为全透明（只见弹幕文字）、
 /// 1 为完全不透明（完全遮住直播画面）。注意作用对象是蒙版，不是窗口整体。
 const double minOverlayOpacity = 0.0;
@@ -107,13 +116,14 @@ double overlayHeightLimit(double screenHeight) =>
   ({double width, double height}) size, {
   required double screenWidth,
   required double screenHeight,
-}) =>
-    (
-      width: clampOverlayWidth(size.width)
-          .clamp(minOverlayWidth, overlayWidthLimit(screenWidth)),
-      height: clampOverlayHeight(size.height)
-          .clamp(minOverlayHeight, overlayHeightLimit(screenHeight)),
-    );
+}) => (
+  width: clampOverlayWidth(
+    size.width,
+  ).clamp(minOverlayWidth, overlayWidthLimit(screenWidth)),
+  height: clampOverlayHeight(
+    size.height,
+  ).clamp(minOverlayHeight, overlayHeightLimit(screenHeight)),
+);
 
 /// 屏幕尺寸变化（横竖屏切换 / 折叠屏展开）时按比例换算窗口尺寸。
 ///
@@ -205,18 +215,17 @@ class PaneStyle {
     bool clearFontSize = false,
     bool clearOpacity = false,
     bool clearTextColor = false,
-  }) =>
-      PaneStyle(
-        fontSize: clearFontSize ? null : (fontSize ?? this.fontSize),
-        opacity: clearOpacity ? null : (opacity ?? this.opacity),
-        textColor: clearTextColor ? null : (textColor ?? this.textColor),
-      );
+  }) => PaneStyle(
+    fontSize: clearFontSize ? null : (fontSize ?? this.fontSize),
+    opacity: clearOpacity ? null : (opacity ?? this.opacity),
+    textColor: clearTextColor ? null : (textColor ?? this.textColor),
+  );
 
   Map<String, Object?> toJson() => <String, Object?>{
-        if (fontSize != null) 'fontSize': clampDanmuFontSize(fontSize!),
-        if (opacity != null) 'opacity': clampOverlayOpacity(opacity!),
-        if (textColor != null) 'textColor': textColor,
-      };
+    if (fontSize != null) 'fontSize': clampDanmuFontSize(fontSize!),
+    if (opacity != null) 'opacity': clampOverlayOpacity(opacity!),
+    if (textColor != null) 'textColor': textColor,
+  };
 
   /// 解析单栏样式；结构对不上或三个字段都缺省时返回 null。
   static PaneStyle? tryParse(Object? raw) {
@@ -225,8 +234,9 @@ class PaneStyle {
     final Object? opacity = raw['opacity'];
     final Object? textColor = raw['textColor'];
     final PaneStyle style = PaneStyle(
-      fontSize:
-          fontSize is num ? clampDanmuFontSize(fontSize.toDouble()) : null,
+      fontSize: fontSize is num
+          ? clampDanmuFontSize(fontSize.toDouble())
+          : null,
       opacity: opacity is num ? clampOverlayOpacity(opacity.toDouble()) : null,
       textColor: textColor is int ? textColor : null,
     );
@@ -286,10 +296,10 @@ class RoomOption {
   final String group;
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'webRid': webRid,
-        if (name.isNotEmpty) 'name': name,
-        if (group.isNotEmpty) 'group': group,
-      };
+    'webRid': webRid,
+    if (name.isNotEmpty) 'name': name,
+    if (group.isNotEmpty) 'group': group,
+  };
 
   /// 解析单条候选；缺少 webRid 时返回 null。
   static RoomOption? tryParse(Object? raw) {
@@ -350,6 +360,7 @@ class OverlayConfig {
     this.focusBehavior = defaultFocusBehavior,
     this.dragLocked = false,
     this.ballCorner = 0,
+    this.clickThrough = false,
   });
 
   /// 各栏绑定的直播间号，按栏位顺序排列（栏 0 在前）。
@@ -388,24 +399,29 @@ class OverlayConfig {
   /// 悬浮球吸附在窗口的哪个角（0 左上 / 1 右上 / 2 左下 / 3 右下）。
   final int ballCorner;
 
+  /// 是否开启点击穿透：开启后悬浮窗不再接收触摸，点击直接落到下层画面。
+  /// 代价是窗内所有交互（悬浮球菜单、列表滚动、长按调透明度）都会失效。
+  final bool clickThrough;
+
   /// 由房间数推导的网格布局。
   OverlayGrid get grid => OverlayGrid(webRids.length);
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'type': overlayConfigType,
-        'webRids': webRids,
-        'opacity': clampOverlayOpacity(opacity),
-        'fontSize': clampDanmuFontSize(fontSize),
-        'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed),
-        'filter': filter.toJson(),
-        'paneStyles': encodePaneStyles(paneStyles),
-        'roomOptions': encodeRoomOptions(roomOptions),
-        'lightTheme': lightTheme,
-        'showTitleBar': showTitleBar,
-        'focusBehavior': clampFocusBehavior(focusBehavior),
-        'dragLocked': dragLocked,
-        'ballCorner': clampBallCorner(ballCorner),
-      };
+    'type': overlayConfigType,
+    'webRids': webRids,
+    'opacity': clampOverlayOpacity(opacity),
+    'fontSize': clampDanmuFontSize(fontSize),
+    'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed),
+    'filter': filter.toJson(),
+    'paneStyles': encodePaneStyles(paneStyles),
+    'roomOptions': encodeRoomOptions(roomOptions),
+    'lightTheme': lightTheme,
+    'showTitleBar': showTitleBar,
+    'focusBehavior': clampFocusBehavior(focusBehavior),
+    'dragLocked': dragLocked,
+    'ballCorner': clampBallCorner(ballCorner),
+    'clickThrough': clickThrough,
+  };
 
   /// 解析主 App 下发的消息；非 config 消息或没有任何有效房间时返回 null。
   static OverlayConfig? tryParse(Object? raw) {
@@ -441,6 +457,7 @@ class OverlayConfig {
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
       dragLocked: raw['dragLocked'] == true,
       ballCorner: clampBallCorner(raw['ballCorner']),
+      clickThrough: raw['clickThrough'] == true,
     );
   }
 }
@@ -451,17 +468,21 @@ FilterPrefs parseFilterPrefs(Object? raw) {
   final Object? visibleKinds = raw['visibleKinds'];
   return FilterPrefs(
     blockedKeywords: raw['blockedKeywords'] is List
-        ? normalizeKeywordList(List<Object?>.from(raw['blockedKeywords'] as List))
+        ? normalizeKeywordList(
+            List<Object?>.from(raw['blockedKeywords'] as List),
+          )
         : const <String>[],
     blockedUsers: raw['blockedUsers'] is List
         ? normalizeKeywordList(List<Object?>.from(raw['blockedUsers'] as List))
         : const <String>[],
     highlightKeywords: raw['highlightKeywords'] is List
         ? normalizeKeywordList(
-            List<Object?>.from(raw['highlightKeywords'] as List))
+            List<Object?>.from(raw['highlightKeywords'] as List),
+          )
         : const <String>[],
-    visibleKinds:
-        visibleKinds is List ? _kindsFromNames(visibleKinds) : defaultListKinds,
+    visibleKinds: visibleKinds is List
+        ? _kindsFromNames(visibleKinds)
+        : defaultListKinds,
     // 老版本下发的 filter 没有这个键，缺省按关闭处理，等价于原来的子串匹配。
     regexEnabled: raw['regexEnabled'] == true,
   );
@@ -478,7 +499,9 @@ Set<DanmakuKind> _kindsFromNames(List<Object?> raw) {
       }
     }
   }
-  return kinds.isEmpty ? defaultListKinds : Set<DanmakuKind>.unmodifiable(kinds);
+  return kinds.isEmpty
+      ? defaultListKinds
+      : Set<DanmakuKind>.unmodifiable(kinds);
 }
 
 /// 主 App 下发的纯过滤偏好调整（prd F10 / F11 / F13）。
@@ -491,9 +514,9 @@ class OverlayFilter {
   final FilterPrefs prefs;
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'type': overlayFilterType,
-        'filter': prefs.toJson(),
-      };
+    'type': overlayFilterType,
+    'filter': prefs.toJson(),
+  };
 
   /// 解析过滤消息；非 filter 消息时返回 null。
   static FilterPrefs? tryParse(Object? raw) {
@@ -512,9 +535,9 @@ class OverlayRooms {
   final List<RoomOption> options;
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'type': overlayRoomsType,
-        'roomOptions': encodeRoomOptions(options),
-      };
+    'type': overlayRoomsType,
+    'roomOptions': encodeRoomOptions(options),
+  };
 
   /// 解析候选房间消息；非 rooms 消息时返回 null。
   static List<RoomOption>? tryParse(Object? raw) {
@@ -537,6 +560,7 @@ class OverlayStyle {
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
     this.dragLocked = false,
+    this.clickThrough = false,
     this.screenWidth = 0,
     this.screenHeight = 0,
   });
@@ -560,24 +584,28 @@ class OverlayStyle {
   /// 是否锁定窗口位置；锁定后窗口不能拖动（悬浮球菜单可切换）。
   final bool dragLocked;
 
+  /// 是否开启点击穿透（设置页或悬浮球菜单可切换）。
+  final bool clickThrough;
+
   /// 设备屏幕逻辑尺寸：悬浮窗引擎里查不到屏幕尺寸，只能由主 App 下发，
   /// 供悬浮球菜单调整窗口尺寸时收敛（避免放大后溢出屏幕）。0 表示未知。
   final double screenWidth;
   final double screenHeight;
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'type': overlayStyleType,
-        'opacity': clampOverlayOpacity(opacity),
-        'fontSize': clampDanmuFontSize(fontSize),
-        'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed),
-        'paneStyles': encodePaneStyles(paneStyles),
-        'lightTheme': lightTheme,
-        'showTitleBar': showTitleBar,
-        'focusBehavior': clampFocusBehavior(focusBehavior),
-        'dragLocked': dragLocked,
-        if (screenWidth > 0) 'screenWidth': screenWidth,
-        if (screenHeight > 0) 'screenHeight': screenHeight,
-      };
+    'type': overlayStyleType,
+    'opacity': clampOverlayOpacity(opacity),
+    'fontSize': clampDanmuFontSize(fontSize),
+    'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed),
+    'paneStyles': encodePaneStyles(paneStyles),
+    'lightTheme': lightTheme,
+    'showTitleBar': showTitleBar,
+    'focusBehavior': clampFocusBehavior(focusBehavior),
+    'dragLocked': dragLocked,
+    'clickThrough': clickThrough,
+    if (screenWidth > 0) 'screenWidth': screenWidth,
+    if (screenHeight > 0) 'screenHeight': screenHeight,
+  };
 
   /// 解析样式消息；非 style 消息或缺少透明度时返回 null。
   static OverlayStyle? tryParse(Object? raw) {
@@ -601,6 +629,7 @@ class OverlayStyle {
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
       dragLocked: raw['dragLocked'] == true,
+      clickThrough: raw['clickThrough'] == true,
       screenWidth: screenWidth is num && screenWidth > 0
           ? screenWidth.toDouble()
           : 0,
@@ -626,9 +655,9 @@ class OverlayCredential {
   final String? cookies;
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'type': overlayCredentialType,
-        'cookies': cookies,
-      };
+    'type': overlayCredentialType,
+    'cookies': cookies,
+  };
 
   /// 解析凭证消息；非 credential 消息时返回 null。
   static OverlayCredential? tryParse(Object? raw) {
@@ -644,8 +673,9 @@ class OverlayCredential {
 /// 插件关闭窗口只是停止前台服务并把 FlutterView 从缓存引擎上摘下来，
 /// 引擎与 Dart 侧 widget 树都不会销毁，因此主 App 必须在关闭前显式下发本指令，
 /// 让悬浮窗卸载各栏、断开全部直播间连接（prd 4.11）。
-Map<String, Object?> buildOverlayCloseMessage() =>
-    <String, Object?>{'type': overlayCloseType};
+Map<String, Object?> buildOverlayCloseMessage() => <String, Object?>{
+  'type': overlayCloseType,
+};
 
 /// 悬浮窗内改动、需要主 App 落盘的偏好增量（悬浮球菜单用）。
 ///
@@ -660,6 +690,7 @@ class OverlayPrefsPatch {
     this.windowHeight,
     this.dragLocked,
     this.ballCorner,
+    this.clickThrough,
   });
 
   final double? opacity;
@@ -668,6 +699,7 @@ class OverlayPrefsPatch {
   final double? windowHeight;
   final bool? dragLocked;
   final int? ballCorner;
+  final bool? clickThrough;
 
   bool get isEmpty =>
       opacity == null &&
@@ -675,17 +707,18 @@ class OverlayPrefsPatch {
       windowWidth == null &&
       windowHeight == null &&
       dragLocked == null &&
-      ballCorner == null;
+      ballCorner == null &&
+      clickThrough == null;
 
   Map<String, Object?> toJson() => <String, Object?>{
-        if (opacity != null) 'opacity': clampOverlayOpacity(opacity!),
-        if (fontSize != null) 'fontSize': clampDanmuFontSize(fontSize!),
-        if (windowWidth != null) 'windowWidth': clampOverlayWidth(windowWidth!),
-        if (windowHeight != null)
-          'windowHeight': clampOverlayHeight(windowHeight!),
-        if (dragLocked != null) 'dragLocked': dragLocked,
-        if (ballCorner != null) 'ballCorner': clampBallCorner(ballCorner!),
-      };
+    if (opacity != null) 'opacity': clampOverlayOpacity(opacity!),
+    if (fontSize != null) 'fontSize': clampDanmuFontSize(fontSize!),
+    if (windowWidth != null) 'windowWidth': clampOverlayWidth(windowWidth!),
+    if (windowHeight != null) 'windowHeight': clampOverlayHeight(windowHeight!),
+    if (dragLocked != null) 'dragLocked': dragLocked,
+    if (ballCorner != null) 'ballCorner': clampBallCorner(ballCorner!),
+    if (clickThrough != null) 'clickThrough': clickThrough,
+  };
 
   /// 解析偏好增量；非对象或没有任何字段时返回 null。
   static OverlayPrefsPatch? tryParse(Object? raw) {
@@ -696,17 +729,21 @@ class OverlayPrefsPatch {
     final Object? windowHeight = raw['windowHeight'];
     final Object? dragLocked = raw['dragLocked'];
     final Object? ballCorner = raw['ballCorner'];
+    final Object? clickThrough = raw['clickThrough'];
     final OverlayPrefsPatch patch = OverlayPrefsPatch(
       opacity: opacity is num ? clampOverlayOpacity(opacity.toDouble()) : null,
-      fontSize:
-          fontSize is num ? clampDanmuFontSize(fontSize.toDouble()) : null,
-      windowWidth:
-          windowWidth is num ? clampOverlayWidth(windowWidth.toDouble()) : null,
+      fontSize: fontSize is num
+          ? clampDanmuFontSize(fontSize.toDouble())
+          : null,
+      windowWidth: windowWidth is num
+          ? clampOverlayWidth(windowWidth.toDouble())
+          : null,
       windowHeight: windowHeight is num
           ? clampOverlayHeight(windowHeight.toDouble())
           : null,
       dragLocked: dragLocked is bool ? dragLocked : null,
       ballCorner: ballCorner is int ? clampBallCorner(ballCorner) : null,
+      clickThrough: clickThrough is bool ? clickThrough : null,
     );
     return patch.isEmpty ? null : patch;
   }
@@ -725,6 +762,7 @@ class OverlayStatus {
     this.permissionRevoked = false,
     this.webRids = const <String>[],
     this.prefsPatch,
+    this.filter,
   });
 
   final LiveSessionStage stage;
@@ -740,21 +778,27 @@ class OverlayStatus {
   /// 悬浮窗把最新绑定回报给主 App，由主 App 写入本地偏好持久化。
   final List<String> webRids;
 
-  /// 悬浮球菜单里改动的偏好增量（透明度 / 字号 / 窗口尺寸 / 锁定）；
+  /// 悬浮球菜单里改动的偏好增量（透明度 / 字号 / 窗口尺寸 / 锁定 / 点击穿透）；
   /// null 表示本次上报没有改动，主 App 不需要落盘。
   final OverlayPrefsPatch? prefsPatch;
 
+  /// 悬浮窗列表里改了过滤偏好（把某用户 / 某段文本加入屏蔽）后的完整取值；
+  /// null 表示本次上报没有改动。悬浮窗引擎写不了主 App 的过滤文件，
+  /// 只能整份带回来由主 App 落盘（覆盖式，不会与主 App 侧叠加）。
+  final FilterPrefs? filter;
+
   Map<String, Object?> toJson() => <String, Object?>{
-        'type': overlayStateType,
-        'stage': stage.name,
-        'received': received,
-        'webRid': webRid,
-        'error': error,
-        'permissionRevoked': permissionRevoked,
-        if (webRids.isNotEmpty) 'webRids': webRids,
-        if (prefsPatch != null && !prefsPatch!.isEmpty)
-          'prefs': prefsPatch!.toJson(),
-      };
+    'type': overlayStateType,
+    'stage': stage.name,
+    'received': received,
+    'webRid': webRid,
+    'error': error,
+    'permissionRevoked': permissionRevoked,
+    if (webRids.isNotEmpty) 'webRids': webRids,
+    if (prefsPatch != null && !prefsPatch!.isEmpty)
+      'prefs': prefsPatch!.toJson(),
+    if (filter != null) 'filter': filter!.toJson(),
+  };
 
   /// 解析悬浮窗上报的消息；非 state 消息时返回 null。
   static OverlayStatus? tryParse(Object? raw) {
@@ -769,6 +813,7 @@ class OverlayStatus {
     final Object? webRid = raw['webRid'];
     final Object? error = raw['error'];
     final Object? webRids = raw['webRids'];
+    final Object? filter = raw['filter'];
     return OverlayStatus(
       stage: stage,
       received: received is int ? received : 0,
@@ -782,6 +827,55 @@ class OverlayStatus {
             ]
           : const <String>[],
       prefsPatch: OverlayPrefsPatch.tryParse(raw['prefs']),
+      filter: filter is Map ? parseFilterPrefs(filter) : null,
     );
+  }
+}
+
+/// 悬浮窗 → 主 App：请求复制一段文本（悬浮窗引擎没有剪贴板插件通道）。
+///
+/// 与 [OverlayStatus] 走同一条上行通道，只是类型不同：主 App 收到后调用
+/// `Clipboard.setData` 完成复制。
+class OverlayClipboard {
+  const OverlayClipboard(this.text);
+
+  /// 要写入剪贴板的文本；空串没有复制意义，由调用方过滤。
+  final String text;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'type': overlayClipboardType,
+    'text': text,
+  };
+
+  /// 解析复制请求；非 clipboard 消息或文本为空时返回 null。
+  static OverlayClipboard? tryParse(Object? raw) {
+    if (raw is! Map || raw['type'] != overlayClipboardType) return null;
+    final Object? text = raw['text'];
+    if (text is! String || text.isEmpty) return null;
+    return OverlayClipboard(text);
+  }
+}
+
+/// 原生 → 悬浮窗：点击穿透开关被窗外的入口（通知栏按钮）改成了某个值。
+///
+/// 穿透开启后悬浮窗收不到触摸，窗内没法关，通知栏提供唯一的就地关闭入口；
+/// 关掉之后要通知悬浮窗把本地开关与待落盘增量同步过去。
+class OverlayClickThrough {
+  const OverlayClickThrough(this.value);
+
+  /// 最新的点击穿透状态。
+  final bool value;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'type': overlayClickThroughType,
+    'value': value,
+  };
+
+  /// 解析穿透状态消息；非 clickThrough 消息或缺少布尔值时返回 null。
+  static OverlayClickThrough? tryParse(Object? raw) {
+    if (raw is! Map || raw['type'] != overlayClickThroughType) return null;
+    final Object? value = raw['value'];
+    if (value is! bool) return null;
+    return OverlayClickThrough(value);
   }
 }

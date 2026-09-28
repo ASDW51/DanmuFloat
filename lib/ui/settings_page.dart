@@ -168,10 +168,14 @@ class _SettingsPageState extends State<SettingsPage> {
     _syncWindowSizeWithScreen(screen);
     final double widthLimit = overlayWidthLimit(screen.width);
     final double heightLimit = overlayHeightLimit(screen.height);
-    final double widthValue =
-        _prefs.windowWidth.clamp(minOverlayWidth, widthLimit);
-    final double heightValue =
-        _prefs.windowHeight.clamp(minOverlayHeight, heightLimit);
+    final double widthValue = _prefs.windowWidth.clamp(
+      minOverlayWidth,
+      widthLimit,
+    );
+    final double heightValue = _prefs.windowHeight.clamp(
+      minOverlayHeight,
+      heightLimit,
+    );
     final ({double width, double height}) recommended = fitOverlaySize(
       recommendedOverlaySize(_prefs.webRids.length),
       screenWidth: screen.width,
@@ -191,14 +195,10 @@ class _SettingsPageState extends State<SettingsPage> {
             max: maxOverlayOpacity,
             // 0~1 之间按 0.05 一档，默认值 0.8 正好落在刻度上。
             divisions: 20,
-            onChanged: (double value) => _apply(
-              _prefs.copyWith(opacity: value),
-              persist: false,
-            ),
-            onChangeEnd: (double value) => _apply(
-              _prefs.copyWith(opacity: value),
-              persist: true,
-            ),
+            onChanged: (double value) =>
+                _apply(_prefs.copyWith(opacity: value), persist: false),
+            onChangeEnd: (double value) =>
+                _apply(_prefs.copyWith(opacity: value), persist: true),
           ),
           const Divider(height: 1),
           const _SectionTitle('弹幕字号'),
@@ -209,14 +209,10 @@ class _SettingsPageState extends State<SettingsPage> {
             min: minDanmuFontSize,
             max: maxDanmuFontSize,
             divisions: (maxDanmuFontSize - minDanmuFontSize).round(),
-            onChanged: (double value) => _apply(
-              _prefs.copyWith(fontSize: value),
-              persist: false,
-            ),
-            onChangeEnd: (double value) => _apply(
-              _prefs.copyWith(fontSize: value),
-              persist: true,
-            ),
+            onChanged: (double value) =>
+                _apply(_prefs.copyWith(fontSize: value), persist: false),
+            onChangeEnd: (double value) =>
+                _apply(_prefs.copyWith(fontSize: value), persist: true),
           ),
           const Divider(height: 1),
           const _SectionTitle('弹幕滚动速度'),
@@ -226,15 +222,12 @@ class _SettingsPageState extends State<SettingsPage> {
             value: _prefs.scrollSpeed,
             min: minDanmuScrollSpeed,
             max: maxDanmuScrollSpeed,
-            divisions: ((maxDanmuScrollSpeed - minDanmuScrollSpeed) / 0.25).round(),
-            onChanged: (double value) => _apply(
-              _prefs.copyWith(scrollSpeed: value),
-              persist: false,
-            ),
-            onChangeEnd: (double value) => _apply(
-              _prefs.copyWith(scrollSpeed: value),
-              persist: true,
-            ),
+            divisions: ((maxDanmuScrollSpeed - minDanmuScrollSpeed) / 0.25)
+                .round(),
+            onChanged: (double value) =>
+                _apply(_prefs.copyWith(scrollSpeed: value), persist: false),
+            onChangeEnd: (double value) =>
+                _apply(_prefs.copyWith(scrollSpeed: value), persist: true),
           ),
           const Divider(height: 1),
           const _SectionTitle('主题与皮肤'),
@@ -269,10 +262,8 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             trailing: Switch(
               value: _prefs.lightTheme,
-              onChanged: (bool value) => _apply(
-                _prefs.copyWith(lightTheme: value),
-                persist: true,
-              ),
+              onChanged: (bool value) =>
+                  _apply(_prefs.copyWith(lightTheme: value), persist: true),
             ),
           ),
           const Divider(height: 1),
@@ -280,7 +271,10 @@ class _SettingsPageState extends State<SettingsPage> {
           ListTile(
             leading: const Icon(Icons.filter_alt_outlined),
             title: const Text('屏蔽关键词 / 屏蔽用户 / 高亮词'),
-            subtitle: Text(_filterSummary(), style: const TextStyle(fontSize: 12)),
+            subtitle: Text(
+              _filterSummary(),
+              style: const TextStyle(fontSize: 12),
+            ),
             trailing: const Icon(Icons.chevron_right),
             onTap: _openFilterPage,
           ),
@@ -293,14 +287,10 @@ class _SettingsPageState extends State<SettingsPage> {
             min: minOverlayWidth,
             max: widthLimit,
             divisions: ((widthLimit - minOverlayWidth) / 20).round(),
-            onChanged: (double value) => _apply(
-              _prefs.copyWith(windowWidth: value),
-              persist: false,
-            ),
-            onChangeEnd: (double value) => _apply(
-              _prefs.copyWith(windowWidth: value),
-              persist: true,
-            ),
+            onChanged: (double value) =>
+                _apply(_prefs.copyWith(windowWidth: value), persist: false),
+            onChangeEnd: (double value) =>
+                _apply(_prefs.copyWith(windowWidth: value), persist: true),
           ),
           _SliderGroup(
             title: '整体高度　${heightValue.toStringAsFixed(0)}',
@@ -309,14 +299,10 @@ class _SettingsPageState extends State<SettingsPage> {
             min: minOverlayHeight,
             max: heightLimit,
             divisions: ((heightLimit - minOverlayHeight) / 20).round(),
-            onChanged: (double value) => _apply(
-              _prefs.copyWith(windowHeight: value),
-              persist: false,
-            ),
-            onChangeEnd: (double value) => _apply(
-              _prefs.copyWith(windowHeight: value),
-              persist: true,
-            ),
+            onChanged: (double value) =>
+                _apply(_prefs.copyWith(windowHeight: value), persist: false),
+            onChangeEnd: (double value) =>
+                _apply(_prefs.copyWith(windowHeight: value), persist: true),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -352,10 +338,8 @@ class _SettingsPageState extends State<SettingsPage> {
           _PaneStyleSection(
             webRids: _prefs.webRids,
             styles: _prefs.paneStyles,
-            onChanged: (Map<String, PaneStyle> styles) => _apply(
-              _prefs.copyWith(paneStyles: styles),
-              persist: true,
-            ),
+            onChanged: (Map<String, PaneStyle> styles) =>
+                _apply(_prefs.copyWith(paneStyles: styles), persist: true),
           ),
           const Divider(height: 1),
           const _SectionTitle('栏位与手势'),
@@ -368,10 +352,8 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             trailing: Switch(
               value: _prefs.showTitleBar,
-              onChanged: (bool value) => _apply(
-                _prefs.copyWith(showTitleBar: value),
-                persist: true,
-              ),
+              onChanged: (bool value) =>
+                  _apply(_prefs.copyWith(showTitleBar: value), persist: true),
             ),
           ),
           const Padding(
@@ -407,6 +389,21 @@ class _SettingsPageState extends State<SettingsPage> {
             child: Text(
               '手势（prd F21）：双击弹幕区暂停 / 继续；长按后上下滑动调节本栏透明度',
               style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.touch_app_outlined),
+            title: const Text('点击穿透'),
+            subtitle: const Text(
+              '开启后悬浮窗不再接收触摸，点击直接落到下层画面。'
+              '此时窗内菜单、列表滚动与手势调节都会失效，'
+              '可下拉通知栏点「关闭点击穿透」，或回到本页关闭',
+              style: TextStyle(fontSize: 12),
+            ),
+            trailing: Switch(
+              value: _prefs.clickThrough,
+              onChanged: (bool value) =>
+                  _apply(_prefs.copyWith(clickThrough: value), persist: true),
             ),
           ),
           const Divider(height: 1),
@@ -484,7 +481,8 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _clearCredential() async {
     final bool confirmed = await _confirm(
       title: '清除本地凭证',
-      content: '将删除已加密保存的手动凭证，之后回退为匿名自动获取。'
+      content:
+          '将删除已加密保存的手动凭证，之后回退为匿名自动获取。'
           '已建立的连接不受影响，下次连接按新凭证取。',
       confirmText: '清除',
     );
@@ -518,7 +516,7 @@ class _SettingsPageState extends State<SettingsPage> {
         content: Text(
           location == null
               ? '备份已复制到剪贴板（${json.length} 字符）。未能写入本地文件，'
-                  '可粘到任意位置自行保存。'
+                    '可粘到任意位置自行保存。'
               : '备份已复制到剪贴板，并另存为文件：\n$location',
         ),
         actions: <Widget>[
@@ -541,7 +539,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
     final bool confirmed = await _confirm(
       title: '导入数据',
-      content: '将用备份覆盖当前的主播列表、悬浮窗样式、过滤设置与主题。'
+      content:
+          '将用备份覆盖当前的主播列表、悬浮窗样式、过滤设置与主题。'
           '此操作不可撤销。',
       confirmText: '覆盖导入',
     );
@@ -568,7 +567,8 @@ class _SettingsPageState extends State<SettingsPage> {
     if (reset == null) return;
     final bool confirmed = await _confirm(
       title: '清除所有本地数据',
-      content: '将断开全部连接、关闭悬浮窗，并删除主播列表、样式偏好、'
+      content:
+          '将断开全部连接、关闭悬浮窗，并删除主播列表、样式偏好、'
           '合规状态与凭证密文，等同恢复初始状态。此操作不可撤销。',
       confirmText: '清除并重置',
     );
@@ -629,8 +629,9 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _snack(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
 
@@ -688,8 +689,9 @@ class _CredentialSectionState extends State<_CredentialSection> {
     if (!mounted) return;
     _controller.clear();
     setState(() {});
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('凭证已加密保存')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('凭证已加密保存')));
   }
 
   @override
@@ -837,74 +839,74 @@ class _ImportDialogState extends State<_ImportDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: const Text('导入数据'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+    title: const Text('导入数据'),
+    content: SizedBox(
+      width: double.maxFinite,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            '选择之前导出的备份文件，或把备份 JSON 粘贴进来。',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _controller,
+            minLines: 4,
+            maxLines: 6,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            decoration: const InputDecoration(
+              hintText: '{"app":"danmu-float", ...}',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: (String value) => setState(() => _validate(value)),
+          ),
+          if (_error != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ] else if (_rooms != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              '备份有效：$_rooms 个主播',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+          Row(
             children: <Widget>[
-              const Text(
-                '选择之前导出的备份文件，或把备份 JSON 粘贴进来。',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
+              TextButton.icon(
+                onPressed: _pickFile,
+                icon: const Icon(Icons.folder_open, size: 18),
+                label: const Text('从文件选择'),
               ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _controller,
-                minLines: 4,
-                maxLines: 6,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-                decoration: const InputDecoration(
-                  hintText: '{"app":"danmu-float", ...}',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                onChanged: (String value) => setState(() => _validate(value)),
-              ),
-              if (_error != null) ...<Widget>[
-                const SizedBox(height: 8),
-                Text(
-                  _error!,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.error,
-                  ),
-                ),
-              ] else if (_rooms != null) ...<Widget>[
-                const SizedBox(height: 8),
-                Text(
-                  '备份有效：$_rooms 个主播',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
-              Row(
-                children: <Widget>[
-                  TextButton.icon(
-                    onPressed: _pickFile,
-                    icon: const Icon(Icons.folder_open, size: 18),
-                    label: const Text('从文件选择'),
-                  ),
-                  TextButton.icon(
-                    onPressed: _paste,
-                    icon: const Icon(Icons.content_paste, size: 18),
-                    label: const Text('从剪贴板粘贴'),
-                  ),
-                ],
+              TextButton.icon(
+                onPressed: _paste,
+                icon: const Icon(Icons.content_paste, size: 18),
+                label: const Text('从剪贴板粘贴'),
               ),
             ],
           ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(_controller.text),
-            child: const Text('导入'),
-          ),
         ],
-      );
+      ),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.of(context).pop(_controller.text),
+        child: const Text('导入'),
+      ),
+    ],
+  );
 }
 
 class _SectionTitle extends StatelessWidget {
@@ -914,12 +916,9 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-        child: Text(
-          text,
-          style: const TextStyle(fontSize: 12, color: Colors.grey),
-        ),
-      );
+    padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+    child: Text(text, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+  );
 }
 
 /// 一条带说明文字的滑杆。
@@ -948,57 +947,54 @@ class _SliderGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const SizedBox(height: 8),
-            Text(title),
-            Slider(
-              value: value,
-              min: min,
-              max: max,
-              divisions: divisions,
-              label: value.toStringAsFixed(0),
-              // 拖动中实时预览，松手才落盘。
-              onChanged: onChanged,
-              onChangeEnd: onChangeEnd,
-            ),
-            Text(
-              hint,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-            const SizedBox(height: 8),
-          ],
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const SizedBox(height: 8),
+        Text(title),
+        Slider(
+          value: value,
+          min: min,
+          max: max,
+          divisions: divisions,
+          label: value.toStringAsFixed(0),
+          // 拖动中实时预览，松手才落盘。
+          onChanged: onChanged,
+          onChangeEnd: onChangeEnd,
         ),
-      );
+        Text(hint, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 8),
+      ],
+    ),
+  );
 }
 
 /// 主 App 主题模式选项（prd F20）。
 const List<({String label, ThemeMode mode})> _themeChoices =
     <({String label, ThemeMode mode})>[
-  (label: '跟随系统', mode: ThemeMode.system),
-  (label: '浅色', mode: ThemeMode.light),
-  (label: '深色', mode: ThemeMode.dark),
-];
+      (label: '跟随系统', mode: ThemeMode.system),
+      (label: '浅色', mode: ThemeMode.light),
+      (label: '深色', mode: ThemeMode.dark),
+    ];
 
 /// 主题模式的中文短名（诊断摘要用）。
 String _themeModeLabel(ThemeMode mode) => switch (mode) {
-      ThemeMode.light => '浅色',
-      ThemeMode.dark => '深色',
-      ThemeMode.system => '跟随系统',
-    };
+  ThemeMode.light => '浅色',
+  ThemeMode.dark => '深色',
+  ThemeMode.system => '跟随系统',
+};
 
 /// 单栏可选的正文颜色（深色悬浮窗上足够醒目，prd F5）。
 const List<({String label, int value})> _paneColorChoices =
     <({String label, int value})>[
-  (label: '白', value: 0xFFFFFFFF),
-  (label: '黄', value: 0xFFFFEB3B),
-  (label: '橙', value: 0xFFFF9800),
-  (label: '绿', value: 0xFF69F0AE),
-  (label: '蓝', value: 0xFF40C4FF),
-  (label: '粉', value: 0xFFFF80AB),
-];
+      (label: '白', value: 0xFFFFFFFF),
+      (label: '黄', value: 0xFFFFEB3B),
+      (label: '橙', value: 0xFFFF9800),
+      (label: '绿', value: 0xFF69F0AE),
+      (label: '蓝', value: 0xFF40C4FF),
+      (label: '粉', value: 0xFFFF80AB),
+    ];
 
 /// 「按栏独立配置」分区（prd F5）：逐栏覆盖字号 / 透明度 / 颜色。
 ///
@@ -1092,10 +1088,10 @@ class _PaneStyleDialogState extends State<_PaneStyleDialog> {
   late int? _textColor = widget.style.textColor;
 
   PaneStyle _build() => PaneStyle(
-        fontSize: _useFontSize ? _fontSize : null,
-        opacity: _useOpacity ? _opacity : null,
-        textColor: _textColor,
-      );
+    fontSize: _useFontSize ? _fontSize : null,
+    opacity: _useOpacity ? _opacity : null,
+    textColor: _textColor,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -1118,8 +1114,9 @@ class _PaneStyleDialogState extends State<_PaneStyleDialog> {
               min: minDanmuFontSize,
               max: maxDanmuFontSize,
               divisions: (maxDanmuFontSize - minDanmuFontSize).round(),
-              onChanged:
-                  _useFontSize ? (double value) => setState(() => _fontSize = value) : null,
+              onChanged: _useFontSize
+                  ? (double value) => setState(() => _fontSize = value)
+                  : null,
             ),
             _toggleRow(
               label: _useOpacity
@@ -1133,8 +1130,9 @@ class _PaneStyleDialogState extends State<_PaneStyleDialog> {
               min: minOverlayOpacity,
               max: maxOverlayOpacity,
               divisions: 20,
-              onChanged:
-                  _useOpacity ? (double value) => setState(() => _opacity = value) : null,
+              onChanged: _useOpacity
+                  ? (double value) => setState(() => _opacity = value)
+                  : null,
             ),
             const SizedBox(height: 8),
             const Text('正文字色'),
@@ -1148,11 +1146,13 @@ class _PaneStyleDialogState extends State<_PaneStyleDialog> {
                   selected: _textColor == null,
                   onSelected: (_) => setState(() => _textColor = null),
                 ),
-                for (final ({String label, int value}) choice in _paneColorChoices)
+                for (final ({String label, int value}) choice
+                    in _paneColorChoices)
                   ChoiceChip(
                     label: Text(choice.label),
                     selected: _textColor == choice.value,
-                    onSelected: (_) => setState(() => _textColor = choice.value),
+                    onSelected: (_) =>
+                        setState(() => _textColor = choice.value),
                   ),
               ],
             ),
@@ -1184,11 +1184,10 @@ class _PaneStyleDialogState extends State<_PaneStyleDialog> {
     required String label,
     required bool value,
     required ValueChanged<bool> onChanged,
-  }) =>
-      Row(
-        children: <Widget>[
-          Expanded(child: Text(label)),
-          Switch(value: value, onChanged: onChanged),
-        ],
-      );
+  }) => Row(
+    children: <Widget>[
+      Expanded(child: Text(label)),
+      Switch(value: value, onChanged: onChanged),
+    ],
+  );
 }

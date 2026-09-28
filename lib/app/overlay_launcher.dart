@@ -5,7 +5,9 @@ import 'dart:async';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
+import 'package:danmu_float/storage/filter_store.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 
 /// 窗口尺寸（dp）由设置页决定（prd 4.2 只约束单栏最小 200×150）。
@@ -121,6 +123,10 @@ Future<void> openOverlay(
     alignment: OverlayAlignment.centerRight,
     enableDrag: !config.dragLocked,
     positionGravity: PositionGravity.auto,
+    // 建窗时就要带上穿透状态：窗口一旦不可触摸，窗内没有入口改回来。
+    flag: config.clickThrough
+        ? OverlayFlag.clickThrough
+        : OverlayFlag.defaultFlag,
     overlayTitle: 'DanmuFloat',
     overlayContent: '正在显示弹幕悬浮窗',
   );
@@ -155,6 +161,7 @@ Future<void> shareOverlayStyle({
   bool showTitleBar = true,
   String focusBehavior = defaultFocusBehavior,
   bool dragLocked = false,
+  bool clickThrough = false,
   double screenWidth = 0,
   double screenHeight = 0,
 }) async {
@@ -171,6 +178,7 @@ Future<void> shareOverlayStyle({
       showTitleBar: showTitleBar,
       focusBehavior: focusBehavior,
       dragLocked: dragLocked,
+      clickThrough: clickThrough,
       screenWidth: screenWidth,
       screenHeight: screenHeight,
     ).toJson(),
@@ -227,17 +235,44 @@ Stream<OverlayStatus> get overlayStatusStream =>
 
 StreamController<OverlayStatus>? _statusController;
 
+/// 过滤偏好变化流（悬浮窗里把用户 / 文本加入屏蔽后由主 App 落盘的那份）。
+///
+/// 广播分发：首页、弹幕页等已打开的页面都按同一份口径刷新展示，
+/// 避免一处改了屏蔽词、另一处还按旧口径显示。
+Stream<FilterPrefs> get filterChangedStream =>
+    (_filterController ??= StreamController<FilterPrefs>.broadcast()).stream;
+
+StreamController<FilterPrefs>? _filterController;
+
+/// 主 App 侧的过滤偏好存储（只为落盘悬浮窗内改动的过滤项）。
+final FilterStore _filterStore = FilterStore();
+
 StreamController<OverlayStatus> _relayOverlayStatus() {
   final StreamController<OverlayStatus> controller =
       StreamController<OverlayStatus>.broadcast();
-  FlutterScreenOverlay.overlayListener.listen(
-    (dynamic message) {
-      final OverlayStatus? status = OverlayStatus.tryParse(message);
-      if (status != null && !controller.isClosed) controller.add(status);
-    },
-    onError: (Object error) => debugPrint('悬浮窗状态流异常: $error'),
-  );
+  FlutterScreenOverlay.overlayListener.listen((dynamic message) {
+    // 悬浮窗引擎没有剪贴板通道，复制请求从这里落到主 App 执行。
+    final OverlayClipboard? clipboard = OverlayClipboard.tryParse(message);
+    if (clipboard != null) {
+      unawaited(Clipboard.setData(ClipboardData(text: clipboard.text)));
+      return;
+    }
+    final OverlayStatus? status = OverlayStatus.tryParse(message);
+    if (status == null) return;
+    if (status.filter != null) unawaited(_persistFilter(status.filter!));
+    if (!controller.isClosed) controller.add(status);
+  }, onError: (Object error) => debugPrint('悬浮窗状态流异常: $error'));
   return controller;
+}
+
+/// 悬浮窗里改了过滤偏好：主 App 落盘并广播，供各页面刷新同一份口径。
+Future<void> _persistFilter(FilterPrefs prefs) async {
+  try {
+    await _filterStore.save(prefs);
+  } on Object catch (exception) {
+    debugPrint('落盘过滤偏好失败: $exception');
+  }
+  if (!(_filterController?.isClosed ?? true)) _filterController!.add(prefs);
 }
 
 /// 关闭悬浮窗：先让悬浮窗卸载各栏（断开全部连接、清空内存缓存）再关窗口。

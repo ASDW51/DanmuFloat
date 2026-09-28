@@ -55,6 +55,14 @@ public class OverlayService extends Service implements View.OnTouchListener {
 
     public static final String INTENT_EXTRA_IS_CLOSE_WINDOW = "IsCloseWindow";
 
+    /**
+     * 通知栏「关闭点击穿透」动作：只改窗口 flag 并通知悬浮窗同步本地开关。
+     *
+     * 点击穿透开启后悬浮窗收不到触摸，窗内没有关闭入口，通知栏的按钮是唯一的就地出口。
+     * 必须走独立分支处理：正常建窗流程会先 detach 再重建窗口，把已建立的弹幕连接全部断开。
+     */
+    public static final String ACTION_DISABLE_CLICK_THROUGH = "flutter.overlay.window.DISABLE_CLICK_THROUGH";
+
     private static OverlayService instance;
     public static boolean isRunning = false;
     private WindowManager windowManager = null;
@@ -150,6 +158,11 @@ public class OverlayService extends Service implements View.OnTouchListener {
             stopSelf();
             isRunning = false;
             return START_NOT_STICKY;
+        }
+        if (ACTION_DISABLE_CLICK_THROUGH.equals(intent.getAction())) {
+            // 通知栏动作：就地改 flag，不能走下面的 detach / 重建流程。
+            disableClickThroughFromNotification();
+            return START_STICKY;
         }
         if (windowManager != null || flutterView != null) {
             detachOverlayView();
@@ -366,9 +379,99 @@ public class OverlayService extends Service implements View.OnTouchListener {
                 Log.e("OverlayService", "updateOverlayFlag: updateViewLayout failed (permission revoked or view detached)", e);
                 result.success(false);
             }
+            // 穿透状态变了：通知栏按钮要跟着出现 / 消失。
+            refreshNotification();
         } else {
             result.success(false);
         }
+    }
+
+    /** 当前窗口是否处于点击穿透态（不可触摸）。 */
+    private boolean isClickThroughEnabled() {
+        return WindowSetup.flag == clickableFlag;
+    }
+
+    /**
+     * 构建前台服务通知。点击穿透开启时附一个「关闭点击穿透」动作：
+     * 穿透态下悬浮窗收不到触摸，通知栏是窗内唯一可用的就地关闭入口。
+     */
+    private Notification buildOverlayNotification() {
+        Intent notificationIntent = new Intent(this, FlutterOverlayWindowPlugin.class);
+        int pendingFlags;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            pendingFlags = PendingIntent.FLAG_IMMUTABLE;
+        } else {
+            pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+        }
+        PendingIntent pendingIntent = PendingIntent.getActivity(this,
+                0, notificationIntent, pendingFlags);
+        final int notifyIcon = getDrawableResourceId("mipmap", "launcher");
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, OverlayConstants.CHANNEL_ID)
+                .setContentTitle(WindowSetup.overlayTitle)
+                .setContentText(WindowSetup.overlayContent)
+                .setSmallIcon(notifyIcon == 0 ? R.drawable.notification_icon : notifyIcon)
+                .setContentIntent(pendingIntent)
+                .setVisibility(WindowSetup.notificationVisibility)
+                // PRIORITY_LOW + silent: no heads-up banner / no sound for the
+                // required foreground-service notification (covers pre-O too,
+                // where importance is taken from the notification priority).
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setSilent(true)
+                .setOnlyAlertOnce(true);
+        if (isClickThroughEnabled()) {
+            Intent actionIntent = new Intent(this, OverlayService.class);
+            actionIntent.setAction(ACTION_DISABLE_CLICK_THROUGH);
+            PendingIntent actionPending = PendingIntent.getService(this, 1, actionIntent, pendingFlags);
+            // 动作图标沿用通知本身的小图标：Android 7 及以下会按图标渲染动作项，传 0 会显示空白。
+            builder.addAction(new NotificationCompat.Action(
+                    notifyIcon == 0 ? R.drawable.notification_icon : notifyIcon,
+                    "关闭点击穿透", actionPending));
+        }
+        return builder.build();
+    }
+
+    /** 刷新前台服务通知（穿透开关变化后需要增删「关闭点击穿透」按钮）。 */
+    private void refreshNotification() {
+        try {
+            NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager != null) {
+                manager.notify(OverlayConstants.NOTIFICATION_ID, buildOverlayNotification());
+            }
+        } catch (Throwable t) {
+            Log.w("OverlayService", "refreshNotification failed (non-fatal)", t);
+        }
+    }
+
+    /**
+     * 通知栏「关闭点击穿透」：把窗口 flag 改回可触摸，并通知悬浮窗同步本地开关。
+     *
+     * 不走 onStartCommand 的正常建窗流程——那会 detach 并重建窗口，
+     * 已建立的弹幕连接会被全部断开。
+     */
+    private void disableClickThroughFromNotification() {
+        if (windowManager == null || flutterView == null) {
+            Log.w("OverlayService", "Click-through action ignored: overlay window is not active");
+            return;
+        }
+        WindowSetup.setFlag("defaultFlag");
+        WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
+        params.flags = WindowSetup.flag | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS |
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+                WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED;
+        params.alpha = 1;
+        try {
+            windowManager.updateViewLayout(flutterView, params);
+        } catch (Exception e) {
+            Log.e("OverlayService", "Click-through action: updateViewLayout failed", e);
+        }
+        // 让悬浮窗把本地开关与待落盘增量同步过去（主 App 随后会落盘该偏好）。
+        if (overlayMessageChannel != null) {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("type", "clickThrough");
+            payload.put("value", false);
+            overlayMessageChannel.send(payload);
+        }
+        refreshNotification();
     }
 
     private void resizeOverlay(int width, int height, boolean enableDrag, MethodChannel.Result result) {
@@ -463,29 +566,6 @@ public class OverlayService extends Service implements View.OnTouchListener {
         }
 
         createNotificationChannel();
-        Intent notificationIntent = new Intent(this, FlutterOverlayWindowPlugin.class);
-        int pendingFlags;
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            pendingFlags = PendingIntent.FLAG_IMMUTABLE;
-        } else {
-            pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
-        }
-        PendingIntent pendingIntent = PendingIntent.getActivity(this,
-                0, notificationIntent, pendingFlags);
-        final int notifyIcon = getDrawableResourceId("mipmap", "launcher");
-        Notification notification = new NotificationCompat.Builder(this, OverlayConstants.CHANNEL_ID)
-                .setContentTitle(WindowSetup.overlayTitle)
-                .setContentText(WindowSetup.overlayContent)
-                .setSmallIcon(notifyIcon == 0 ? R.drawable.notification_icon : notifyIcon)
-                .setContentIntent(pendingIntent)
-                .setVisibility(WindowSetup.notificationVisibility)
-                // PRIORITY_LOW + silent: no heads-up banner / no sound for the
-                // required foreground-service notification (covers pre-O too,
-                // where importance is taken from the notification priority).
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setSilent(true)
-                .setOnlyAlertOnce(true)
-                .build();
         // Guard: on Android 12+ the system throws ForegroundServiceStartNotAllowedException
         // when startForeground() is called but the app no longer has a foreground context
         // (e.g. the Activity finished its paused→stopped transition between the
@@ -493,7 +573,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
         // Catching Exception rather than the API-31 class keeps us compatible with
         // lower minSdk compilations while still handling the crash gracefully.
         try {
-            startForeground(OverlayConstants.NOTIFICATION_ID, notification);
+            startForeground(OverlayConstants.NOTIFICATION_ID, buildOverlayNotification());
         } catch (Exception e) {
             Log.e("OverlayService", "startForeground failed — app may have gone to background before service started. Stopping service.", e);
             stopSelf();

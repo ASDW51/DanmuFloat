@@ -29,6 +29,7 @@ class OverlayPrefs {
     this.focusBehavior = defaultFocusBehavior,
     this.dragLocked = false,
     this.ballCorner = 0,
+    this.clickThrough = false,
   });
 
   /// 上次勾选的主播，按栏位顺序排列（下次打开多栏弹窗时据此预勾选）。
@@ -67,11 +68,14 @@ class OverlayPrefs {
   /// 悬浮球吸附在窗口的哪个角（0 左上 / 1 右上 / 2 左下 / 3 右下）。
   final int ballCorner;
 
+  /// 是否开启点击穿透：开启后悬浮窗不接收触摸，点击落到下层画面（prd F2 延伸）。
+  final bool clickThrough;
+
   /// 窗口尺寸，供建窗 / 重排窗口时使用。
   ({double width, double height}) get windowSize => (
-        width: clampOverlayWidth(windowWidth),
-        height: clampOverlayHeight(windowHeight),
-      );
+    width: clampOverlayWidth(windowWidth),
+    height: clampOverlayHeight(windowHeight),
+  );
 
   OverlayPrefs copyWith({
     List<String>? webRids,
@@ -86,37 +90,39 @@ class OverlayPrefs {
     String? focusBehavior,
     bool? dragLocked,
     int? ballCorner,
-  }) =>
-      OverlayPrefs(
-        webRids: webRids ?? this.webRids,
-        opacity: opacity ?? this.opacity,
-        fontSize: fontSize ?? this.fontSize,
-        scrollSpeed: scrollSpeed ?? this.scrollSpeed,
-        windowWidth: windowWidth ?? this.windowWidth,
-        windowHeight: windowHeight ?? this.windowHeight,
-        paneStyles: paneStyles ?? this.paneStyles,
-        lightTheme: lightTheme ?? this.lightTheme,
-        showTitleBar: showTitleBar ?? this.showTitleBar,
-        focusBehavior: focusBehavior ?? this.focusBehavior,
-        dragLocked: dragLocked ?? this.dragLocked,
-        ballCorner: ballCorner ?? this.ballCorner,
-      );
+    bool? clickThrough,
+  }) => OverlayPrefs(
+    webRids: webRids ?? this.webRids,
+    opacity: opacity ?? this.opacity,
+    fontSize: fontSize ?? this.fontSize,
+    scrollSpeed: scrollSpeed ?? this.scrollSpeed,
+    windowWidth: windowWidth ?? this.windowWidth,
+    windowHeight: windowHeight ?? this.windowHeight,
+    paneStyles: paneStyles ?? this.paneStyles,
+    lightTheme: lightTheme ?? this.lightTheme,
+    showTitleBar: showTitleBar ?? this.showTitleBar,
+    focusBehavior: focusBehavior ?? this.focusBehavior,
+    dragLocked: dragLocked ?? this.dragLocked,
+    ballCorner: ballCorner ?? this.ballCorner,
+    clickThrough: clickThrough ?? this.clickThrough,
+  );
 
   /// 合并悬浮窗上报的偏好增量（悬浮球菜单改的部分）。
   OverlayPrefs appliedPatch(OverlayPrefsPatch patch) => OverlayPrefs(
-        webRids: webRids,
-        opacity: patch.opacity ?? opacity,
-        fontSize: patch.fontSize ?? fontSize,
-        scrollSpeed: scrollSpeed,
-        windowWidth: patch.windowWidth ?? windowWidth,
-        windowHeight: patch.windowHeight ?? windowHeight,
-        paneStyles: paneStyles,
-        lightTheme: lightTheme,
-        showTitleBar: showTitleBar,
-        focusBehavior: focusBehavior,
-        dragLocked: patch.dragLocked ?? dragLocked,
-        ballCorner: patch.ballCorner ?? ballCorner,
-      );
+    webRids: webRids,
+    opacity: patch.opacity ?? opacity,
+    fontSize: patch.fontSize ?? fontSize,
+    scrollSpeed: scrollSpeed,
+    windowWidth: patch.windowWidth ?? windowWidth,
+    windowHeight: patch.windowHeight ?? windowHeight,
+    paneStyles: paneStyles,
+    lightTheme: lightTheme,
+    showTitleBar: showTitleBar,
+    focusBehavior: focusBehavior,
+    dragLocked: patch.dragLocked ?? dragLocked,
+    ballCorner: patch.ballCorner ?? ballCorner,
+    clickThrough: patch.clickThrough ?? clickThrough,
+  );
 
   /// 组装成下发给悬浮窗的配置。
   ///
@@ -128,51 +134,52 @@ class OverlayPrefs {
     List<String> rooms, {
     FilterPrefs filter = const FilterPrefs(),
     List<RoomOption> roomOptions = const <RoomOption>[],
-  }) =>
-      OverlayConfig(
-        webRids: rooms,
-        opacity: clampOverlayOpacity(opacity),
-        fontSize: clampDanmuFontSize(fontSize),
-        scrollSpeed: clampDanmuScrollSpeed(scrollSpeed),
-        filter: filter,
-        paneStyles: _stylesFor(rooms),
-        roomOptions: roomOptions,
-        lightTheme: lightTheme,
-        showTitleBar: showTitleBar,
-        focusBehavior: clampFocusBehavior(focusBehavior),
-        dragLocked: dragLocked,
-        ballCorner: clampBallCorner(ballCorner),
-      );
+  }) => OverlayConfig(
+    webRids: rooms,
+    opacity: clampOverlayOpacity(opacity),
+    fontSize: clampDanmuFontSize(fontSize),
+    scrollSpeed: clampDanmuScrollSpeed(scrollSpeed),
+    filter: filter,
+    paneStyles: _stylesFor(rooms),
+    roomOptions: roomOptions,
+    lightTheme: lightTheme,
+    showTitleBar: showTitleBar,
+    focusBehavior: clampFocusBehavior(focusBehavior),
+    dragLocked: dragLocked,
+    ballCorner: clampBallCorner(ballCorner),
+    clickThrough: clickThrough,
+  );
 
   /// 只保留当前绑定的房间的样式，避免下发时带上已解绑房间的冗余覆盖。
   Map<String, PaneStyle> _stylesFor(List<String> rooms) => <String, PaneStyle>{
-        for (final String room in rooms)
-          if (paneStyles[room] != null) room: paneStyles[room]!,
-      };
+    for (final String room in rooms)
+      if (paneStyles[room] != null) room: paneStyles[room]!,
+  };
 
   Map<String, Object?> toJson() => <String, Object?>{
-        // 按 design.md 2.3 的 panes 结构存放：每栏的房间与样式（prd F5）写在一起。
-        'panes': <Map<String, Object?>>[
-          for (int index = 0; index < webRids.length; index++)
-            <String, Object?>{
-              'index': index,
-              'room_id': webRids[index],
-              ...?paneStyles[webRids[index]]?.toJson(),
-            },
-        ],
-        'opacity': clampOverlayOpacity(opacity),
-        'fontSize': clampDanmuFontSize(fontSize),
-        'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed),
-        'lightTheme': lightTheme,
-        'showTitleBar': showTitleBar,
-        'focusBehavior': clampFocusBehavior(focusBehavior),
-        'dragLocked': dragLocked,
-        'ballCorner': clampBallCorner(ballCorner),
-        'window': <String, Object?>{
-          'width': clampOverlayWidth(windowWidth),
-          'height': clampOverlayHeight(windowHeight),
+    // 按 design.md 2.3 的 panes 结构存放：每栏的房间与样式（prd F5）写在一起。
+    'panes': <Map<String, Object?>>[
+      for (int index = 0; index < webRids.length; index++)
+        <String, Object?>{
+          'index': index,
+          'room_id': webRids[index],
+          ...?paneStyles[webRids[index]]?.toJson(),
         },
-      };
+    ],
+    'opacity': clampOverlayOpacity(opacity),
+    'fontSize': clampDanmuFontSize(fontSize),
+    'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed),
+    'lightTheme': lightTheme,
+    'showTitleBar': showTitleBar,
+    'focusBehavior': clampFocusBehavior(focusBehavior),
+    'dragLocked': dragLocked,
+    'ballCorner': clampBallCorner(ballCorner),
+    'clickThrough': clickThrough,
+    'window': <String, Object?>{
+      'width': clampOverlayWidth(windowWidth),
+      'height': clampOverlayHeight(windowHeight),
+    },
+  };
 
   /// 解析一份偏好；结构完全对不上时返回 null，由调用方回落默认值。
   static OverlayPrefs? tryParse(Object? raw) {
@@ -186,7 +193,9 @@ class OverlayPrefs {
     final Object? height = window is Map ? window['height'] : null;
     return OverlayPrefs(
       webRids: panes is List ? _parsePanes(panes) : const <String>[],
-      paneStyles: panes is List ? _parsePaneStyles(panes) : const <String, PaneStyle>{},
+      paneStyles: panes is List
+          ? _parsePaneStyles(panes)
+          : const <String, PaneStyle>{},
       opacity: opacity is num
           ? clampOverlayOpacity(opacity.toDouble())
           : defaultOverlayOpacity,
@@ -207,6 +216,7 @@ class OverlayPrefs {
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
       dragLocked: raw['dragLocked'] == true,
       ballCorner: clampBallCorner(raw['ballCorner']),
+      clickThrough: raw['clickThrough'] == true,
     );
   }
 
@@ -227,9 +237,10 @@ class OverlayPrefs {
         unindexed.add(roomId.trim());
       }
     }
-    indexed.sort((({int index, String roomId}) a,
-            ({int index, String roomId}) b) =>
-        a.index.compareTo(b.index));
+    indexed.sort(
+      (({int index, String roomId}) a, ({int index, String roomId}) b) =>
+          a.index.compareTo(b.index),
+    );
     return <String>[
       for (final ({int index, String roomId}) item in indexed) item.roomId,
       ...unindexed,
@@ -287,7 +298,8 @@ class OverlayPrefsStore {
   Future<OverlayPrefs> load() async {
     final File file = await _file();
     if (!await file.exists()) return const OverlayPrefs();
-    return decodeOverlayPrefs(await file.readAsString()) ?? const OverlayPrefs();
+    return decodeOverlayPrefs(await file.readAsString()) ??
+        const OverlayPrefs();
   }
 
   /// 覆盖写入偏好。

@@ -46,8 +46,9 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   /// 这样从设置页改了屏蔽词 / 类型后重进本页能立刻按新口径显示。
   final List<DanmakuEvent> _raw = <DanmakuEvent>[];
   final ScrollController _scrollController = ScrollController();
-  late final DanmakuAutoScroller _autoScroller =
-      DanmakuAutoScroller(_scrollController);
+  late final DanmakuAutoScroller _autoScroller = DanmakuAutoScroller(
+    _scrollController,
+  );
 
   /// 悬浮窗样式偏好：本页用到字号与滚动速度。
   final OverlayPrefsStore _prefsStore = OverlayPrefsStore();
@@ -81,6 +82,9 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   OverlayStatus? _overlayState;
   StreamSubscription<OverlayStatus>? _overlaySubscription;
 
+  /// 悬浮窗里改了屏蔽（弹幕行菜单）后主 App 落盘的那份偏好：跟着刷新本页展示。
+  StreamSubscription<FilterPrefs>? _filterSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -99,6 +103,10 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
         if (patch != null) _prefs = _prefs.appliedPatch(patch);
       });
     });
+    _filterSubscription = filterChangedStream.listen((FilterPrefs filter) {
+      if (!mounted) return;
+      setState(() => _filter = filter);
+    });
     unawaited(_loadPrefs());
     unawaited(_loadFilter());
     unawaited(_connect());
@@ -108,6 +116,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _overlaySubscription?.cancel();
+    _filterSubscription?.cancel();
     _stageSubscription?.cancel();
     _danmuSubscription?.cancel();
     _session?.stop();
@@ -187,13 +196,17 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     });
     // 房间统计只用来更新在线人数、进场只进底部单行，过滤时都不能挡掉。
     _danmuSubscription = session.danmu
-        .where((DanmakuEvent event) =>
-            event.isDisplayable && isStreamRelevant(event.kind))
+        .where(
+          (DanmakuEvent event) =>
+              event.isDisplayable && isStreamRelevant(event.kind),
+        )
         .listen(_onEvent);
     setState(() => _stage = LiveSessionStage.resolvingRoom);
     await session.start();
     if (!mounted) return;
-    setState(() => _errorMessage = session.errorMessage ?? session.signatureWarning);
+    setState(
+      () => _errorMessage = session.errorMessage ?? session.signatureWarning,
+    );
   }
 
   void _onEvent(DanmakuEvent event) {
@@ -239,10 +252,10 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
 
   /// 按当前过滤口径派生的可见列表（prd F10 / F13）。
   List<DanmakuEvent> get _visible => <DanmakuEvent>[
-        for (final DanmakuEvent event in _raw)
-          if (isListKind(event.kind, _filter) && !isBlockedBy(event, _filter))
-            event,
-      ];
+    for (final DanmakuEvent event in _raw)
+      if (isListKind(event.kind, _filter) && !isBlockedBy(event, _filter))
+        event,
+  ];
 
   /// 开启 / 关闭本房间的单栏悬浮窗。
   Future<void> _toggleOverlay() async {
@@ -284,6 +297,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
         showTitleBar: _prefs.showTitleBar,
         focusBehavior: _prefs.focusBehavior,
         dragLocked: _prefs.dragLocked,
+        clickThrough: _prefs.clickThrough,
         screenWidth: screen.width,
         screenHeight: screen.height,
       ),
@@ -307,7 +321,9 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     }
     if (_errorMessage != null) buffer.writeln('错误: $_errorMessage');
     if (_session?.signatureDegraded ?? false) {
-      buffer.writeln('签名降级为 $fallbackDanmuSignature: ${_session!.signatureWarning}');
+      buffer.writeln(
+        '签名降级为 $fallbackDanmuSignature: ${_session!.signatureWarning}',
+      );
     }
     if (_session?.socketError != null) {
       buffer.writeln('连接错误: ${_session!.socketError}');
@@ -322,8 +338,78 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   }
 
   void _snack(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 应用过滤偏好：刷新本页展示、落盘，并同步给已开着的悬浮窗（prd F10）。
+  Future<void> _applyFilter(FilterPrefs next) async {
+    setState(() => _filter = next);
+    await _filterStore.save(next);
+    await shareOverlayFilter(next);
+  }
+
+  /// 单击弹幕弹出的功能菜单：复制弹幕 / 复制 userId / 屏蔽该用户 / 加入屏蔽词。
+  Future<void> _showEventMenu(DanmakuEvent event) async {
+    final String userId = event.user.userId.trim();
+    final String? action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (BuildContext context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            ListTile(
+              dense: true,
+              title: Text(
+                event.text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.black54, fontSize: 13),
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.copy),
+              title: const Text('复制弹幕'),
+              onTap: () => Navigator.of(context).pop('copyText'),
+            ),
+            if (userId.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.badge_outlined),
+                title: const Text('复制 userId'),
+                onTap: () => Navigator.of(context).pop('copyUser'),
+              ),
+            if (userId.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.block),
+                title: const Text('屏蔽该用户'),
+                onTap: () => Navigator.of(context).pop('blockUser'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.filter_alt_off_outlined),
+              title: const Text('加入屏蔽词'),
+              onTap: () => Navigator.of(context).pop('blockKeyword'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'copyText':
+        await Clipboard.setData(ClipboardData(text: event.text));
+        if (mounted) _snack('已复制弹幕');
+      case 'copyUser':
+        await Clipboard.setData(ClipboardData(text: userId));
+        if (mounted) _snack('已复制 userId');
+      case 'blockUser':
+        await _applyFilter(withBlockedUser(_filter, userId));
+        if (mounted) _snack('已屏蔽该用户');
+      case 'blockKeyword':
+        await _applyFilter(withBlockedKeyword(_filter, event.text));
+        if (mounted) _snack('已加入屏蔽词');
+    }
   }
 
   @override
@@ -433,14 +519,14 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   }
 
   String _stageLabel(LiveSessionStage stage) => switch (stage) {
-        LiveSessionStage.idle => '未连接',
-        LiveSessionStage.resolvingRoom => '解析房间信息…',
-        LiveSessionStage.signing => '生成签名…',
-        LiveSessionStage.connecting => '连接中…',
-        LiveSessionStage.live => '已连接',
-        LiveSessionStage.offline => '主播未开播',
-        LiveSessionStage.error => '异常',
-      };
+    LiveSessionStage.idle => '未连接',
+    LiveSessionStage.resolvingRoom => '解析房间信息…',
+    LiveSessionStage.signing => '生成签名…',
+    LiveSessionStage.connecting => '连接中…',
+    LiveSessionStage.live => '已连接',
+    LiveSessionStage.offline => '主播未开播',
+    LiveSessionStage.error => '异常',
+  };
 
   Widget _buildEventList() {
     final List<DanmakuEvent> visible = _visible;
@@ -471,8 +557,10 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
                   borderRadius: BorderRadius.circular(14),
                   onTap: _backToLatest,
                   child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
                     child: Text(
                       '回到最新',
                       style: TextStyle(
@@ -536,6 +624,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
 
   /// 单条弹幕：时间 + 荣誉等级 + 灯牌等级 + 昵称 + 内容；
   /// 飘屏 / 特权弹幕带类型前缀并整体着色，与普通弹幕区分。
+  /// 单击弹出该条的功能菜单（复制 / 屏蔽）。
   Widget _buildEventTile(DanmakuEvent event) {
     final DanmakuUser user = event.user;
     final String? mark = danmakuTypeLabel(event.kind);
@@ -549,64 +638,67 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       DanmakuKind.roomRank => Colors.amber.shade800,
       _ => null,
     };
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Text.rich(
-        TextSpan(
-          style: TextStyle(fontSize: _prefs.fontSize),
-          children: <InlineSpan>[
-            TextSpan(
-              text: '${formatClock(event.timeMs)} ',
-              style: TextStyle(
-                color: Colors.grey,
-                fontSize: smallerFontSize(_prefs.fontSize, 2),
-              ),
-            ),
-            if (mark != null && markColor != null)
+    return InkWell(
+      onTap: () => unawaited(_showEventMenu(event)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Text.rich(
+          TextSpan(
+            style: TextStyle(fontSize: _prefs.fontSize),
+            children: <InlineSpan>[
               TextSpan(
-                text: '$mark ',
+                text: '${formatClock(event.timeMs)} ',
                 style: TextStyle(
-                  color: markColor,
+                  color: Colors.grey,
                   fontSize: smallerFontSize(_prefs.fontSize, 2),
                 ),
               ),
-            if (user.level > 0)
-              TextSpan(
-                text: 'Lv.${user.level} ',
-                style: TextStyle(
-                  color: Colors.orange.shade800,
-                  fontSize: smallerFontSize(_prefs.fontSize, 2),
+              if (mark != null && markColor != null)
+                TextSpan(
+                  text: '$mark ',
+                  style: TextStyle(
+                    color: markColor,
+                    fontSize: smallerFontSize(_prefs.fontSize, 2),
+                  ),
                 ),
-              ),
-            if (user.fanLevel > 0)
-              TextSpan(
-                text: '灯牌${user.fanLevel} ',
-                style: TextStyle(
-                  color: Colors.purple.shade400,
-                  fontSize: smallerFontSize(_prefs.fontSize, 2),
+              if (user.level > 0)
+                TextSpan(
+                  text: 'Lv.${user.level} ',
+                  style: TextStyle(
+                    color: Colors.orange.shade800,
+                    fontSize: smallerFontSize(_prefs.fontSize, 2),
+                  ),
                 ),
-              ),
-            if (user.nickName.isNotEmpty)
-              TextSpan(
-                text: '${user.nickName}: ',
-                style: TextStyle(
-                  color: Colors.indigo.shade400,
-                  fontWeight: FontWeight.bold,
+              if (user.fanLevel > 0)
+                TextSpan(
+                  text: '灯牌${user.fanLevel} ',
+                  style: TextStyle(
+                    color: Colors.purple.shade400,
+                    fontSize: smallerFontSize(_prefs.fontSize, 2),
+                  ),
                 ),
-              ),
-            // 正文按高亮词切分（prd F11）：命中片段用高亮样式。
-            for (final HighlightSegment segment in splitHighlights(
-              event.text,
-              _filter.highlightKeywords,
-              regex: _filter.regexEnabled,
-            ))
-              TextSpan(
-                text: segment.text,
-                style: segment.highlighted
-                    ? _highlightStyle
-                    : TextStyle(color: markColor),
-              ),
-          ],
+              if (user.nickName.isNotEmpty)
+                TextSpan(
+                  text: '${user.nickName}: ',
+                  style: TextStyle(
+                    color: Colors.indigo.shade400,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              // 正文按高亮词切分（prd F11）：命中片段用高亮样式。
+              for (final HighlightSegment segment in splitHighlights(
+                event.text,
+                _filter.highlightKeywords,
+                regex: _filter.regexEnabled,
+              ))
+                TextSpan(
+                  text: segment.text,
+                  style: segment.highlighted
+                      ? _highlightStyle
+                      : TextStyle(color: markColor),
+                ),
+            ],
+          ),
         ),
       ),
     );

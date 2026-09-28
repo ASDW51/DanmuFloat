@@ -104,8 +104,11 @@ void main() {
       expect(single.fontSize, 21);
       expect(single.scrollSpeed, 2);
 
-      final OverlayConfig quad = const OverlayPrefs()
-          .toConfig(<String>['735', '736', '737']);
+      final OverlayConfig quad = const OverlayPrefs().toConfig(<String>[
+        '735',
+        '736',
+        '737',
+      ]);
       expect(quad.grid.columns, 2);
       expect(quad.grid.rows, 2);
       expect(quad.opacity, defaultOverlayOpacity);
@@ -168,8 +171,9 @@ void main() {
       expect(config.showTitleBar, isFalse);
       expect(config.focusBehavior, focusBehaviorHide);
 
-      final OverlayPrefs? legacy =
-          OverlayPrefs.tryParse(const OverlayPrefs().toJson());
+      final OverlayPrefs? legacy = OverlayPrefs.tryParse(
+        const OverlayPrefs().toJson(),
+      );
       expect(legacy!.lightTheme, isFalse);
       expect(legacy.showTitleBar, isTrue);
       expect(legacy.focusBehavior, defaultFocusBehavior);
@@ -190,10 +194,14 @@ void main() {
       // 吸附角随 config 下发给悬浮窗，否则重开窗会回到左上角。
       expect(parsed.toConfig(<String>['735']).ballCorner, 2);
 
-      expect(OverlayPrefs.tryParse(const OverlayPrefs().toJson())!.ballCorner, 0);
       expect(
-        OverlayPrefs.tryParse(const OverlayPrefs(ballCorner: 9).toJson())!
-            .ballCorner,
+        OverlayPrefs.tryParse(const OverlayPrefs().toJson())!.ballCorner,
+        0,
+      );
+      expect(
+        OverlayPrefs.tryParse(
+          const OverlayPrefs(ballCorner: 9).toJson(),
+        )!.ballCorner,
         0,
       );
     });
@@ -205,6 +213,32 @@ void main() {
       );
       expect(merged.ballCorner, 3);
       expect(merged.opacity, 0.5);
+    });
+
+    test('点击穿透经 JSON 往返后保留，并随 config 下发与偏好增量合并', () {
+      final OverlayPrefs? parsed = OverlayPrefs.tryParse(
+        const OverlayPrefs(clickThrough: true).toJson(),
+      );
+      expect(parsed!.clickThrough, isTrue);
+      // 必须随 config 下发：窗口一旦不可触摸，窗内没有入口改回来。
+      expect(parsed.toConfig(<String>['735']).clickThrough, isTrue);
+
+      expect(
+        OverlayPrefs.tryParse(const OverlayPrefs().toJson())!.clickThrough,
+        isFalse,
+      );
+      // 悬浮球菜单改的穿透状态经增量合并回主 App 的偏好。
+      const OverlayPrefs prefs = OverlayPrefs(opacity: 0.5);
+      expect(
+        prefs
+            .appliedPatch(const OverlayPrefsPatch(clickThrough: true))
+            .clickThrough,
+        isTrue,
+      );
+      expect(
+        prefs.appliedPatch(const OverlayPrefsPatch(clickThrough: true)).opacity,
+        0.5,
+      );
     });
   });
 
@@ -253,11 +287,13 @@ void main() {
 
     test('皮肤与栏位偏好落盘后可重新读出', () async {
       final OverlayPrefsStore prefsStore = store();
-      await prefsStore.save(const OverlayPrefs(
-        lightTheme: true,
-        showTitleBar: false,
-        focusBehavior: focusBehaviorHide,
-      ));
+      await prefsStore.save(
+        const OverlayPrefs(
+          lightTheme: true,
+          showTitleBar: false,
+          focusBehavior: focusBehaviorHide,
+        ),
+      );
       final OverlayPrefs loaded = await prefsStore.load();
       expect(loaded.lightTheme, isTrue);
       expect(loaded.showTitleBar, isFalse);

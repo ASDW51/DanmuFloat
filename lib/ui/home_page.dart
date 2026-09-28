@@ -42,8 +42,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final CredentialStore _credentialStore = CredentialStore();
 
   /// 「清除所有本地数据」用；与页面共用同一个凭证实例，清完状态才一致。
-  late final LocalDataReset _dataReset =
-      LocalDataReset(credentialStore: _credentialStore);
+  late final LocalDataReset _dataReset = LocalDataReset(
+    credentialStore: _credentialStore,
+  );
 
   /// 刷新房间信息用的客户端：复用同一个实例以共享 ttwid 缓存与连接池。
   final RoomInfoClient _roomInfoClient = RoomInfoClient();
@@ -73,6 +74,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 监听悬浮窗上报：权限被撤销时悬浮窗会自行断开，这里同步按钮状态。
   StreamSubscription<OverlayStatus>? _overlaySubscription;
 
+  /// 悬浮窗里改了屏蔽（弹幕行菜单）后主 App 落盘的那份偏好：跟着刷新本页口径。
+  StreamSubscription<FilterPrefs>? _filterSubscription;
+
   /// 本地偏好是否已读回：读回前不动窗口尺寸，否则会把默认值当成用户设置。
   bool _prefsReady = false;
 
@@ -96,6 +100,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       // 把最新绑定与偏好落盘。
       _applyReportedStatus(status);
     });
+    _filterSubscription = filterChangedStream.listen((FilterPrefs filter) {
+      if (!mounted) return;
+      setState(() => _filter = filter);
+    });
     unawaited(_load());
     unawaited(_loadPrefs());
     unawaited(_loadFilter());
@@ -108,6 +116,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _overlaySubscription?.cancel();
+    _filterSubscription?.cancel();
     _roomInfoClient.close();
     super.dispose();
   }
@@ -147,9 +156,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await _refreshOverlayPermission();
     if (!mounted) return;
     _snack(
-      _overlayPermissionDenied
-          ? '未授予悬浮窗权限，当前仅能在 App 内查看'
-          : '已授予悬浮窗权限，可开启悬浮窗了',
+      _overlayPermissionDenied ? '未授予悬浮窗权限，当前仅能在 App 内查看' : '已授予悬浮窗权限，可开启悬浮窗了',
     );
   }
 
@@ -253,6 +260,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         showTitleBar: prefs.showTitleBar,
         focusBehavior: prefs.focusBehavior,
         dragLocked: prefs.dragLocked,
+        clickThrough: prefs.clickThrough,
         screenWidth: screen.width,
         screenHeight: screen.height,
       ),
@@ -354,8 +362,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _add() async {
     final ManagedRoom? room = await showAddRoomDialog(
       context,
-      existingWebRids:
-          _rooms.map((ManagedRoom item) => item.webRid).toSet(),
+      existingWebRids: _rooms.map((ManagedRoom item) => item.webRid).toSet(),
     );
     if (room == null || !mounted) return;
 
@@ -389,9 +396,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
     if (group == null || !mounted) return;
     final List<ManagedRoom> next = _rooms
-        .map((ManagedRoom item) => item.webRid == room.webRid
-            ? item.copyWith(group: group)
-            : item)
+        .map(
+          (ManagedRoom item) =>
+              item.webRid == room.webRid ? item.copyWith(group: group) : item,
+        )
         .toList(growable: false);
     setState(() => _rooms = next);
     await _store.save(next);
@@ -458,10 +466,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _connectSingle(ManagedRoom room) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (BuildContext context) => DanmuPage(
-          webRid: room.webRid,
-          title: room.displayName,
-        ),
+        builder: (BuildContext context) =>
+            DanmuPage(webRid: room.webRid, title: room.displayName),
       ),
     );
   }
@@ -476,9 +482,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       builder: (BuildContext context) => _MultiSelectDialog(
         rooms: _rooms,
         // 带出上次的栏位绑定；期间被移除的主播不再预勾选。
-        initialSelection: _prefs.webRids
-            .where(known.contains)
-            .toList(growable: false),
+        initialSelection:
+            _prefs.webRids.where(known.contains).toList(growable: false),
       ),
     );
     if (selected == null || selected.isEmpty || !mounted) return;
@@ -563,8 +568,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _snack(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -725,7 +731,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           style: const TextStyle(color: Colors.white),
         ),
       ),
-      title: Text(room.displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Text(
+        room.displayName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -864,8 +874,9 @@ class _GroupDialog extends StatefulWidget {
 }
 
 class _GroupDialogState extends State<_GroupDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.current);
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.current,
+  );
 
   @override
   void dispose() {
@@ -904,8 +915,7 @@ class _GroupDialogState extends State<_GroupDialog> {
                 for (final String group in widget.groups)
                   ActionChip(
                     label: Text(group),
-                    onPressed: () =>
-                        setState(() => _controller.text = group),
+                    onPressed: () => setState(() => _controller.text = group),
                   ),
               ],
             ),
@@ -919,8 +929,7 @@ class _GroupDialogState extends State<_GroupDialog> {
           child: const Text('取消'),
         ),
         FilledButton(
-          onPressed: () =>
-              Navigator.of(context).pop(_controller.text.trim()),
+          onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
           child: const Text('保存'),
         ),
       ],
@@ -930,7 +939,10 @@ class _GroupDialogState extends State<_GroupDialog> {
 
 /// 多栏选择弹窗：勾选要连接的主播，确认后开悬浮窗。
 class _MultiSelectDialog extends StatefulWidget {
-  const _MultiSelectDialog({required this.rooms, this.initialSelection = const <String>[]});
+  const _MultiSelectDialog({
+    required this.rooms,
+    this.initialSelection = const <String>[],
+  });
 
   final List<ManagedRoom> rooms;
 
@@ -944,8 +956,7 @@ class _MultiSelectDialog extends StatefulWidget {
 class _MultiSelectDialogState extends State<_MultiSelectDialog> {
   late final Set<String> _selected = <String>{
     for (final String webRid in widget.initialSelection)
-      if (widget.rooms.any((ManagedRoom room) => room.webRid == webRid))
-        webRid,
+      if (widget.rooms.any((ManagedRoom room) => room.webRid == webRid)) webRid,
   };
 
   /// 超过 4 栏为高性能模式，提示会在下一步弹出强制确认（prd F4）。
@@ -972,10 +983,7 @@ class _MultiSelectDialogState extends State<_MultiSelectDialog> {
             const SizedBox(height: 8),
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 320),
-              child: ListView(
-                shrinkWrap: true,
-                children: _buildEntries(),
-              ),
+              child: ListView(shrinkWrap: true, children: _buildEntries()),
             ),
           ],
         ),
@@ -1030,7 +1038,11 @@ class _MultiSelectDialogState extends State<_MultiSelectDialog> {
     return CheckboxListTile(
       dense: true,
       value: checked,
-      title: Text(room.displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Text(
+        room.displayName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
       subtitle: Text(room.webRid, style: const TextStyle(fontSize: 12)),
       onChanged: (bool? value) => setState(() {
         if (value ?? false) {

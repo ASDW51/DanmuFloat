@@ -123,8 +123,7 @@ class OverlayPalette {
   );
 
   /// 按皮肤开关取配色。
-  static OverlayPalette of(bool light) =>
-      light ? lightPalette : darkPalette;
+  static OverlayPalette of(bool light) => light ? lightPalette : darkPalette;
 
   /// 各类型在皮肤上的配色（列表过滤与类型前缀文案见 danmaku_display.dart）：
   /// 普通弹幕正文用 [body]；其余类型前缀与正文同色（prd F13 类型区分）。
@@ -156,10 +155,8 @@ class OverlayApp extends StatelessWidget {
   const OverlayApp({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        home: const OverlayPage(),
-      );
+  Widget build(BuildContext context) =>
+      MaterialApp(debugShowCheckedModeBanner: false, home: const OverlayPage());
 }
 
 class OverlayPage extends StatefulWidget {
@@ -182,6 +179,29 @@ class _PaneReport {
   final LiveSessionStage stage;
   final int received;
   final String? error;
+}
+
+/// 悬浮窗内的轻提示（悬浮窗没有 Scaffold，用弹窗代替 SnackBar）。
+///
+/// 页面级（悬浮球菜单）与栏级（弹幕行菜单）共用同一套弹窗外观。
+Future<void> showOverlayNotice(
+  BuildContext context,
+  String title,
+  String message,
+) async {
+  await showDialog<void>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('知道了'),
+        ),
+      ],
+    ),
+  );
 }
 
 class _OverlayPageState extends State<OverlayPage> {
@@ -227,6 +247,10 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 弹幕才能正常滚动——插件会把窗口内任何超过 5px 的滑动都当作搬窗口。
   bool _dragLocked = false;
 
+  /// 是否开启点击穿透（设置页 / 悬浮球菜单 / 通知栏按钮三处可切换）：
+  /// 开启后窗口不接收触摸，点击直接落到下层画面，窗内所有交互失效。
+  bool _clickThrough = false;
+
   /// 设备屏幕逻辑尺寸，随样式消息从主 App 下发（悬浮窗引擎查不到屏幕尺寸）；
   /// 0 表示未知，此时改尺寸只按固定上下限收敛。
   double _screenWidth = 0;
@@ -248,6 +272,10 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 悬浮球里改动、待上报给主 App 落盘的偏好增量。
   OverlayPrefsPatch? _pendingPatch;
 
+  /// 列表菜单里改的过滤偏好（屏蔽用户 / 屏蔽词），随下次上报交主 App 落盘。
+  /// 悬浮窗引擎写不了主 App 的过滤文件，只能整份带回去覆盖。
+  FilterPrefs? _pendingFilter;
+
   /// 可在栏内快速切换的候选房间（prd F14 / F15），来自主 App 的主播列表。
   List<RoomOption> _roomOptions = const <RoomOption>[];
 
@@ -264,8 +292,9 @@ class _OverlayPageState extends State<OverlayPage> {
     super.initState();
     // 插件在主 App 启动时就会预热本引擎，此处尽早注册监听，
     // 避免主 App 下发 config 时消息无人接收。
-    _bridgeSubscription =
-        FlutterScreenOverlay.overlayListener.listen(_onBridgeMessage);
+    _bridgeSubscription = FlutterScreenOverlay.overlayListener.listen(
+      _onBridgeMessage,
+    );
   }
 
   @override
@@ -298,6 +327,7 @@ class _OverlayPageState extends State<OverlayPage> {
     final OverlayStyle? style = OverlayStyle.tryParse(message);
     if (style != null) {
       final bool lockChanged = style.dragLocked != _dragLocked;
+      final bool clickThroughChanged = style.clickThrough != _clickThrough;
       setState(() {
         _opacity = style.opacity;
         _fontSize = style.fontSize;
@@ -307,17 +337,29 @@ class _OverlayPageState extends State<OverlayPage> {
         _showTitleBar = style.showTitleBar;
         _focusBehavior = style.focusBehavior;
         _dragLocked = style.dragLocked;
+        _clickThrough = style.clickThrough;
         if (style.screenWidth > 0) _screenWidth = style.screenWidth;
         if (style.screenHeight > 0) _screenHeight = style.screenHeight;
       });
       // 主 App 改了锁定状态（如换设备 / 恢复备份）时同步插件的拖动开关。
       if (lockChanged) _syncDragEnabled();
+      // 主 App 设置页改了点击穿透：同步窗口 flag（插件只在悬浮窗引擎注册该通道）。
+      if (clickThroughChanged) unawaited(_applyClickThrough(_clickThrough));
       return;
     }
     // 纯过滤调整：屏蔽 / 高亮 / 类型筛选，改了只影响后续判定，已有列表按新口径重建。
     final FilterPrefs? filter = OverlayFilter.tryParse(message);
     if (filter != null) {
       setState(() => _filter = filter);
+      return;
+    }
+    // 通知栏「关闭点击穿透」按钮（原生侧改完 flag 后下发）：穿透开启时窗内收不到
+    // 触摸，这是就地关掉的唯一入口，收到后把本地开关与待落盘增量同步过去。
+    final OverlayClickThrough? clickThrough = OverlayClickThrough.tryParse(
+      message,
+    );
+    if (clickThrough != null) {
+      _setClickThrough(clickThrough.value);
       return;
     }
     // 候选房间更新（prd F14 / F15）：只刷新切换弹窗里的可选项，不动各栏绑定。
@@ -328,6 +370,7 @@ class _OverlayPageState extends State<OverlayPage> {
     }
     final OverlayConfig? config = OverlayConfig.tryParse(message);
     if (config == null) return;
+    final bool clickThroughChanged = config.clickThrough != _clickThrough;
     setState(() {
       _webRids = config.webRids;
       _opacity = config.opacity;
@@ -341,6 +384,7 @@ class _OverlayPageState extends State<OverlayPage> {
       _focusBehavior = config.focusBehavior;
       _dragLocked = config.dragLocked;
       _ballCorner = config.ballCorner;
+      _clickThrough = config.clickThrough;
       // 布局或房间变化会重建对应栏位，旧栏位的上报先作废。
       _reports.clear();
       // 栏位重排后原来的焦点与手势透明度都不再对应同一栏，一并复位。
@@ -349,6 +393,8 @@ class _OverlayPageState extends State<OverlayPage> {
       // 重新授权后主 App 会再下发一次配置，此时恢复正常上报。
       _permissionRevoked = false;
     });
+    // 复用已存在的窗口重排时（resizeOverlay 路径）不会重置窗口 flag，这里补一次。
+    if (clickThroughChanged) unawaited(_applyClickThrough(_clickThrough));
   }
 
   /// 在悬浮窗内切换某栏绑定的直播间（prd F15 / F8）。
@@ -454,6 +500,8 @@ class _OverlayPageState extends State<OverlayPage> {
           // 悬浮球里改的透明度 / 尺寸 / 锁定随本次上报带给主 App 落盘；
           // 带出去后就清空，避免每秒重复上报同一个值。
           prefsPatch: _takePendingPatch(),
+          // 列表菜单里加的屏蔽用户 / 屏蔽词同理，整份带回去覆盖落盘。
+          filter: _takePendingFilter(),
         ).toJson(),
       ),
     );
@@ -464,6 +512,23 @@ class _OverlayPageState extends State<OverlayPage> {
     final OverlayPrefsPatch? patch = _pendingPatch;
     _pendingPatch = null;
     return patch;
+  }
+
+  /// 取出待落盘的过滤偏好并清空。
+  FilterPrefs? _takePendingFilter() {
+    final FilterPrefs? filter = _pendingFilter;
+    _pendingFilter = null;
+    return filter;
+  }
+
+  /// 列表菜单里把某用户 / 某段文本加入屏蔽：立即按新口径刷新本窗口展示，
+  /// 并把整份过滤偏好交主 App 落盘（悬浮窗引擎写不了主 App 的偏好文件）。
+  void _onPaneFilterChanged(FilterPrefs prefs) {
+    setState(() {
+      _filter = prefs;
+      _pendingFilter = prefs;
+    });
+    _reportState();
   }
 
   @override
@@ -539,43 +604,49 @@ class _OverlayPageState extends State<OverlayPage> {
   ///
   /// 闲置时半透明，避免一个小圆钮一直压在弹幕上；展开或按下时加深到接近不透明。
   Widget _buildBall(OverlayPalette palette) => Opacity(
-        opacity: _menuOpen ? 0.95 : 0.4,
-        child: Material(
-          color: palette.isLight ? Colors.white70 : Colors.black54,
-          shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: () => setState(() {
-              _menuOpen = !_menuOpen;
-              // 展开时按当前实际窗口尺寸初始化滑杆取值。
-              if (_menuOpen) _windowSize = MediaQuery.sizeOf(context);
-            }),
-            child: SizedBox(
-              width: 24,
-              height: 24,
-              child: Icon(
-                _menuOpen ? Icons.close : Icons.tune,
-                size: 15,
-                color: palette.chrome,
-              ),
-            ),
+    opacity: _menuOpen ? 0.95 : 0.4,
+    child: Material(
+      color: palette.isLight ? Colors.white70 : Colors.black54,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () => setState(() {
+          _menuOpen = !_menuOpen;
+          // 展开时按当前实际窗口尺寸初始化滑杆取值。
+          if (_menuOpen) _windowSize = MediaQuery.sizeOf(context);
+        }),
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: Icon(
+            _menuOpen ? Icons.close : Icons.tune,
+            size: 15,
+            color: palette.chrome,
           ),
         ),
-      );
+      ),
+    ),
+  );
 
   /// 悬浮球展开的功能菜单：紧凑排版并整体可滚动，
   /// 窗口被调小时也不会溢出（prd F2 延伸：尺寸 / 透明度等设置在悬浮窗内即可调）。
   Widget _buildMenu(OverlayPalette palette) {
     final double base = paneFontSize(_fontSize, _webRids.length);
     final double label = smallerFontSize(base, 2);
-    final double widthLimit =
-        _screenWidth > 0 ? overlayWidthLimit(_screenWidth) : maxOverlayWidth;
-    final double heightLimit =
-        _screenHeight > 0 ? overlayHeightLimit(_screenHeight) : maxOverlayHeight;
-    final double currentWidth =
-        _windowSize.width.clamp(minOverlayWidth, widthLimit);
-    final double currentHeight =
-        _windowSize.height.clamp(minOverlayHeight, heightLimit);
+    final double widthLimit = _screenWidth > 0
+        ? overlayWidthLimit(_screenWidth)
+        : maxOverlayWidth;
+    final double heightLimit = _screenHeight > 0
+        ? overlayHeightLimit(_screenHeight)
+        : maxOverlayHeight;
+    final double currentWidth = _windowSize.width.clamp(
+      minOverlayWidth,
+      widthLimit,
+    );
+    final double currentHeight = _windowSize.height.clamp(
+      minOverlayHeight,
+      heightLimit,
+    );
 
     return Material(
       color: palette.isLight
@@ -604,6 +675,26 @@ class _OverlayPageState extends State<OverlayPage> {
             ),
             Text(
               _dragLocked ? '已锁定：拖动用于滚动弹幕' : '未锁定：拖动会移动悬浮窗',
+              style: TextStyle(color: palette.secondary, fontSize: label),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    '点击穿透',
+                    style: TextStyle(color: palette.chrome, fontSize: label),
+                  ),
+                ),
+                Switch(
+                  value: _clickThrough,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onChanged: (bool _) => unawaited(_toggleClickThrough()),
+                ),
+              ],
+            ),
+            Text(
+              _clickThrough ? '已开启：点击落到下层画面，窗内无法操作' : '开启后点击可落到下层画面（窗内交互会失效）',
               style: TextStyle(color: palette.secondary, fontSize: label),
             ),
             const SizedBox(height: 4),
@@ -699,17 +790,16 @@ class _OverlayPageState extends State<OverlayPage> {
     double fontSize,
     String text,
     VoidCallback? onPressed,
-  ) =>
-      TextButton(
-        onPressed: onPressed,
-        style: TextButton.styleFrom(
-          foregroundColor: palette.chrome,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-        child: Text(text, style: TextStyle(fontSize: fontSize)),
-      );
+  ) => TextButton(
+    onPressed: onPressed,
+    style: TextButton.styleFrom(
+      foregroundColor: palette.chrome,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      minimumSize: Size.zero,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+    child: Text(text, style: TextStyle(fontSize: fontSize)),
+  );
 
   /// 菜单里的一行滑杆（标题 + 滑杆），实时生效。
   Widget _menuSlider(
@@ -721,37 +811,39 @@ class _OverlayPageState extends State<OverlayPage> {
     double max,
     int divisions,
     ValueChanged<double> onChanged,
-  ) =>
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(title, style: TextStyle(color: palette.chrome, fontSize: fontSize)),
-          SliderTheme(
-            data: SliderThemeData(
-              trackHeight: 2,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-            ),
-            child: Slider(
-              value: value.clamp(min, max),
-              min: min,
-              max: max,
-              divisions: divisions <= 0 ? null : divisions,
-              onChanged: onChanged,
-            ),
-          ),
-        ],
-      );
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      Text(
+        title,
+        style: TextStyle(color: palette.chrome, fontSize: fontSize),
+      ),
+      SliderTheme(
+        data: SliderThemeData(
+          trackHeight: 2,
+          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+          overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+        ),
+        child: Slider(
+          value: value.clamp(min, max),
+          min: min,
+          max: max,
+          divisions: divisions <= 0 ? null : divisions,
+          onChanged: onChanged,
+        ),
+      ),
+    ],
+  );
 
   Widget _buildPlaceholder() => Center(
-        child: Text(
-          '等待配置',
-          style: TextStyle(
-            color: OverlayPalette.of(_lightTheme).secondary,
-            fontSize: 12,
-          ),
-        ),
-      );
+    child: Text(
+      '等待配置',
+      style: TextStyle(
+        color: OverlayPalette.of(_lightTheme).secondary,
+        fontSize: 12,
+      ),
+    ),
+  );
 
   /// 切换某栏的焦点态（prd F7）：已放大则还原，否则放大该栏。
   void _toggleFocus(int index) {
@@ -806,6 +898,49 @@ class _OverlayPageState extends State<OverlayPage> {
     _reportState();
   }
 
+  /// 悬浮球菜单里的「点击穿透」开关。
+  ///
+  /// 开启后窗口立刻不再接收触摸，窗内任何按钮都点不到，因此先把提示读完再生效；
+  /// 关闭入口只保留通知栏按钮与主 App 设置页（窗内已点不到）。
+  Future<void> _toggleClickThrough() async {
+    if (_clickThrough) {
+      _setClickThrough(false);
+      return;
+    }
+    await _showNotice(
+      '开启点击穿透',
+      '开启后悬浮窗不再接收触摸，点击会直接落到下层画面。\n\n'
+          '此时窗内菜单、列表滚动与长按调透明度都会失效，'
+          '可下拉通知栏点「关闭点击穿透」，或回到主 App 设置页关闭。',
+    );
+    if (!mounted) return;
+    _setClickThrough(true);
+  }
+
+  /// 切换点击穿透：更新本地开关、记待落盘增量、同步窗口 flag 并回报主 App。
+  void _setClickThrough(bool value) {
+    if (value == _clickThrough) return;
+    setState(() {
+      _clickThrough = value;
+      // 穿透生效后菜单点不到，先收起，回来时是干净状态。
+      _menuOpen = false;
+      _mergePatch(clickThrough: value);
+    });
+    unawaited(_applyClickThrough(value));
+    _reportState();
+  }
+
+  /// 把穿透状态同步到窗口 flag（插件 updateFlag，只在悬浮窗引擎注册了该通道）。
+  Future<void> _applyClickThrough(bool value) async {
+    try {
+      await FlutterScreenOverlay.updateFlag(
+        value ? OverlayFlag.clickThrough : OverlayFlag.defaultFlag,
+      );
+    } on Object catch (exception) {
+      debugPrint('切换点击穿透失败: $exception');
+    }
+  }
+
   /// 合并一次待落盘的偏好增量（同字段以最新值为准）。
   void _mergePatch({
     double? opacity,
@@ -814,6 +949,7 @@ class _OverlayPageState extends State<OverlayPage> {
     double? windowHeight,
     bool? dragLocked,
     int? ballCorner,
+    bool? clickThrough,
   }) {
     final OverlayPrefsPatch base = _pendingPatch ?? const OverlayPrefsPatch();
     _pendingPatch = OverlayPrefsPatch(
@@ -823,6 +959,7 @@ class _OverlayPageState extends State<OverlayPage> {
       windowHeight: windowHeight ?? base.windowHeight,
       dragLocked: dragLocked ?? base.dragLocked,
       ballCorner: ballCorner ?? base.ballCorner,
+      clickThrough: clickThrough ?? base.clickThrough,
     );
   }
 
@@ -989,19 +1126,7 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 悬浮窗内的轻提示（悬浮窗没有 Scaffold，用弹窗代替 SnackBar）。
   Future<void> _showNotice(String title, String message) async {
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
+    await showOverlayNotice(context, title, message);
   }
 
   /// 悬浮球菜单里的「关闭悬浮窗」：先卸载各栏断开连接，再关窗。
@@ -1039,19 +1164,20 @@ class _OverlayPageState extends State<OverlayPage> {
     final int focusRow = focus == null ? -1 : focus ~/ columns;
     final int focusColumn = focus == null ? -1 : focus % columns;
 
-    int rowFlex(int row) => focus == null
-        ? 1
-        : (row == focusRow ? (hide ? 100 : 3) : 1);
-    int columnFlex(int row, int column) => focus != null &&
-            row == focusRow &&
-            column == focusColumn
+    int rowFlex(int row) =>
+        focus == null ? 1 : (row == focusRow ? (hide ? 100 : 3) : 1);
+    int columnFlex(int row, int column) =>
+        focus != null && row == focusRow && column == focusColumn
         ? (hide ? 100 : 3)
         : 1;
 
     /// 非焦点栏在「隐藏」档下保留在树上但不占空间，连接与缓存照旧。
     Widget paneAt(int index) {
-      final Widget pane =
-          _buildPane(index: index, webRid: _webRids[index], palette: palette);
+      final Widget pane = _buildPane(
+        index: index,
+        webRid: _webRids[index],
+        palette: palette,
+      );
       if (focus != null && hide && index != focus) {
         return Visibility(
           visible: false,
@@ -1066,8 +1192,7 @@ class _OverlayPageState extends State<OverlayPage> {
     return Column(
       children: <Widget>[
         for (int row = 0; row < rows; row++) ...<Widget>[
-          if (row > 0)
-            Divider(height: 1, thickness: 1, color: palette.divider),
+          if (row > 0) Divider(height: 1, thickness: 1, color: palette.divider),
           Expanded(
             flex: rowFlex(row),
             child: Row(
@@ -1121,6 +1246,7 @@ class _OverlayPageState extends State<OverlayPage> {
       onOpacityChanged: (double value) => _setPaneOpacity(index, value),
       onDragLockChanged: _setDragLock,
       onSwitchRoom: (String next) => _rebindPane(index, next),
+      onFilterChanged: _onPaneFilterChanged,
       onReport: _onPaneReport,
     );
   }
@@ -1143,6 +1269,7 @@ class _OverlayPane extends StatefulWidget {
     required this.onOpacityChanged,
     required this.onDragLockChanged,
     required this.onSwitchRoom,
+    required this.onFilterChanged,
     required this.onReport,
     this.textColor,
     this.onToggleFocus,
@@ -1193,6 +1320,10 @@ class _OverlayPane extends StatefulWidget {
   /// 本栏改绑回调：由悬浮窗页统一改 `_webRids` 并回报主 App。
   final ValueChanged<String> onSwitchRoom;
 
+  /// 弹幕行菜单里改了过滤偏好（屏蔽用户 / 加入屏蔽词）后回调，
+  /// 由悬浮窗页刷新各栏展示并回报主 App 落盘。
+  final ValueChanged<FilterPrefs> onFilterChanged;
+
   final void Function(int index, _PaneReport report) onReport;
 
   @override
@@ -1204,8 +1335,9 @@ class _OverlayPaneState extends State<_OverlayPane> {
   /// 这样在设置里改屏蔽词 / 类型后，已收到的弹幕也会立刻按新口径生效。
   final List<DanmakuEvent> _raw = <DanmakuEvent>[];
   final ScrollController _scrollController = ScrollController();
-  late final DanmakuAutoScroller _autoScroller =
-      DanmakuAutoScroller(_scrollController)..speed = widget.scrollSpeed;
+  late final DanmakuAutoScroller _autoScroller = DanmakuAutoScroller(
+    _scrollController,
+  )..speed = widget.scrollSpeed;
 
   StreamSubscription<LiveSessionStage>? _stageSubscription;
   StreamSubscription<DanmakuEvent>? _danmuSubscription;
@@ -1239,17 +1371,16 @@ class _OverlayPaneState extends State<_OverlayPane> {
   OverlayPalette get _palette => widget.palette;
 
   /// 普通弹幕正文颜色：单栏覆盖优先（prd F5），否则用当前皮肤默认色。
-  Color get _bodyColor => widget.textColor == null
-      ? _palette.body
-      : Color(widget.textColor!);
+  Color get _bodyColor =>
+      widget.textColor == null ? _palette.body : Color(widget.textColor!);
 
   /// 按当前过滤口径派生的可见列表（prd F10 / F13）。
   List<DanmakuEvent> get _visible => <DanmakuEvent>[
-        for (final DanmakuEvent event in _raw)
-          if (isListKind(event.kind, widget.filter) &&
-              !isBlockedBy(event, widget.filter))
-            event,
-      ];
+    for (final DanmakuEvent event in _raw)
+      if (isListKind(event.kind, widget.filter) &&
+          !isBlockedBy(event, widget.filter))
+        event,
+  ];
 
   @override
   void initState() {
@@ -1293,6 +1424,62 @@ class _OverlayPaneState extends State<_OverlayPane> {
       _backtracking = false;
     });
     _autoScroller.jumpToLatest();
+  }
+
+  /// 单条弹幕的点击菜单：复制弹幕 / 复制 userId / 屏蔽该用户 / 加入屏蔽词。
+  ///
+  /// 判重下沉到弹幕行而不是整栏：栏级单击已用于双击暂停与长按调透明度，
+  /// 行级 onTap 与它们共存（单击需等双击判定超时，略有延迟）。
+  Future<void> _showEventMenu(DanmakuEvent event) async {
+    final String userId = event.user.userId.trim();
+    final String? action = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => SimpleDialog(
+        title: Text(event.text, maxLines: 3, overflow: TextOverflow.ellipsis),
+        children: <Widget>[
+          _eventMenuAction('copyText', '复制弹幕'),
+          if (userId.isNotEmpty) _eventMenuAction('copyUser', '复制 userId'),
+          if (userId.isNotEmpty) _eventMenuAction('blockUser', '屏蔽该用户'),
+          _eventMenuAction('blockKeyword', '加入屏蔽词'),
+        ],
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'copyText':
+        await _copy(event.text);
+      case 'copyUser':
+        await _copy(userId);
+      case 'blockUser':
+        widget.onFilterChanged(withBlockedUser(widget.filter, userId));
+        await _notice(
+          '已屏蔽该用户',
+          '${event.user.nickName}（$userId）已加入屏蔽名单，可在主 App 设置页管理。',
+        );
+      case 'blockKeyword':
+        widget.onFilterChanged(withBlockedKeyword(widget.filter, event.text));
+        await _notice('已加入屏蔽词', '「${event.text}」已加入屏蔽词，可在主 App 设置页管理。');
+    }
+  }
+
+  /// 弹幕行菜单里的一项；点击后把动作标识回传给 [_showEventMenu]。
+  Widget _eventMenuAction(String value, String label) => SimpleDialogOption(
+    onPressed: () => Navigator.of(context).pop(value),
+    child: Text(label),
+  );
+
+  /// 请主 App 代写剪贴板：悬浮窗引擎没有注册平台插件，`Clipboard` 在这里不可用。
+  Future<void> _copy(String text) async {
+    if (text.isEmpty) return;
+    await FlutterScreenOverlay.shareData(OverlayClipboard(text).toJson());
+    if (!mounted) return;
+    await _notice('已复制到剪贴板', text);
+  }
+
+  /// 栏内轻提示（悬浮窗没有 Scaffold，用弹窗代替 SnackBar）。
+  Future<void> _notice(String title, String message) async {
+    if (!mounted) return;
+    await showOverlayNotice(context, title, message);
   }
 
   /// 长按开始：记下起始透明度并临时关掉窗口拖动（prd F21）。
@@ -1350,8 +1537,10 @@ class _OverlayPaneState extends State<_OverlayPane> {
     });
     // 房间统计只用来更新在线人数、不进列表，因此过滤时不能挡掉。
     _danmuSubscription = session.danmu
-        .where((DanmakuEvent event) =>
-            event.isDisplayable && isStreamRelevant(event.kind))
+        .where(
+          (DanmakuEvent event) =>
+              event.isDisplayable && isStreamRelevant(event.kind),
+        )
         .listen(_onEvent);
     await session.start();
     if (!mounted) return;
@@ -1506,15 +1695,13 @@ class _OverlayPaneState extends State<_OverlayPane> {
           if (widget.roomOptions.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(right: 2),
-              child: Icon(
-                Icons.swap_horiz,
-                size: 13,
-                color: palette.secondary,
-              ),
+              child: Icon(Icons.swap_horiz, size: 13, color: palette.secondary),
             ),
           Text(
             // 已连上且有在线数据时右上是人数；否则退回连接状态，保证能看出当前所处阶段。
-            _online > 0 ? '在线 ${formatOnlineCount(_online)}' : _stageText(_stage),
+            _online > 0
+                ? '在线 ${formatOnlineCount(_online)}'
+                : _stageText(_stage),
             style: labelStyle,
           ),
           // 焦点模式（prd F7）：放大本栏 / 还原；单栏布局下没有其它栏可让位，不显示。
@@ -1568,14 +1755,14 @@ class _OverlayPaneState extends State<_OverlayPane> {
 
   /// 连接状态的短文本（prd F6：栏目标识需含连接状态）。
   String _stageText(LiveSessionStage stage) => switch (stage) {
-        LiveSessionStage.idle => _bound ? '未连接' : '未绑定',
-        LiveSessionStage.resolvingRoom => '解析房间…',
-        LiveSessionStage.signing => '签名中…',
-        LiveSessionStage.connecting => '连接中…',
-        LiveSessionStage.live => '已连接',
-        LiveSessionStage.offline => '未开播',
-        LiveSessionStage.error => '异常',
-      };
+    LiveSessionStage.idle => _bound ? '未连接' : '未绑定',
+    LiveSessionStage.resolvingRoom => '解析房间…',
+    LiveSessionStage.signing => '签名中…',
+    LiveSessionStage.connecting => '连接中…',
+    LiveSessionStage.live => '已连接',
+    LiveSessionStage.offline => '未开播',
+    LiveSessionStage.error => '异常',
+  };
 
   Widget _buildEventList() {
     final OverlayPalette palette = _palette;
@@ -1625,8 +1812,10 @@ class _OverlayPaneState extends State<_OverlayPane> {
                   borderRadius: BorderRadius.circular(12),
                   onTap: _backToLatest,
                   child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 3,
+                    ),
                     child: Text(
                       '回到最新',
                       style: TextStyle(
@@ -1645,19 +1834,19 @@ class _OverlayPaneState extends State<_OverlayPane> {
 
   /// 手势调透明度时的数值胶囊（prd F21）。
   Widget _buildOpacityHud() => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-        decoration: BoxDecoration(
-          color: _palette.isLight ? Colors.white70 : Colors.black54,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          '透明度 ${clampOverlayOpacity(widget.opacity).toStringAsFixed(2)}',
-          style: TextStyle(
-            color: _palette.chrome,
-            fontSize: smallerFontSize(widget.fontSize, 2),
-          ),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+    decoration: BoxDecoration(
+      color: _palette.isLight ? Colors.white70 : Colors.black54,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Text(
+      '透明度 ${clampOverlayOpacity(widget.opacity).toStringAsFixed(2)}',
+      style: TextStyle(
+        color: _palette.chrome,
+        fontSize: smallerFontSize(widget.fontSize, 2),
+      ),
+    ),
+  );
 
   /// 底部固定一行：最新一条进场信息（昵称 + 荣誉等级 + 灯牌等级 + 进场文案）。
   Widget _buildEntryBanner(DanmakuEvent event) {
@@ -1710,65 +1899,71 @@ class _OverlayPaneState extends State<_OverlayPane> {
 
   /// 单条弹幕：荣誉等级 + 灯牌等级 + 昵称 + 内容；
   /// 飘屏 / 特权弹幕带类型前缀并整体着色，与普通弹幕区分。
+  ///
+  /// 单击弹出该条的功能菜单（复制 / 屏蔽）；滑动与双击暂停由上层手势接管。
   Widget _buildEventTile(DanmakuEvent event) {
     final OverlayPalette palette = _palette;
     final DanmakuUser user = event.user;
     final String? mark = danmakuTypeLabel(event.kind);
     final Color? markColor = palette.typeColor(event.kind);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      child: Text.rich(
-        TextSpan(
-          style: TextStyle(fontSize: widget.fontSize),
-          children: <InlineSpan>[
-            if (mark != null && markColor != null)
-              TextSpan(
-                text: '$mark ',
-                style: TextStyle(
-                  color: markColor,
-                  fontSize: smallerFontSize(widget.fontSize, 2),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => unawaited(_showEventMenu(event)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: Text.rich(
+          TextSpan(
+            style: TextStyle(fontSize: widget.fontSize),
+            children: <InlineSpan>[
+              if (mark != null && markColor != null)
+                TextSpan(
+                  text: '$mark ',
+                  style: TextStyle(
+                    color: markColor,
+                    fontSize: smallerFontSize(widget.fontSize, 2),
+                  ),
                 ),
-              ),
-            // 等级与灯牌前置到昵称前，昵称后紧跟弹幕内容。
-            if (user.level > 0)
-              TextSpan(
-                // 荣誉等级：level > 0 才显示（大量用户无荣誉等级）
-                text: 'Lv.${user.level} ',
-                style: TextStyle(
-                  color: palette.levelColor,
-                  fontSize: smallerFontSize(widget.fontSize, 2),
+              // 等级与灯牌前置到昵称前，昵称后紧跟弹幕内容。
+              if (user.level > 0)
+                TextSpan(
+                  // 荣誉等级：level > 0 才显示（大量用户无荣誉等级）
+                  text: 'Lv.${user.level} ',
+                  style: TextStyle(
+                    color: palette.levelColor,
+                    fontSize: smallerFontSize(widget.fontSize, 2),
+                  ),
                 ),
-              ),
-            if (user.fanLevel > 0)
-              TextSpan(
-                // 灯牌等级：优先取 user.fans_club.data.level
-                text: '灯牌${user.fanLevel} ',
-                style: TextStyle(
-                  color: palette.fanLevelColor,
-                  fontSize: smallerFontSize(widget.fontSize, 2),
+              if (user.fanLevel > 0)
+                TextSpan(
+                  // 灯牌等级：优先取 user.fans_club.data.level
+                  text: '灯牌${user.fanLevel} ',
+                  style: TextStyle(
+                    color: palette.fanLevelColor,
+                    fontSize: smallerFontSize(widget.fontSize, 2),
+                  ),
                 ),
-              ),
-            if (user.nickName.isNotEmpty)
-              TextSpan(
-                text: '${user.nickName}: ',
-                style: TextStyle(
-                  color: palette.userAccent,
-                  fontWeight: FontWeight.bold,
+              if (user.nickName.isNotEmpty)
+                TextSpan(
+                  text: '${user.nickName}: ',
+                  style: TextStyle(
+                    color: palette.userAccent,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-            // 正文按高亮词切分（prd F11）：命中片段用高亮样式。
-            for (final HighlightSegment segment in splitHighlights(
-              event.text,
-              widget.filter.highlightKeywords,
-              regex: widget.filter.regexEnabled,
-            ))
-              TextSpan(
-                text: segment.text,
-                style: segment.highlighted
-                    ? palette.highlightStyle
-                    : TextStyle(color: markColor ?? _bodyColor),
-              ),
-          ],
+              // 正文按高亮词切分（prd F11）：命中片段用高亮样式。
+              for (final HighlightSegment segment in splitHighlights(
+                event.text,
+                widget.filter.highlightKeywords,
+                regex: widget.filter.regexEnabled,
+              ))
+                TextSpan(
+                  text: segment.text,
+                  style: segment.highlighted
+                      ? palette.highlightStyle
+                      : TextStyle(color: markColor ?? _bodyColor),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1893,9 +2088,9 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
 
   /// 未绑定的候选房间，用于「添加栏位」。
   List<RoomOption> get _unbound => <RoomOption>[
-        for (final RoomOption option in widget.options)
-          if (!_webRids.contains(option.webRid)) option,
-      ];
+    for (final RoomOption option in widget.options)
+      if (!_webRids.contains(option.webRid)) option,
+  ];
 
   String _label(String webRid) {
     for (final RoomOption option in widget.options) {
@@ -1907,15 +2102,14 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
   Future<String?> _pickRoom({
     required List<RoomOption> candidates,
     required String current,
-  }) =>
-      showDialog<String>(
-        context: context,
-        builder: (BuildContext context) => _RoomPickerDialog(
-          options: candidates,
-          current: current,
-          fontSize: widget.fontSize,
-        ),
-      );
+  }) => showDialog<String>(
+    context: context,
+    builder: (BuildContext context) => _RoomPickerDialog(
+      options: candidates,
+      current: current,
+      fontSize: widget.fontSize,
+    ),
+  );
 
   /// 换绑某栏（候选是全部主播，方便换回来）。
   Future<void> _switch(int index) async {
@@ -1982,10 +2176,15 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
                             onPressed: () => _switch(index),
                             style: TextButton.styleFrom(
                               minimumSize: Size.zero,
-                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            child: Text('切换', style: TextStyle(fontSize: subSize)),
+                            child: Text(
+                              '切换',
+                              style: TextStyle(fontSize: subSize),
+                            ),
                           ),
                           IconButton(
                             tooltip: '移除本栏',

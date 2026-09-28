@@ -15,12 +15,14 @@ void main() {
   group('OverlayConfig', () {
     test('经 JSON 往返后保留各栏房间、opacity、fontSize 与 scrollSpeed', () {
       final OverlayConfig? parsed = OverlayConfig.tryParse(
-        roundTrip(const OverlayConfig(
-          webRids: <String>['735', '736', '737', '738'],
-          opacity: 0.6,
-          fontSize: 18,
-          scrollSpeed: 1.75,
-        ).toJson()),
+        roundTrip(
+          const OverlayConfig(
+            webRids: <String>['735', '736', '737', '738'],
+            opacity: 0.6,
+            fontSize: 18,
+            scrollSpeed: 1.75,
+          ).toJson(),
+        ),
       );
       expect(parsed, isNotNull);
       expect(parsed!.webRids, <String>['735', '736', '737', '738']);
@@ -62,10 +64,7 @@ void main() {
       );
       expect(
         OverlayConfig.tryParse(
-          roundTrip(<String, Object?>{
-            'type': 'config',
-            'webRids': <String>[],
-          }),
+          roundTrip(<String, Object?>{'type': 'config', 'webRids': <String>[]}),
         ),
         isNull,
       );
@@ -141,8 +140,9 @@ void main() {
       final List<int> counts = <int>[0, 1, 2, 4, 6, 9];
       double previousArea = 0;
       for (final int count in counts) {
-        final ({double width, double height}) size =
-            recommendedOverlaySize(count);
+        final ({double width, double height}) size = recommendedOverlaySize(
+          count,
+        );
         expect(clampOverlayWidth(size.width), size.width);
         expect(clampOverlayHeight(size.height), size.height);
         expect(size.width * size.height, greaterThanOrEqualTo(previousArea));
@@ -194,11 +194,13 @@ void main() {
   group('OverlayStyle', () {
     test('经 JSON 往返后保留透明度、字号与滚动速度，并把越界值收敛到范围', () {
       final OverlayStyle? parsed = OverlayStyle.tryParse(
-        roundTrip(const OverlayStyle(
-          opacity: 0.5,
-          fontSize: 20,
-          scrollSpeed: 2.5,
-        ).toJson()),
+        roundTrip(
+          const OverlayStyle(
+            opacity: 0.5,
+            fontSize: 20,
+            scrollSpeed: 2.5,
+          ).toJson(),
+        ),
       );
       expect(parsed!.opacity, 0.5);
       expect(parsed.fontSize, 20);
@@ -250,11 +252,13 @@ void main() {
   group('PaneStyle', () {
     test('经 JSON 往返后保留字号、透明度与字色，越界值收敛', () {
       final PaneStyle? parsed = PaneStyle.tryParse(
-        roundTrip(const PaneStyle(
-          fontSize: 18,
-          opacity: 0.4,
-          textColor: 0xFFFFEB3B,
-        ).toJson()),
+        roundTrip(
+          const PaneStyle(
+            fontSize: 18,
+            opacity: 0.4,
+            textColor: 0xFFFFEB3B,
+          ).toJson(),
+        ),
       );
       expect(parsed, isNotNull);
       expect(parsed!.fontSize, 18);
@@ -303,23 +307,25 @@ void main() {
 
     test('OverlayConfig / OverlayStyle 经 JSON 往返后保留 paneStyles', () {
       final OverlayConfig? config = OverlayConfig.tryParse(
-        roundTrip(const OverlayConfig(
-          webRids: <String>['735', '736'],
-          paneStyles: <String, PaneStyle>{
-            '735': PaneStyle(fontSize: 20, textColor: 0xFF00FF00),
-          },
-        ).toJson()),
+        roundTrip(
+          const OverlayConfig(
+            webRids: <String>['735', '736'],
+            paneStyles: <String, PaneStyle>{
+              '735': PaneStyle(fontSize: 20, textColor: 0xFF00FF00),
+            },
+          ).toJson(),
+        ),
       );
       expect(config!.paneStyles['735']!.fontSize, 20);
       expect(config.paneStyles['735']!.textColor, 0xFF00FF00);
 
       final OverlayStyle? style = OverlayStyle.tryParse(
-        roundTrip(const OverlayStyle(
-          opacity: 0.5,
-          paneStyles: <String, PaneStyle>{
-            '736': PaneStyle(opacity: 0.3),
-          },
-        ).toJson()),
+        roundTrip(
+          const OverlayStyle(
+            opacity: 0.5,
+            paneStyles: <String, PaneStyle>{'736': PaneStyle(opacity: 0.3)},
+          ).toJson(),
+        ),
       );
       expect(style!.paneStyles['736']!.opacity, 0.3);
       // 缺 paneStyles 的旧消息回落空表，不会被当成非法值。
@@ -335,12 +341,14 @@ void main() {
   group('OverlayStatus', () {
     test('经 JSON 往返后保留 stage、received、webRid、error', () {
       final OverlayStatus? parsed = OverlayStatus.tryParse(
-        roundTrip(const OverlayStatus(
-          stage: LiveSessionStage.live,
-          received: 42,
-          webRid: '735',
-          error: 'boom',
-        ).toJson()),
+        roundTrip(
+          const OverlayStatus(
+            stage: LiveSessionStage.live,
+            received: 42,
+            webRid: '735',
+            error: 'boom',
+          ).toJson(),
+        ),
       );
       expect(parsed, isNotNull);
       expect(parsed!.stage, LiveSessionStage.live);
@@ -353,12 +361,14 @@ void main() {
 
     test('权限撤销标记经 JSON 往返后保留', () {
       final OverlayStatus? parsed = OverlayStatus.tryParse(
-        roundTrip(const OverlayStatus(
-          stage: LiveSessionStage.error,
-          received: 0,
-          error: '悬浮窗权限已被撤销，已断开全部连接',
-          permissionRevoked: true,
-        ).toJson()),
+        roundTrip(
+          const OverlayStatus(
+            stage: LiveSessionStage.error,
+            received: 0,
+            error: '悬浮窗权限已被撤销，已断开全部连接',
+            permissionRevoked: true,
+          ).toJson(),
+        ),
       );
       expect(parsed!.permissionRevoked, isTrue);
       expect(parsed.stage, LiveSessionStage.error);
@@ -366,11 +376,13 @@ void main() {
 
     test('各栏最新绑定经 state 回报，缺省回落空表（prd F8 / F15）', () {
       final OverlayStatus? parsed = OverlayStatus.tryParse(
-        roundTrip(const OverlayStatus(
-          stage: LiveSessionStage.live,
-          received: 3,
-          webRids: <String>['735', '737'],
-        ).toJson()),
+        roundTrip(
+          const OverlayStatus(
+            stage: LiveSessionStage.live,
+            received: 3,
+            webRids: <String>['735', '737'],
+          ).toJson(),
+        ),
       );
       expect(parsed!.webRids, <String>['735', '737']);
 
@@ -404,10 +416,12 @@ void main() {
   group('RoomOption / OverlayRooms', () {
     test('候选房间经 JSON 往返后保留直播间号、展示名与分组（prd F14）', () {
       final List<RoomOption>? parsed = OverlayRooms.tryParse(
-        roundTrip(const OverlayRooms(<RoomOption>[
-          RoomOption(webRid: '735', name: '老王', group: '关注'),
-          RoomOption(webRid: '736'),
-        ]).toJson()),
+        roundTrip(
+          const OverlayRooms(<RoomOption>[
+            RoomOption(webRid: '735', name: '老王', group: '关注'),
+            RoomOption(webRid: '736'),
+          ]).toJson(),
+        ),
       );
       expect(parsed, isNotNull);
       expect(parsed!.length, 2);
@@ -432,13 +446,15 @@ void main() {
 
     test('config 携带候选房间，缺省回落空表', () {
       final OverlayConfig? config = OverlayConfig.tryParse(
-        roundTrip(const OverlayConfig(
-          webRids: <String>['735'],
-          roomOptions: <RoomOption>[
-            RoomOption(webRid: '735', name: '老王', group: '关注'),
-            RoomOption(webRid: '736', name: '小李'),
-          ],
-        ).toJson()),
+        roundTrip(
+          const OverlayConfig(
+            webRids: <String>['735'],
+            roomOptions: <RoomOption>[
+              RoomOption(webRid: '735', name: '老王', group: '关注'),
+              RoomOption(webRid: '736', name: '小李'),
+            ],
+          ).toJson(),
+        ),
       );
       expect(config!.roomOptions.length, 2);
       expect(config.roomOptions[1].name, '小李');
@@ -464,12 +480,14 @@ void main() {
 
     test('OverlayStyle 经 JSON 往返保留皮肤、栏目标识与焦点模式', () {
       final OverlayStyle? parsed = OverlayStyle.tryParse(
-        roundTrip(const OverlayStyle(
-          opacity: 0.5,
-          lightTheme: true,
-          showTitleBar: false,
-          focusBehavior: focusBehaviorHide,
-        ).toJson()),
+        roundTrip(
+          const OverlayStyle(
+            opacity: 0.5,
+            lightTheme: true,
+            showTitleBar: false,
+            focusBehavior: focusBehaviorHide,
+          ).toJson(),
+        ),
       );
       expect(parsed!.lightTheme, isTrue);
       expect(parsed.showTitleBar, isFalse);
@@ -499,12 +517,14 @@ void main() {
 
     test('OverlayConfig 经 JSON 往返保留皮肤、栏目标识与焦点模式，缺省回落默认值', () {
       final OverlayConfig? parsed = OverlayConfig.tryParse(
-        roundTrip(const OverlayConfig(
-          webRids: <String>['735'],
-          lightTheme: true,
-          showTitleBar: false,
-          focusBehavior: focusBehaviorHide,
-        ).toJson()),
+        roundTrip(
+          const OverlayConfig(
+            webRids: <String>['735'],
+            lightTheme: true,
+            showTitleBar: false,
+            focusBehavior: focusBehaviorHide,
+          ).toJson(),
+        ),
       );
       expect(parsed!.lightTheme, isTrue);
       expect(parsed.showTitleBar, isFalse);
@@ -525,12 +545,16 @@ void main() {
   group('过滤偏好（prd F10 / F11 / F13）', () {
     test('OverlayFilter 经 JSON 往返保留关键词、类型与正则开关', () {
       final FilterPrefs? parsed = OverlayFilter.tryParse(
-        roundTrip(const OverlayFilter(FilterPrefs(
-          blockedKeywords: <String>[r'^6{3,}$'],
-          blockedUsers: <String>['张三'],
-          highlightKeywords: <String>[r'(抽奖|福利)'],
-          regexEnabled: true,
-        )).toJson()),
+        roundTrip(
+          const OverlayFilter(
+            FilterPrefs(
+              blockedKeywords: <String>[r'^6{3,}$'],
+              blockedUsers: <String>['张三'],
+              highlightKeywords: <String>[r'(抽奖|福利)'],
+              regexEnabled: true,
+            ),
+          ).toJson(),
+        ),
       );
       expect(parsed, isNotNull);
       expect(parsed!.blockedKeywords, <String>[r'^6{3,}$']);
@@ -612,10 +636,9 @@ void main() {
 
     test('config 经 JSON 往返保留吸附角，缺省回落左上角', () {
       final OverlayConfig? parsed = OverlayConfig.tryParse(
-        roundTrip(const OverlayConfig(
-          webRids: <String>['735'],
-          ballCorner: 3,
-        ).toJson()),
+        roundTrip(
+          const OverlayConfig(webRids: <String>['735'], ballCorner: 3).toJson(),
+        ),
       );
       expect(parsed!.ballCorner, 3);
       final OverlayConfig? legacy = OverlayConfig.tryParse(
@@ -640,12 +663,120 @@ void main() {
   });
 
   test('close 指令识别，主 App 构造的关闭载荷可被悬浮窗识别', () {
-    expect(isOverlayCloseMessage(roundTrip(buildOverlayCloseMessage())), isTrue);
-    expect(isOverlayCloseMessage(roundTrip(<String, Object?>{'type': 'close'})),
-        isTrue);
     expect(
-        isOverlayCloseMessage(roundTrip(<String, Object?>{'type': 'config'})),
-        isFalse);
+      isOverlayCloseMessage(roundTrip(buildOverlayCloseMessage())),
+      isTrue,
+    );
+    expect(
+      isOverlayCloseMessage(roundTrip(<String, Object?>{'type': 'close'})),
+      isTrue,
+    );
+    expect(
+      isOverlayCloseMessage(roundTrip(<String, Object?>{'type': 'config'})),
+      isFalse,
+    );
     expect(isOverlayCloseMessage(null), isFalse);
+  });
+
+  group('点击穿透（prd F2 延伸）', () {
+    test('config / style 经 JSON 往返保留穿透状态，缺省为关闭', () {
+      final OverlayConfig? config = OverlayConfig.tryParse(
+        roundTrip(
+          const OverlayConfig(
+            webRids: <String>['735'],
+            clickThrough: true,
+          ).toJson(),
+        ),
+      );
+      expect(config!.clickThrough, isTrue);
+      final OverlayConfig? legacy = OverlayConfig.tryParse(
+        roundTrip(const OverlayConfig(webRids: <String>['735']).toJson()),
+      );
+      expect(legacy!.clickThrough, isFalse);
+
+      final OverlayStyle? style = OverlayStyle.tryParse(
+        roundTrip(
+          const OverlayStyle(opacity: 0.5, clickThrough: true).toJson(),
+        ),
+      );
+      expect(style!.clickThrough, isTrue);
+      expect(
+        OverlayStyle.tryParse(
+          roundTrip(const OverlayStyle(opacity: 0.5).toJson()),
+        )!.clickThrough,
+        isFalse,
+      );
+    });
+
+    test('偏好增量携带穿透状态，且不夹带未改动的字段', () {
+      final OverlayPrefsPatch? patch = OverlayPrefsPatch.tryParse(
+        roundTrip(const OverlayPrefsPatch(clickThrough: true).toJson()),
+      );
+      expect(patch!.clickThrough, isTrue);
+      expect(patch.dragLocked, isNull);
+      expect(patch.isEmpty, isFalse);
+    });
+
+    test('原生下发的关闭穿透消息可被悬浮窗解析', () {
+      final OverlayClickThrough? message = OverlayClickThrough.tryParse(
+        roundTrip(const OverlayClickThrough(false).toJson()),
+      );
+      expect(message!.value, isFalse);
+      expect(
+        OverlayClickThrough.tryParse(<String, Object?>{'type': 'clickThrough'}),
+        isNull,
+      );
+      expect(
+        OverlayClickThrough.tryParse(<String, Object?>{
+          'type': 'clickThrough',
+          'value': 'no',
+        }),
+        isNull,
+      );
+    });
+
+    test('复制请求经 JSON 往返保留文本，空文本被丢弃', () {
+      final OverlayClipboard? request = OverlayClipboard.tryParse(
+        roundTrip(const OverlayClipboard('来了').toJson()),
+      );
+      expect(request!.text, '来了');
+      expect(
+        OverlayClipboard.tryParse(
+          roundTrip(const OverlayClipboard('').toJson()),
+        ),
+        isNull,
+      );
+    });
+  });
+
+  group('悬浮窗回传过滤偏好', () {
+    test('state 携带的整份过滤偏好经 JSON 往返后保留（prd F10）', () {
+      final OverlayStatus? status = OverlayStatus.tryParse(
+        roundTrip(
+          const OverlayStatus(
+            stage: LiveSessionStage.live,
+            received: 1,
+            filter: FilterPrefs(
+              blockedUsers: <String>['123'],
+              blockedKeywords: <String>['广告'],
+            ),
+          ).toJson(),
+        ),
+      );
+      expect(status!.filter!.blockedUsers, <String>['123']);
+      expect(status.filter!.blockedKeywords, <String>['广告']);
+    });
+
+    test('未改动过滤偏好时 state 不带上该字段', () {
+      final OverlayStatus? status = OverlayStatus.tryParse(
+        roundTrip(
+          const OverlayStatus(
+            stage: LiveSessionStage.idle,
+            received: 0,
+          ).toJson(),
+        ),
+      );
+      expect(status!.filter, isNull);
+    });
   });
 }
