@@ -1,1 +1,7 @@
 include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    # third_party 下是上游插件源码的内联副本，只为修 Android 侧上行转发缺陷（见 pubspec.yaml
+    # 的 flutter_screen_overlay 注释）。Dart 代码保持上游原样，不按本项目的 lint 规则要求。
+    - third_party/**

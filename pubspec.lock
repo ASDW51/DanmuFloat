@@ -113,10 +113,9 @@ packages:
   flutter_screen_overlay:
     dependency: "direct main"
     description:
-      name: flutter_screen_overlay
-      sha256: "028bcadd79d0d42f2a5d28715b73e807715f4d2203e209050b3c0c9607c21fa2"
-      url: "https://pub.flutter-io.cn"
-    source: hosted
+      path: "third_party/flutter_screen_overlay"
+      relative: true
+    source: path
     version: "1.0.7"
   flutter_secure_storage:
     dependency: "direct main"

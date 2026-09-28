@@ -18,7 +18,13 @@ dependencies:
   # X-MS-STUB 的 md5 计算
   crypto: ^3.0.6
   # 悬浮窗：覆盖在其他 App 之上，前台服务保活（prd F2 / 4.11）
-  flutter_screen_overlay: ^1.0.7
+  #
+  # 走本地内联副本而非 pub 版本：1.0.7 的 OverlayService 转发悬浮窗上行消息时读的是
+  # 进程级静态字段 WindowSetup.messenger，它会被悬浮窗引擎附着插件时覆盖成悬浮窗自己的
+  # 通道，导致消息弹回悬浮窗、主 App 一条都收不到（悬浮窗内偏好增量、栏位换绑、权限撤销
+  # 上报全废）。third_party/ 下的副本在 onCreate 里提前抓取主引擎通道后转发。
+  flutter_screen_overlay:
+    path: third_party/flutter_screen_overlay
   # 主播列表持久化：JSON 文件写入 App 私有目录（design.md 2.1 / 2.3）
   path_provider: ^2.1.4
   flutter_secure_storage: ^11.2.0

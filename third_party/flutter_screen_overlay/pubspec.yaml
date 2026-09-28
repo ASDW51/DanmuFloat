@@ -1,0 +1,28 @@
+name: flutter_screen_overlay
+# 注意：这是 flutter_screen_overlay 1.0.7 的内联副本（不是 pub 依赖），只为修一个 Android 侧缺陷：
+# OverlayService 转发悬浮窗上行消息时读进程级静态字段 WindowSetup.messenger，而该字段会被悬浮窗引擎
+# 附着插件时覆盖，导致消息弹回悬浮窗、主 App 收不到。副本改为在 onCreate 里提前抓取主引擎通道后转发
+# （见 android/.../OverlayService.java 的 upstreamMessenger）。升级上游时需重新套用这处改动。
+description: Flutter plugin for displaying persistent Android overlay windows above other apps. Supports foreground service lifecycle, draggable PiP overlays, and null-intent crash recovery on system-initiated service restarts.
+version: 1.0.7
+homepage: https://github.com/vairagadeharshwardhan/flutter_screen_overlay
+
+environment:
+  sdk: ">=2.16.2 <4.0.0"
+  flutter: ">=2.5.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^1.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: flutter.overlay.window.flutter_overlay_window
+        pluginClass: FlutterOverlayWindowPlugin
