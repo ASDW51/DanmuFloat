@@ -15,6 +15,15 @@ public abstract class WindowSetup {
     static int flag = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
     static int gravity = Gravity.CENTER;
     static BasicMessageChannel<Object> messenger = null;
+    /**
+     * 主引擎上的 overlay_messenger 通道，供 OverlayService 把悬浮窗的上行消息转发回主 App。
+     *
+     * 不能用 [messenger] 代替：那个字段谁最后附着插件就指向谁，悬浮窗引擎附着时会被覆盖成
+     * 悬浮窗自己的通道，转发出去的消息会原路弹回悬浮窗。这个字段由主引擎处理 showOverlay
+     * 时写入（见 FlutterOverlayWindowPlugin#onMethodCall），每次开窗刷新，
+     * 因此既不受字段覆盖影响，也不受悬浮窗引擎缓存复用影响。
+     */
+    static BasicMessageChannel<Object> upstreamMessenger = null;
     static String overlayTitle = "Overlay is activated";
     static String overlayContent = "Tap to edit settings or disable";
     static String positionGravity = "none";

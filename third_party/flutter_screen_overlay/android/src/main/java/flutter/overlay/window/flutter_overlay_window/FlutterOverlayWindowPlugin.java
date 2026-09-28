@@ -104,6 +104,11 @@ public class FlutterOverlayWindowPlugin implements
             WindowSetup.setNotificationVisibility(notificationVisibility);
             WindowSetup.setWakeScreen(Boolean.TRUE.equals(wakeScreen));
 
+            // 记下主引擎的上行出口：此刻正在处理主 App 发来的 showOverlay，messenger 必定属于
+            // 主引擎。OverlayService 转发出悬浮窗上行消息时用它，避免读已被悬浮窗引擎覆盖的
+            // WindowSetup.messenger 而把消息弹回悬浮窗自己。
+            WindowSetup.upstreamMessenger = messenger;
+
             final Intent intent = new Intent(context, OverlayService.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);

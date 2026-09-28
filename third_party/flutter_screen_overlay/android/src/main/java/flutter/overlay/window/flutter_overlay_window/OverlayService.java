@@ -61,8 +61,6 @@ public class OverlayService extends Service implements View.OnTouchListener {
     private FlutterView flutterView;
     private MethodChannel flutterChannel;
     private BasicMessageChannel<Object> overlayMessageChannel;
-    /** 主引擎的 overlay_messenger 通道；在悬浮窗引擎覆盖 WindowSetup.messenger 之前抓取。 */
-    private BasicMessageChannel<Object> upstreamMessenger;
     private int clickableFlag = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
 
@@ -210,10 +208,10 @@ public class OverlayService extends Service implements View.OnTouchListener {
         });
         if (overlayMessageChannel != null) {
             overlayMessageChannel.setMessageHandler((message, reply) -> {
-                // 用建窗时抓下来的主引擎通道转发，不能读 WindowSetup.messenger：
-                // 它此时已被悬浮窗引擎覆盖成自己的通道，会把消息原路弹回悬浮窗。
-                if (upstreamMessenger != null) {
-                    upstreamMessenger.send(message);
+                // 转发到主引擎的上行出口，不能读 WindowSetup.messenger：它此时已被悬浮窗引擎
+                // 覆盖成悬浮窗自己的通道，会把消息原路弹回悬浮窗，主 App 一条都收不到。
+                if (WindowSetup.upstreamMessenger != null) {
+                    WindowSetup.upstreamMessenger.send(message);
                 } else {
                     reply.reply(null);
                 }
@@ -440,14 +438,6 @@ public class OverlayService extends Service implements View.OnTouchListener {
 
     @Override
     public void onCreate() {
-        // 建悬浮窗引擎之前先把主引擎的上行出口抓下来。
-        //
-        // WindowSetup.messenger 是进程级静态字段，谁最后附着插件就指向谁；悬浮窗引擎
-        // 是自动注册插件创建的（下面的 createAndRunEngine），附着时会把该字段覆盖成
-        // 悬浮窗自己的通道。若转发时再读这个字段，消息会被送回悬浮窗引擎自身，主 App
-        // 一条都收不到——悬浮窗内的偏好增量、栏位换绑、权限撤销上报全都依赖这条上行链路。
-        upstreamMessenger = WindowSetup.messenger;
-
         // Get the cached FlutterEngine
         FlutterEngine flutterEngine = FlutterEngineCache.getInstance().get(OverlayConstants.CACHED_TAG);
 
