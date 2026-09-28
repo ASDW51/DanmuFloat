@@ -339,8 +339,10 @@ void main() {
       (setData.arguments as Map<Object?, Object?>)['text'],
       transfer.exportPayload,
     );
-    // 除复制外还另存了一份文件。
-    expect(transfer.exportToFileCalls, 1);
+    // 除复制外还另存了一份文件（优先落系统公共「下载」目录）。
+    expect(transfer.exportToDownloadsCalls, 1);
+    expect(transfer.exportToFileCalls, 0);
+    expect(find.textContaining('下载/danmu_float_backup_'), findsOneWidget);
   });
 
   testWidgets('导入数据：确认后覆盖落盘并回调外层刷新', (WidgetTester tester) async {
@@ -407,6 +409,32 @@ void main() {
     expect(imported, 0);
     expect(find.textContaining('这不是 DanmuFloat 的备份文件'), findsOneWidget);
   });
+
+  testWidgets('导入弹窗按备份格式就地校验：合法提示主播数，非法给红字', (WidgetTester tester) async {
+    _useFullScreen(tester);
+    await tester.pumpWidget(_wrapFull(
+      prefs: const OverlayPrefs(),
+      store: CredentialStore(backend: FakeCredentialBackend()),
+      dataTransfer: FakeDataTransfer(),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('导入数据'));
+    await tester.pumpAndSettle();
+
+    final Finder field = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(field, '{"app":"danmu-float","version":1}');
+    await tester.pumpAndSettle();
+    expect(find.text('备份有效：0 个主播'), findsOneWidget);
+
+    await tester.enterText(field, '{"app":"other","version":1}');
+    await tester.pumpAndSettle();
+    expect(find.text('这不是 DanmuFloat 的备份文件'), findsOneWidget);
+    expect(find.textContaining('备份有效'), findsNothing);
+  });
 }
 
 /// 假的备份器：widget 测试跑在 FakeAsync 下，真实文件 IO 无法完成，
@@ -420,10 +448,17 @@ class FakeDataTransfer implements LocalDataTransfer {
   final String exportPayload;
   final String? importError;
   String? importedRaw;
+  int exportToDownloadsCalls = 0;
   int exportToFileCalls = 0;
 
   @override
   Future<String> exportJson() async => exportPayload;
+
+  @override
+  Future<String?> exportToDownloads(String json) async {
+    exportToDownloadsCalls++;
+    return '下载/${backupFileName(DateTime(2026, 9, 28, 1, 2, 3))}';
+  }
 
   @override
   Future<String?> exportToFile(String json) async {

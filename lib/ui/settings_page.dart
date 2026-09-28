@@ -417,13 +417,13 @@ class _SettingsPageState extends State<SettingsPage> {
           ListTile(
             leading: const Icon(Icons.upload_file_outlined),
             title: const Text('导出数据'),
-            subtitle: const Text('备份主播列表与各项设置，可复制或存成文件'),
+            subtitle: const Text('备份主播列表与各项设置，存到「下载」目录并复制一份'),
             onTap: _exportData,
           ),
           ListTile(
             leading: const Icon(Icons.download_outlined),
             title: const Text('导入数据'),
-            subtitle: const Text('从备份 JSON 恢复主播列表与各项设置（覆盖当前数据）'),
+            subtitle: const Text('从备份文件或粘贴 JSON 恢复（覆盖当前数据）'),
             onTap: _importData,
           ),
           ListTile(
@@ -497,7 +497,8 @@ class _SettingsPageState extends State<SettingsPage> {
     _snack('已清除本地凭证');
   }
 
-  /// 导出数据：读回全部本地配置 → 复制到剪贴板 → 另存一份文件 → 弹窗告知结果。
+  /// 导出数据：读回全部本地配置 → 复制到剪贴板 → 存进公共「下载」目录 →
+  /// 弹窗告知结果。
   Future<void> _exportData() async {
     final String json;
     try {
@@ -508,17 +509,17 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
     await Clipboard.setData(ClipboardData(text: json));
-    final String? path = await _dataTransfer.exportToFile(json);
+    final String? location = await _dataTransfer.exportToDownloads(json);
     if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
         title: const Text('导出完成'),
         content: Text(
-          path == null
+          location == null
               ? '备份已复制到剪贴板（${json.length} 字符）。未能写入本地文件，'
                   '可粘到任意位置自行保存。'
-              : '备份已复制到剪贴板，并另存为文件：\n$path',
+              : '备份已复制到剪贴板，并另存为文件：\n$location',
         ),
         actions: <Widget>[
           FilledButton(
@@ -765,7 +766,10 @@ class _CredentialSectionState extends State<_CredentialSection> {
   }
 }
 
-/// 导入备份弹窗：多行输入 JSON，可从剪贴板一键预填。
+/// 导入备份弹窗：多行输入 JSON，可从文件或剪贴板一键填入。
+///
+/// 填入 / 输入时就按备份格式校验一次（[decodeDataBundle]，不落盘），把「不是本 App
+/// 的备份」「版本过新」这类问题当场说清楚，别等覆盖确认完才报错。
 class _ImportDialog extends StatefulWidget {
   const _ImportDialog();
 
@@ -776,10 +780,22 @@ class _ImportDialog extends StatefulWidget {
 class _ImportDialogState extends State<_ImportDialog> {
   final TextEditingController _controller = TextEditingController();
 
+  /// 校验不通过的原因：非空时在输入框下方红字提示。
+  String? _error;
+
+  /// 校验通过时备份里的主播数，用于给一句「这份备份有效」的确认。
+  int? _rooms;
+
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  /// 填入一段备份文本（来自文件或剪贴板）并就地校验。
+  void _fill(String text) {
+    _controller.text = text;
+    _validate(text);
   }
 
   /// 从剪贴板填入；剪贴板为空时保持原样，不做打扰。
@@ -787,7 +803,36 @@ class _ImportDialogState extends State<_ImportDialog> {
     final ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
     final String text = data?.text ?? '';
     if (text.isEmpty || !mounted) return;
-    setState(() => _controller.text = text);
+    setState(() => _fill(text));
+  }
+
+  /// 从系统文件选择器选一份备份读进来；用户取消时保持原样。
+  Future<void> _pickFile() async {
+    final ({String? text, String? error})? picked = await pickImportTextFile();
+    if (picked == null || !mounted) return;
+    if (picked.text == null) {
+      setState(() {
+        _error = picked.error ?? '未能读取所选文件';
+        _rooms = null;
+      });
+      return;
+    }
+    setState(() => _fill(picked.text!));
+  }
+
+  /// 按备份格式校验一次；空内容不算错误，只是没有可校验的东西。
+  void _validate(String raw) {
+    String? error;
+    int? rooms;
+    if (raw.trim().isNotEmpty) {
+      try {
+        rooms = decodeDataBundle(raw).rooms.length;
+      } on DataTransferException catch (exception) {
+        error = exception.message;
+      }
+    }
+    _error = error;
+    _rooms = rooms;
   }
 
   @override
@@ -800,7 +845,7 @@ class _ImportDialogState extends State<_ImportDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               const Text(
-                '粘贴之前导出的备份 JSON，或从剪贴板一键填入。',
+                '选择之前导出的备份文件，或把备份 JSON 粘贴进来。',
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               const SizedBox(height: 8),
@@ -814,14 +859,37 @@ class _ImportDialogState extends State<_ImportDialog> {
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
+                onChanged: (String value) => setState(() => _validate(value)),
               ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: _paste,
-                  icon: const Icon(Icons.content_paste, size: 18),
-                  label: const Text('从剪贴板粘贴'),
+              if (_error != null) ...<Widget>[
+                const SizedBox(height: 8),
+                Text(
+                  _error!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                 ),
+              ] else if (_rooms != null) ...<Widget>[
+                const SizedBox(height: 8),
+                Text(
+                  '备份有效：$_rooms 个主播',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+              Row(
+                children: <Widget>[
+                  TextButton.icon(
+                    onPressed: _pickFile,
+                    icon: const Icon(Icons.folder_open, size: 18),
+                    label: const Text('从文件选择'),
+                  ),
+                  TextButton.icon(
+                    onPressed: _paste,
+                    icon: const Icon(Icons.content_paste, size: 18),
+                    label: const Text('从剪贴板粘贴'),
+                  ),
+                ],
               ),
             ],
           ),

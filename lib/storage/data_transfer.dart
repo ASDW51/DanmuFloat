@@ -6,6 +6,9 @@
 //
 // 各分区直接沿用已有存储的文件结构（rooms.json / overlay.json / filter.json /
 // theme.json / compliance.json），导入时复用各自的解析函数，避免两套口径走样。
+//
+// 文件的系统级读写（写公共「下载」目录、从文件选择器读入）走原生通道，实现见
+// android/app/src/main/kotlin/.../MainActivity.kt；两条路都不需要存储权限。
 import 'dart:convert';
 import 'dart:io';
 
@@ -17,11 +20,61 @@ import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/storage/theme_store.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// 备份文件的标识与版本：导入时用来判断是不是本 App 的备份。
 const String dataBundleAppId = 'danmu-float';
 const int dataBundleVersion = 1;
+
+/// 备份文件原生通道名（与 MainActivity 约定）。
+const String dataFileChannelName = 'danmu_float/data_file';
+
+const MethodChannel _dataFileChannel = MethodChannel(dataFileChannelName);
+
+/// 写文件的后端签名；单测可注入内存实现，不依赖真机通道。
+typedef SaveTextToDownloads = Future<String?> Function({
+  required String fileName,
+  required String content,
+});
+
+/// 把备份文本写进系统公共「下载」目录，返回展示给用户的位置；写不进去返回 null。
+///
+/// Android 10 起应用不能直接写公共目录，原生侧经 MediaStore 落盘，文件管理器
+/// 能直接看到；更低的版本退回系统「另存为」。通道不可用时返回 null。
+Future<String?> saveTextToDownloads({
+  required String fileName,
+  required String content,
+}) async {
+  try {
+    return await _dataFileChannel.invokeMethod<String>(
+      'saveToDownloads',
+      <String, Object?>{'fileName': fileName, 'content': content},
+    );
+  } on PlatformException {
+    return null;
+  } on MissingPluginException {
+    return null;
+  }
+}
+
+/// 从系统文件选择器读一份备份文本。
+///
+/// 返回 null 表示用户取消或通道不可用；读到了但内容读不出来时 [error] 带原因。
+Future<({String? text, String? error})?> pickImportTextFile() async {
+  final Map<Object?, Object?>? raw;
+  try {
+    raw = await _dataFileChannel.invokeMapMethod<Object?, Object?>('pickTextFile');
+  } on PlatformException {
+    return null;
+  } on MissingPluginException {
+    return null;
+  }
+  if (raw == null) return null;
+  final Object? text = raw['text'];
+  final Object? error = raw['error'];
+  return (text: text is String ? text : null, error: error is String ? error : null);
+}
 
 /// 导入失败的原因，[message] 直接面向用户展示。
 class DataTransferException implements Exception {
@@ -153,12 +206,14 @@ class LocalDataTransfer {
     ThemeStore? themeStore,
     ComplianceStore? complianceStore,
     Future<Directory> Function()? directoryResolver,
+    SaveTextToDownloads? saveToDownloads,
   })  : _roomStore = roomStore ?? RoomStore(),
         _prefsStore = prefsStore ?? OverlayPrefsStore(),
         _filterStore = filterStore ?? FilterStore(),
         _themeStore = themeStore ?? ThemeStore(),
         _complianceStore = complianceStore ?? ComplianceStore(),
-        _directoryResolver = directoryResolver ?? getApplicationSupportDirectory;
+        _directoryResolver = directoryResolver ?? getApplicationSupportDirectory,
+        _saveToDownloads = saveToDownloads ?? saveTextToDownloads;
 
   final RoomStore _roomStore;
   final OverlayPrefsStore _prefsStore;
@@ -166,6 +221,7 @@ class LocalDataTransfer {
   final ThemeStore _themeStore;
   final ComplianceStore _complianceStore;
   final Future<Directory> Function() _directoryResolver;
+  final SaveTextToDownloads _saveToDownloads;
 
   /// 读回全部本地数据并组装成备份文本。
   Future<String> exportJson() async => encodeDataBundle(
@@ -176,9 +232,26 @@ class LocalDataTransfer {
         compliance: await _complianceStore.load(),
       );
 
-  /// 备份文本另存一份到本地文件，返回文件路径；写不进去时返回 null。
+  /// 备份文本另存到系统公共「下载」目录，返回展示给用户的位置。
   ///
-  /// 优先写外置私有目录（Android 上文件管理器能直接看到），拿不到再退回内置目录。
+  /// 公共目录写不进去（旧系统上用户取消「另存为」、通道不可用）时退回 App 私有
+  /// 外部目录，保证用户手上总有一份文件。
+  Future<String?> exportToDownloads(String json) async {
+    final String fileName = backupFileName(DateTime.now());
+    try {
+      final String? saved =
+          await _saveToDownloads(fileName: fileName, content: json);
+      if (saved != null) return saved;
+    } on Object {
+      // 通道不可用（非 Android 运行 / 单测没注入）：退回私有目录。
+    }
+    return exportToFile(json);
+  }
+
+  /// 备份文本另存一份到 App 私有目录，返回文件路径；写不进去时返回 null。
+  ///
+  /// 这是 [exportToDownloads] 的兜底：私有目录（Android 上是 Android/data/<包名>）
+  /// 文件管理器一般看不到，只在公共「下载」目录写不进去时用。
   Future<String?> exportToFile(String json) async {
     final Directory directory = await _resolveWritableDirectory();
     try {

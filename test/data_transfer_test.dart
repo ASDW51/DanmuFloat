@@ -158,7 +158,7 @@ void main() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
 
-    LocalDataTransfer makeTransfer() {
+    LocalDataTransfer makeTransfer({SaveTextToDownloads? saveToDownloads}) {
       Future<Directory> resolve() async => directory;
       return LocalDataTransfer(
         roomStore: RoomStore(directoryResolver: resolve),
@@ -167,6 +167,7 @@ void main() {
         themeStore: ThemeStore(directoryResolver: resolve),
         complianceStore: ComplianceStore(directoryResolver: resolve),
         directoryResolver: resolve,
+        saveToDownloads: saveToDownloads,
       );
     }
 
@@ -252,6 +253,52 @@ void main() {
       expect(path, isNotNull);
       expect(File(path!).existsSync(), isTrue);
       expect(File(path).readAsStringSync(), json);
+    });
+
+    test('exportToDownloads 优先写公共目录并回传展示位置', () async {
+      String? savedName;
+      String? savedContent;
+      final LocalDataTransfer transfer = makeTransfer(
+        saveToDownloads: ({required String fileName, required String content}) async {
+          savedName = fileName;
+          savedContent = content;
+          return '下载/$fileName';
+        },
+      );
+
+      final String json = await transfer.exportJson();
+      final String? location = await transfer.exportToDownloads(json);
+
+      expect(location, startsWith('下载/danmu_float_backup_'));
+      expect(savedName, startsWith('danmu_float_backup_'));
+      expect(savedContent, json);
+    });
+
+    test('公共目录写不进去时退回私有目录文件', () async {
+      final LocalDataTransfer transfer = makeTransfer(
+        saveToDownloads: ({required String fileName, required String content}) async =>
+            null,
+      );
+
+      final String json = await transfer.exportJson();
+      final String? location = await transfer.exportToDownloads(json);
+
+      expect(location, isNotNull);
+      expect(File(location!).existsSync(), isTrue);
+      expect(File(location).readAsStringSync(), json);
+    });
+
+    test('公共目录通道抛异常时退回私有目录文件', () async {
+      final LocalDataTransfer transfer = makeTransfer(
+        saveToDownloads: ({required String fileName, required String content}) async =>
+            throw Exception('通道不可用'),
+      );
+
+      final String json = await transfer.exportJson();
+      final String? location = await transfer.exportToDownloads(json);
+
+      expect(location, isNotNull);
+      expect(File(location!).existsSync(), isTrue);
     });
   });
 }
