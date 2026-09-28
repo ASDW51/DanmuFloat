@@ -9,7 +9,6 @@ import 'dart:async';
 
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
-import 'package:danmu_float/compliance/connect_confirm.dart';
 import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/room/managed_room.dart';
@@ -370,12 +369,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 单栏连接：进入 App 内弹幕页（页内可再开悬浮窗）。
   Future<void> _connectSingle(ManagedRoom room) async {
-    // 新增连接前二次确认（prd F25）；本会话已选「不再提示」时直接放行。
-    final bool confirmed = await confirmNewConnection(
-      context,
-      webRids: <String>[room.webRid],
-    );
-    if (!confirmed || !mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => DanmuPage(
@@ -410,10 +403,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       final bool goOn = await _confirmHighPerformance(webRids.length);
       if (!goOn || !mounted) return;
     }
-    // 点「开启悬浮窗」后二次确认一次，覆盖本次全部房间（prd F25）。
-    final bool confirmed =
-        await confirmNewConnection(context, webRids: webRids);
-    if (!confirmed || !mounted) return;
+    // 点「开启悬浮窗」后直接连接：连接前的二次确认已按需求移除。
     final OverlayConfig config = _prefs.toConfig(
       webRids,
       filter: _filter,
