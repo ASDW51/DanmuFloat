@@ -61,6 +61,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final FilterStore _filterStore = FilterStore();
   FilterPrefs _filter = const FilterPrefs();
 
+  /// 主 App 主题偏好；导入数据后要按备份里的值复位。
+  final ThemeStore _themeStore = ThemeStore();
+
   bool _overlayVisible = false;
 
   /// 悬浮窗权限是否被拒（prd 4.10 权限拒绝降级）：为真时首页顶部常驻提示，
@@ -271,9 +274,51 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           filter: _filter,
           filterStore: _filterStore,
           onFilterChanged: _onFilterChanged,
+          onDataImported: _reloadAfterImport,
         ),
       ),
     );
+  }
+
+  /// 导入数据后重新读回全部本地数据，并把最新样式 / 过滤 / 尺寸 / 候选房间
+  /// 推给已开着的悬浮窗（不重发 config，避免冲掉栏内已绑定的房间）。
+  Future<void> _reloadAfterImport() async {
+    final List<ManagedRoom> rooms = await _store.load();
+    final OverlayPrefs prefs = await _prefsStore.load();
+    final FilterPrefs filter = await _filterStore.load();
+    final ThemeMode themeMode = await _themeStore.load();
+    if (!mounted) return;
+    appThemeMode.value = themeMode;
+    setState(() {
+      _rooms = rooms;
+      _prefs = prefs;
+      _filter = filter;
+      _prefsReady = true;
+    });
+    unawaited(
+      shareOverlayStyle(
+        opacity: prefs.opacity,
+        fontSize: prefs.fontSize,
+        scrollSpeed: prefs.scrollSpeed,
+        paneStyles: prefs.paneStyles,
+        lightTheme: prefs.lightTheme,
+        showTitleBar: prefs.showTitleBar,
+        focusBehavior: prefs.focusBehavior,
+      ),
+    );
+    unawaited(shareOverlayFilter(filter));
+    _syncOverlayRooms();
+    if (_overlayVisible) {
+      final Size screen = MediaQuery.sizeOf(context);
+      updateOverlaySize(
+        fitOverlaySize(
+          prefs.windowSize,
+          screenWidth: screen.width,
+          screenHeight: screen.height,
+        ),
+        devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+      );
+    }
   }
 
   /// 设置页改过滤偏好：更新内存并推给已开着的悬浮窗（落盘由设置页负责）。

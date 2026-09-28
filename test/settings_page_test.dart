@@ -6,10 +6,12 @@ import 'dart:io';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
+import 'package:danmu_float/storage/data_transfer.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/theme_store.dart';
 import 'package:danmu_float/ui/settings_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// 内存凭证后端：设置页测试不依赖 Android Keystore 插件通道。
@@ -302,6 +304,144 @@ void main() {
     await tester.pumpAndSettle();
     expect(latest.focusBehavior, focusBehaviorHide);
   });
+
+  testWidgets('导出数据：复制到剪贴板并弹窗提示', (WidgetTester tester) async {
+    _useFullScreen(tester);
+    final List<MethodCall> clipboardCalls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall call) async {
+        clipboardCalls.add(call);
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    final FakeDataTransfer transfer = FakeDataTransfer();
+    await tester.pumpWidget(_wrapFull(
+      prefs: const OverlayPrefs(),
+      store: CredentialStore(backend: FakeCredentialBackend()),
+      dataTransfer: transfer,
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('导出数据'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('导出完成'), findsOneWidget);
+    final MethodCall setData = clipboardCalls.firstWhere(
+      (MethodCall call) => call.method == 'Clipboard.setData',
+    );
+    expect(
+      (setData.arguments as Map<Object?, Object?>)['text'],
+      transfer.exportPayload,
+    );
+    // 除复制外还另存了一份文件。
+    expect(transfer.exportToFileCalls, 1);
+  });
+
+  testWidgets('导入数据：确认后覆盖落盘并回调外层刷新', (WidgetTester tester) async {
+    _useFullScreen(tester);
+    final FakeDataTransfer transfer = FakeDataTransfer();
+    int imported = 0;
+    await tester.pumpWidget(_wrapFull(
+      prefs: const OverlayPrefs(),
+      store: CredentialStore(backend: FakeCredentialBackend()),
+      dataTransfer: transfer,
+      onDataImported: () async => imported++,
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('导入数据'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      '{"app":"danmu-float","version":1}',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, '导入'));
+    await tester.pumpAndSettle();
+
+    // 覆盖是破坏性操作：确认前不导入。
+    expect(imported, 0);
+    await tester.tap(find.widgetWithText(FilledButton, '覆盖导入'));
+    await tester.pumpAndSettle();
+
+    expect(imported, 1);
+    expect(transfer.importedRaw, '{"app":"danmu-float","version":1}');
+    expect(find.textContaining('已导入 1 个主播'), findsOneWidget);
+  });
+
+  testWidgets('导入非法备份：不回调，给出错误提示', (WidgetTester tester) async {
+    _useFullScreen(tester);
+    final FakeDataTransfer transfer =
+        FakeDataTransfer(importError: '这不是 DanmuFloat 的备份文件');
+    int imported = 0;
+    await tester.pumpWidget(_wrapFull(
+      prefs: const OverlayPrefs(),
+      store: CredentialStore(backend: FakeCredentialBackend()),
+      dataTransfer: transfer,
+      onDataImported: () async => imported++,
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('导入数据'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      '{"app":"other"}',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, '导入'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '覆盖导入'));
+    await tester.pumpAndSettle();
+
+    expect(imported, 0);
+    expect(find.textContaining('这不是 DanmuFloat 的备份文件'), findsOneWidget);
+  });
+}
+
+/// 假的备份器：widget 测试跑在 FakeAsync 下，真实文件 IO 无法完成，
+/// 这里只验证设置页的交互接线；真实编解码与落盘由 data_transfer_test 覆盖。
+class FakeDataTransfer implements LocalDataTransfer {
+  FakeDataTransfer({
+    this.exportPayload = '{"app":"danmu-float","version":1}',
+    this.importError,
+  });
+
+  final String exportPayload;
+  final String? importError;
+  String? importedRaw;
+  int exportToFileCalls = 0;
+
+  @override
+  Future<String> exportJson() async => exportPayload;
+
+  @override
+  Future<String?> exportToFile(String json) async {
+    exportToFileCalls++;
+    return '/tmp/${backupFileName(DateTime(2026, 9, 28, 1, 2, 3))}';
+  }
+
+  @override
+  Future<DataImportSummary> importJson(String raw) async {
+    importedRaw = raw;
+    if (importError != null) throw DataTransferException(importError!);
+    return const DataImportSummary(
+      rooms: 1,
+      blockedKeywords: 1,
+      highlightKeywords: 0,
+      regexEnabled: false,
+    );
+  }
 }
 
 /// 测试环境的逻辑屏幕尺寸（Flutter 测试默认 800×600）。
@@ -362,6 +502,8 @@ Widget _wrapFull({
   CredentialStore? store,
   ThemeStore? themeStore,
   Future<void> Function()? onResetAll,
+  LocalDataTransfer? dataTransfer,
+  Future<void> Function()? onDataImported,
 }) =>
     MaterialApp(
       home: SettingsPage(
@@ -370,6 +512,8 @@ Widget _wrapFull({
         credentialStore: store,
         themeStore: themeStore,
         onResetAll: onResetAll,
+        dataTransfer: dataTransfer,
+        onDataImported: onDataImported,
       ),
     );
 

@@ -11,6 +11,7 @@ import 'package:danmu_float/app/overlay_launcher.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
+import 'package:danmu_float/storage/data_transfer.dart';
 import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/theme_store.dart';
@@ -30,6 +31,8 @@ class SettingsPage extends StatefulWidget {
     this.filterStore,
     this.onFilterChanged,
     this.themeStore,
+    this.dataTransfer,
+    this.onDataImported,
   });
 
   /// 进入页面时的偏好快照。
@@ -57,6 +60,12 @@ class SettingsPage extends StatefulWidget {
   /// 主 App 主题偏好存储；单测可注入内存后端。
   final ThemeStore? themeStore;
 
+  /// 备份 / 恢复本地数据（prd F26 侧能力）；单测可注入临时目录。
+  final LocalDataTransfer? dataTransfer;
+
+  /// 导入完成后的回调：调用方负责重新读回本地数据并同步给悬浮窗引擎。
+  final Future<void> Function()? onDataImported;
+
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
@@ -67,6 +76,8 @@ class _SettingsPageState extends State<SettingsPage> {
       widget.credentialStore ?? CredentialStore();
   late final FilterStore _filterStore = widget.filterStore ?? FilterStore();
   late final ThemeStore _themeStore = widget.themeStore ?? ThemeStore();
+  late final LocalDataTransfer _dataTransfer =
+      widget.dataTransfer ?? LocalDataTransfer();
 
   /// 当前过滤偏好：进二级页面改完回退后要能刷新入口摘要。
   late FilterPrefs _filter = widget.filter;
@@ -404,6 +415,18 @@ class _SettingsPageState extends State<SettingsPage> {
           const Divider(height: 1),
           const _SectionTitle('数据与隐私'),
           ListTile(
+            leading: const Icon(Icons.upload_file_outlined),
+            title: const Text('导出数据'),
+            subtitle: const Text('备份主播列表与各项设置，可复制或存成文件'),
+            onTap: _exportData,
+          ),
+          ListTile(
+            leading: const Icon(Icons.download_outlined),
+            title: const Text('导入数据'),
+            subtitle: const Text('从备份 JSON 恢复主播列表与各项设置（覆盖当前数据）'),
+            onTap: _importData,
+          ),
+          ListTile(
             leading: const Icon(Icons.key_off_outlined),
             title: const Text('清除本地凭证'),
             subtitle: const Text('删除已加密保存的手动凭证，回到匿名自动获取；不影响其他配置'),
@@ -472,6 +495,69 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!mounted) return;
     setState(() {});
     _snack('已清除本地凭证');
+  }
+
+  /// 导出数据：读回全部本地配置 → 复制到剪贴板 → 另存一份文件 → 弹窗告知结果。
+  Future<void> _exportData() async {
+    final String json;
+    try {
+      json = await _dataTransfer.exportJson();
+    } on Object catch (exception) {
+      if (!mounted) return;
+      _snack('导出失败：$exception');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: json));
+    final String? path = await _dataTransfer.exportToFile(json);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('导出完成'),
+        content: Text(
+          path == null
+              ? '备份已复制到剪贴板（${json.length} 字符）。未能写入本地文件，'
+                  '可粘到任意位置自行保存。'
+              : '备份已复制到剪贴板，并另存为文件：\n$path',
+        ),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 导入数据：粘贴备份 → 二次确认 → 覆盖落盘 → 回调外层重新读回并同步悬浮窗。
+  Future<void> _importData() async {
+    final String? raw = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => const _ImportDialog(),
+    );
+    if (raw == null || !mounted) return;
+
+    final bool confirmed = await _confirm(
+      title: '导入数据',
+      content: '将用备份覆盖当前的主播列表、悬浮窗样式、过滤设置与主题。'
+          '此操作不可撤销。',
+      confirmText: '覆盖导入',
+    );
+    if (!confirmed || !mounted) return;
+
+    try {
+      final DataImportSummary summary = await _dataTransfer.importJson(raw);
+      await widget.onDataImported?.call();
+      if (!mounted) return;
+      _snack(summary.description);
+    } on DataTransferException catch (exception) {
+      if (!mounted) return;
+      _snack('导入失败：${exception.message}');
+    } on Object catch (exception) {
+      if (!mounted) return;
+      _snack('导入失败：$exception');
+    }
   }
 
   /// 清除所有本地数据（prd F26 硬要求）：二次确认后交给外层依次完成
@@ -677,6 +763,80 @@ class _CredentialSectionState extends State<_CredentialSection> {
       ],
     );
   }
+}
+
+/// 导入备份弹窗：多行输入 JSON，可从剪贴板一键预填。
+class _ImportDialog extends StatefulWidget {
+  const _ImportDialog();
+
+  @override
+  State<_ImportDialog> createState() => _ImportDialogState();
+}
+
+class _ImportDialogState extends State<_ImportDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// 从剪贴板填入；剪贴板为空时保持原样，不做打扰。
+  Future<void> _paste() async {
+    final ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
+    final String text = data?.text ?? '';
+    if (text.isEmpty || !mounted) return;
+    setState(() => _controller.text = text);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('导入数据'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Text(
+                '粘贴之前导出的备份 JSON，或从剪贴板一键填入。',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _controller,
+                minLines: 4,
+                maxLines: 6,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                decoration: const InputDecoration(
+                  hintText: '{"app":"danmu-float", ...}',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _paste,
+                  icon: const Icon(Icons.content_paste, size: 18),
+                  label: const Text('从剪贴板粘贴'),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(_controller.text),
+            child: const Text('导入'),
+          ),
+        ],
+      );
 }
 
 class _SectionTitle extends StatelessWidget {
