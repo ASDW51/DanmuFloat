@@ -27,6 +27,7 @@ class OverlayPrefs {
     this.lightTheme = false,
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
+    this.dragLocked = false,
   });
 
   /// 上次勾选的主播，按栏位顺序排列（下次打开多栏弹窗时据此预勾选）。
@@ -59,6 +60,9 @@ class OverlayPrefs {
   /// 焦点模式下其余栏的处理方式（prd F7）。
   final String focusBehavior;
 
+  /// 是否锁定窗口位置：锁定后窗口不能拖动，栏内弹幕列表才能正常上下滑动。
+  final bool dragLocked;
+
   /// 窗口尺寸，供建窗 / 重排窗口时使用。
   ({double width, double height}) get windowSize => (
         width: clampOverlayWidth(windowWidth),
@@ -76,6 +80,7 @@ class OverlayPrefs {
     bool? lightTheme,
     bool? showTitleBar,
     String? focusBehavior,
+    bool? dragLocked,
   }) =>
       OverlayPrefs(
         webRids: webRids ?? this.webRids,
@@ -88,6 +93,22 @@ class OverlayPrefs {
         lightTheme: lightTheme ?? this.lightTheme,
         showTitleBar: showTitleBar ?? this.showTitleBar,
         focusBehavior: focusBehavior ?? this.focusBehavior,
+        dragLocked: dragLocked ?? this.dragLocked,
+      );
+
+  /// 合并悬浮窗上报的偏好增量（悬浮球菜单改的部分）。
+  OverlayPrefs appliedPatch(OverlayPrefsPatch patch) => OverlayPrefs(
+        webRids: webRids,
+        opacity: patch.opacity ?? opacity,
+        fontSize: patch.fontSize ?? fontSize,
+        scrollSpeed: scrollSpeed,
+        windowWidth: patch.windowWidth ?? windowWidth,
+        windowHeight: patch.windowHeight ?? windowHeight,
+        paneStyles: paneStyles,
+        lightTheme: lightTheme,
+        showTitleBar: showTitleBar,
+        focusBehavior: focusBehavior,
+        dragLocked: patch.dragLocked ?? dragLocked,
       );
 
   /// 组装成下发给悬浮窗的配置。
@@ -112,6 +133,7 @@ class OverlayPrefs {
         lightTheme: lightTheme,
         showTitleBar: showTitleBar,
         focusBehavior: clampFocusBehavior(focusBehavior),
+        dragLocked: dragLocked,
       );
 
   /// 只保留当前绑定的房间的样式，避免下发时带上已解绑房间的冗余覆盖。
@@ -136,6 +158,7 @@ class OverlayPrefs {
         'lightTheme': lightTheme,
         'showTitleBar': showTitleBar,
         'focusBehavior': clampFocusBehavior(focusBehavior),
+        'dragLocked': dragLocked,
         'window': <String, Object?>{
           'width': clampOverlayWidth(windowWidth),
           'height': clampOverlayHeight(windowHeight),
@@ -173,6 +196,7 @@ class OverlayPrefs {
       lightTheme: raw['lightTheme'] == true,
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
+      dragLocked: raw['dragLocked'] == true,
     );
   }
 

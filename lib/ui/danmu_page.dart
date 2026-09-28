@@ -218,11 +218,19 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   }
 
   /// 写入列表缓存并裁剪到展示上限。
+  ///
+  /// 暂停时不裁剪头部：裁剪会让列表整体上移，看起来像「暂停了还在滚动」。
   void _addToRaw(DanmakuEvent event) {
     _raw.add(event);
-    if (_raw.length > _displayLimit) {
-      _raw.removeRange(0, _raw.length - _displayLimit);
+    if (_raw.length <= _displayLimit) return;
+    if (_paused) {
+      // 允许短时超出上限，避免暂停时列表位移；留一倍余量兜住内存。
+      if (_raw.length > _displayLimit * 2) {
+        _raw.removeRange(0, _displayLimit);
+      }
+      return;
     }
+    _raw.removeRange(0, _raw.length - _displayLimit);
   }
 
   /// 按当前过滤口径派生的可见列表（prd F10 / F13）。
@@ -260,6 +268,22 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     );
     if (!mounted) return;
     setState(() => _overlayVisible = true);
+    // 补推屏幕尺寸与锁定状态：悬浮窗引擎拿不到屏幕尺寸，横竖屏换算与尺寸收敛
+    // 都要靠这里下发的值。
+    unawaited(
+      shareOverlayStyle(
+        opacity: _prefs.opacity,
+        fontSize: _prefs.fontSize,
+        scrollSpeed: _prefs.scrollSpeed,
+        paneStyles: _prefs.paneStyles,
+        lightTheme: _prefs.lightTheme,
+        showTitleBar: _prefs.showTitleBar,
+        focusBehavior: _prefs.focusBehavior,
+        dragLocked: _prefs.dragLocked,
+        screenWidth: screen.width,
+        screenHeight: screen.height,
+      ),
+    );
   }
 
   /// 汇总当前诊断信息，供用户一键复制反馈（真机问题排查用）。

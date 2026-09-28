@@ -4,7 +4,7 @@
 // - 右上角 + 添加主播，添加后立即落盘，冷启动或下拉刷新时重新读取
 // - 行内「刷新」拉一次房间信息，更新主播名 / 标题 / 开播状态
 // - 点击整行或行内「连接弹幕」= 单栏连接，进入 App 内弹幕页（页内可再开悬浮窗）
-// - 右上角多栏按钮 = 勾选主播后开多栏悬浮窗（最多 9 栏，3×3）
+// - 右上角多栏按钮 = 勾选主播后开多栏悬浮窗（栏位不限，按栏数推导网格）
 import 'dart:async';
 
 import 'package:danmu_float/app/overlay_bridge.dart';
@@ -92,8 +92,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         });
         return;
       }
-      // 悬浮窗内切换了某栏绑定的房间（prd F8 / F15）：把最新绑定落盘。
-      _applyReportedBindings(status.webRids);
+      // 悬浮窗内切换了某栏绑定的房间，或经悬浮球菜单改了偏好（prd F8 / F15 / F21）：
+      // 把最新绑定与偏好落盘。
+      _applyReportedStatus(status);
     });
     unawaited(_load());
     unawaited(_loadPrefs());
@@ -164,13 +165,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
       ];
 
-  /// 悬浮窗内改绑后回报的最新绑定：与本地偏好不一致时落盘（prd F8 / F15）。
-  void _applyReportedBindings(List<String> webRids) {
-    if (webRids.isEmpty) return;
-    if (_sameWebRids(webRids, _prefs.webRids)) return;
-    final OverlayPrefs next = _prefs.copyWith(webRids: webRids);
+  /// 悬浮窗内改绑房间，或经悬浮球菜单改了透明度 / 字号 / 尺寸 / 锁定时回报的状态：
+  /// 与本地偏好不一致时落盘（prd F8 / F15 / F21）。
+  void _applyReportedStatus(OverlayStatus status) {
+    OverlayPrefs next = _prefs;
+    final List<String> webRids = status.webRids;
+    if (webRids.isNotEmpty && !_sameWebRids(webRids, next.webRids)) {
+      next = next.copyWith(webRids: webRids);
+    }
+    final OverlayPrefsPatch? patch = status.prefsPatch;
+    if (patch != null) next = next.appliedPatch(patch);
+    if (identical(next, _prefs)) return;
     setState(() => _prefs = next);
     unawaited(_prefsStore.save(next));
+    // 主 App 侧记下锁定状态：后续改尺寸时不能被拖动开关冲掉。
+    setOverlayDragLock(next.dragLocked);
   }
 
   /// 推送候选房间列表给已开着的悬浮窗；没开时静默忽略，下次建窗随 config 补发。
@@ -228,16 +237,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() => _filter = filter);
   }
 
-  /// 设置页改样式：先更新内存并推给已开着的悬浮窗，需要落盘时才写文件。
-  void _onPrefsChanged(OverlayPrefs prefs, {required bool persist}) {
-    final bool sizeChanged = prefs.windowWidth != _prefs.windowWidth ||
-        prefs.windowHeight != _prefs.windowHeight;
-    setState(() => _prefs = prefs);
-    // 只推样式与尺寸：此时窗口里绑的是哪些房间由当前持有悬浮窗的页面决定，
-    // 重发 config 会把绑定冲掉。
-    //
-    // 这里不判断本页的开关状态：悬浮窗可能是在弹幕页开的，
-    // 窗口是否已开由 overlay_launcher 统一持有，没开时两处调用会静默忽略。
+  /// 把当前样式偏好连同屏幕尺寸 / 锁定状态推给已开着的悬浮窗。
+  ///
+  /// 只推样式，不动各栏已绑定的房间（重发 config 会把绑定冲掉）。窗口没开时
+  /// 由 overlay_launcher 静默忽略。屏幕尺寸是悬浮窗侧换算横竖屏与收敛尺寸的依据。
+  void _pushOverlayStyle(OverlayPrefs prefs) {
+    final Size screen = MediaQuery.sizeOf(context);
     unawaited(
       shareOverlayStyle(
         opacity: prefs.opacity,
@@ -247,8 +252,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         lightTheme: prefs.lightTheme,
         showTitleBar: prefs.showTitleBar,
         focusBehavior: prefs.focusBehavior,
+        dragLocked: prefs.dragLocked,
+        screenWidth: screen.width,
+        screenHeight: screen.height,
       ),
     );
+  }
+
+  /// 设置页改样式：先更新内存并推给已开着的悬浮窗，需要落盘时才写文件。
+  void _onPrefsChanged(OverlayPrefs prefs, {required bool persist}) {
+    final bool sizeChanged = prefs.windowWidth != _prefs.windowWidth ||
+        prefs.windowHeight != _prefs.windowHeight;
+    setState(() => _prefs = prefs);
+    // 这里不判断本页的开关状态：悬浮窗可能是在弹幕页开的，
+    // 窗口是否已开由 overlay_launcher 统一持有，没开时调用会静默忽略。
+    _pushOverlayStyle(prefs);
     if (sizeChanged) {
       final Size screen = MediaQuery.sizeOf(context);
       updateOverlaySize(
@@ -295,17 +313,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _filter = filter;
       _prefsReady = true;
     });
-    unawaited(
-      shareOverlayStyle(
-        opacity: prefs.opacity,
-        fontSize: prefs.fontSize,
-        scrollSpeed: prefs.scrollSpeed,
-        paneStyles: prefs.paneStyles,
-        lightTheme: prefs.lightTheme,
-        showTitleBar: prefs.showTitleBar,
-        focusBehavior: prefs.focusBehavior,
-      ),
-    );
+    _pushOverlayStyle(prefs);
     unawaited(shareOverlayFilter(filter));
     _syncOverlayRooms();
     if (_overlayVisible) {
@@ -521,6 +529,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     if (!mounted) return;
     setState(() => _overlayVisible = true);
+    // 窗口刚建立 / 刚重排：把屏幕尺寸与锁定状态补给悬浮窗，供其换算与收敛尺寸。
+    _pushOverlayStyle(nextPrefs);
   }
 
   Future<void> _closeOverlay() async {
@@ -934,9 +944,6 @@ class _MultiSelectDialog extends StatefulWidget {
 }
 
 class _MultiSelectDialogState extends State<_MultiSelectDialog> {
-  /// 与悬浮窗最大栏位数一致（3×3 网格）。
-  static const int _maxSelectable = maxPaneCount;
-
   late final Set<String> _selected = <String>{
     for (final String webRid in widget.initialSelection)
       if (widget.rooms.any((ManagedRoom room) => room.webRid == webRid))
@@ -957,7 +964,7 @@ class _MultiSelectDialogState extends State<_MultiSelectDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              '最多选择 $_maxSelectable 个主播，按选择顺序分配到各栏'
+              '按选择顺序分配到各栏'
               '${_highPerformance ? '；超过 $maxStandardPaneCount 栏需二次确认高性能模式' : ''}',
               style: TextStyle(
                 fontSize: 12,
@@ -1022,22 +1029,18 @@ class _MultiSelectDialogState extends State<_MultiSelectDialog> {
 
   Widget _buildTile(ManagedRoom room) {
     final bool checked = _selected.contains(room.webRid);
-    // 已达上限时禁用未勾选项，避免"选了却没生效"。
-    final bool selectable = checked || _selected.length < _maxSelectable;
     return CheckboxListTile(
       dense: true,
       value: checked,
       title: Text(room.displayName, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(room.webRid, style: const TextStyle(fontSize: 12)),
-      onChanged: selectable
-          ? (bool? value) => setState(() {
-                if (value ?? false) {
-                  _selected.add(room.webRid);
-                } else {
-                  _selected.remove(room.webRid);
-                }
-              })
-          : null,
+      onChanged: (bool? value) => setState(() {
+        if (value ?? false) {
+          _selected.add(room.webRid);
+        } else {
+          _selected.remove(room.webRid);
+        }
+      }),
     );
   }
 

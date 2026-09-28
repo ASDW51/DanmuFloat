@@ -221,7 +221,25 @@ class _OverlayPageState extends State<OverlayPage> {
   final Map<int, double> _gestureOpacity = <int, double>{};
 
   /// 长按调透明度期间是否已临时关闭窗口拖动（prd F21），避免重复下发。
+  bool _gestureDragLock = false;
+
+  /// 是否锁定窗口移动（悬浮球菜单可切换）。锁定后拖动落在栏内列表上，
+  /// 弹幕才能正常滚动——插件会把窗口内任何超过 5px 的滑动都当作搬窗口。
   bool _dragLocked = false;
+
+  /// 设备屏幕逻辑尺寸，随样式消息从主 App 下发（悬浮窗引擎查不到屏幕尺寸）；
+  /// 0 表示未知，此时改尺寸只按固定上下限收敛。
+  double _screenWidth = 0;
+  double _screenHeight = 0;
+
+  /// 悬浮球菜单是否展开。
+  bool _menuOpen = false;
+
+  /// 本窗口当前的逻辑尺寸；展开菜单时取一次，之后随本地改尺寸同步。
+  Size _windowSize = Size.zero;
+
+  /// 悬浮球里改动、待上报给主 App 落盘的偏好增量。
+  OverlayPrefsPatch? _pendingPatch;
 
   /// 可在栏内快速切换的候选房间（prd F14 / F15），来自主 App 的主播列表。
   List<RoomOption> _roomOptions = const <RoomOption>[];
@@ -272,6 +290,7 @@ class _OverlayPageState extends State<OverlayPage> {
     // 纯样式调整：只改外观，各栏绑定与缓存都不动。
     final OverlayStyle? style = OverlayStyle.tryParse(message);
     if (style != null) {
+      final bool lockChanged = style.dragLocked != _dragLocked;
       setState(() {
         _opacity = style.opacity;
         _fontSize = style.fontSize;
@@ -280,7 +299,12 @@ class _OverlayPageState extends State<OverlayPage> {
         _lightTheme = style.lightTheme;
         _showTitleBar = style.showTitleBar;
         _focusBehavior = style.focusBehavior;
+        _dragLocked = style.dragLocked;
+        if (style.screenWidth > 0) _screenWidth = style.screenWidth;
+        if (style.screenHeight > 0) _screenHeight = style.screenHeight;
       });
+      // 主 App 改了锁定状态（如换设备 / 恢复备份）时同步插件的拖动开关。
+      if (lockChanged) _syncDragEnabled();
       return;
     }
     // 纯过滤调整：屏蔽 / 高亮 / 类型筛选，改了只影响后续判定，已有列表按新口径重建。
@@ -309,6 +333,7 @@ class _OverlayPageState extends State<OverlayPage> {
       _lightTheme = config.lightTheme;
       _showTitleBar = config.showTitleBar;
       _focusBehavior = config.focusBehavior;
+      _dragLocked = config.dragLocked;
       // 布局或房间变化会重建对应栏位，旧栏位的上报先作废。
       _reports.clear();
       // 栏位重排后原来的焦点与手势透明度都不再对应同一栏，一并复位。
@@ -419,9 +444,19 @@ class _OverlayPageState extends State<OverlayPage> {
           webRid: webRid,
           error: error,
           webRids: _webRids,
+          // 悬浮球里改的透明度 / 尺寸 / 锁定随本次上报带给主 App 落盘；
+          // 带出去后就清空，避免每秒重复上报同一个值。
+          prefsPatch: _takePendingPatch(),
         ).toJson(),
       ),
     );
+  }
+
+  /// 取出待落盘的偏好增量并清空。
+  OverlayPrefsPatch? _takePendingPatch() {
+    final OverlayPrefsPatch? patch = _pendingPatch;
+    _pendingPatch = null;
+    return patch;
   }
 
   @override
@@ -453,11 +488,206 @@ class _OverlayPageState extends State<OverlayPage> {
                 child: _ComplianceBadge(color: palette.badge),
               ),
             ),
+            // 悬浮球：点开是一个功能菜单（锁定移动 / 栏位增删与切换 / 尺寸 / 透明度）。
+            // 悬浮窗没有系统控件，窗口内的操作入口只能自己画。
+            Positioned(left: 3, top: 3, child: _buildBall(palette)),
+            if (_menuOpen)
+              Positioned(
+                left: 3,
+                top: 30,
+                right: 3,
+                bottom: 3,
+                child: _buildMenu(palette),
+              ),
           ],
         ),
       ),
     );
   }
+
+  /// 悬浮球：未展开时是「调节」图标，展开后变成关闭图标。
+  Widget _buildBall(OverlayPalette palette) => Material(
+        color: palette.isLight ? Colors.white70 : Colors.black54,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => setState(() {
+            _menuOpen = !_menuOpen;
+            // 展开时按当前实际窗口尺寸初始化滑杆取值。
+            if (_menuOpen) _windowSize = MediaQuery.sizeOf(context);
+          }),
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: Icon(
+              _menuOpen ? Icons.close : Icons.tune,
+              size: 15,
+              color: palette.chrome,
+            ),
+          ),
+        ),
+      );
+
+  /// 悬浮球展开的功能菜单：紧凑排版并整体可滚动，
+  /// 窗口被调小时也不会溢出（prd F2 延伸：尺寸 / 透明度等设置在悬浮窗内即可调）。
+  Widget _buildMenu(OverlayPalette palette) {
+    final double base = paneFontSize(_fontSize, _webRids.length);
+    final double label = smallerFontSize(base, 2);
+    final double widthLimit =
+        _screenWidth > 0 ? overlayWidthLimit(_screenWidth) : maxOverlayWidth;
+    final double heightLimit =
+        _screenHeight > 0 ? overlayHeightLimit(_screenHeight) : maxOverlayHeight;
+    final double currentWidth =
+        _windowSize.width.clamp(minOverlayWidth, widthLimit);
+    final double currentHeight =
+        _windowSize.height.clamp(minOverlayHeight, heightLimit);
+
+    return Material(
+      color: palette.isLight
+          ? Colors.white.withValues(alpha: 0.94)
+          : Colors.black.withValues(alpha: 0.9),
+      borderRadius: BorderRadius.circular(8),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    '锁定移动',
+                    style: TextStyle(color: palette.chrome, fontSize: label),
+                  ),
+                ),
+                Switch(
+                  value: _dragLocked,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onChanged: (bool _) => _toggleDragLock(),
+                ),
+              ],
+            ),
+            Text(
+              _dragLocked ? '已锁定：拖动用于滚动弹幕' : '未锁定：拖动会移动悬浮窗',
+              style: TextStyle(color: palette.secondary, fontSize: label),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: <Widget>[
+                _menuButton(palette, label, '添加栏位', _addPane),
+                _menuButton(
+                  palette,
+                  label,
+                  '减少栏位',
+                  _webRids.length > 1 ? _removePane : null,
+                ),
+                _menuButton(palette, label, '栏位管理', _managePanes),
+              ],
+            ),
+            _menuSlider(
+              palette,
+              label,
+              '透明度　${_opacity.toStringAsFixed(2)}',
+              _opacity,
+              minOverlayOpacity,
+              maxOverlayOpacity,
+              20,
+              _setGlobalOpacity,
+            ),
+            _menuSlider(
+              palette,
+              label,
+              '弹幕字号　${_fontSize.toStringAsFixed(0)}',
+              _fontSize,
+              minDanmuFontSize,
+              maxDanmuFontSize,
+              (maxDanmuFontSize - minDanmuFontSize).round(),
+              _setGlobalFontSize,
+            ),
+            _menuSlider(
+              palette,
+              label,
+              '窗口宽度　${currentWidth.toStringAsFixed(0)}',
+              currentWidth,
+              minOverlayWidth,
+              widthLimit,
+              ((widthLimit - minOverlayWidth) / 20).round(),
+              (double value) => _setWindowSize(value, currentHeight),
+            ),
+            _menuSlider(
+              palette,
+              label,
+              '窗口高度　${currentHeight.toStringAsFixed(0)}',
+              currentHeight,
+              minOverlayHeight,
+              heightLimit,
+              ((heightLimit - minOverlayHeight) / 20).round(),
+              (double value) => _setWindowSize(currentWidth, value),
+            ),
+            Row(
+              children: <Widget>[
+                _menuButton(palette, label, '适配尺寸', _fitWindowToPaneCount),
+                const SizedBox(width: 4),
+                _menuButton(palette, label, '关闭悬浮窗', _closeOverlayFromMenu),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 菜单里的小按钮；[onPressed] 为 null 时禁用。
+  Widget _menuButton(
+    OverlayPalette palette,
+    double fontSize,
+    String text,
+    VoidCallback? onPressed,
+  ) =>
+      TextButton(
+        onPressed: onPressed,
+        style: TextButton.styleFrom(
+          foregroundColor: palette.chrome,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        child: Text(text, style: TextStyle(fontSize: fontSize)),
+      );
+
+  /// 菜单里的一行滑杆（标题 + 滑杆），实时生效。
+  Widget _menuSlider(
+    OverlayPalette palette,
+    double fontSize,
+    String title,
+    double value,
+    double min,
+    double max,
+    int divisions,
+    ValueChanged<double> onChanged,
+  ) =>
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(title, style: TextStyle(color: palette.chrome, fontSize: fontSize)),
+          SliderTheme(
+            data: SliderThemeData(
+              trackHeight: 2,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+            ),
+            child: Slider(
+              value: value.clamp(min, max),
+              min: min,
+              max: max,
+              divisions: divisions <= 0 ? null : divisions,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      );
 
   Widget _buildPlaceholder() => Center(
         child: Text(
@@ -484,41 +714,249 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 长按调透明度期间临时开关窗口拖动（prd F21）。
   ///
   /// 插件把位移超过 5px 的滑动都用来移动窗口，会和栏内上下滑动抢手势，
-  /// 因此按住时先按当前窗口尺寸原样重发一次 resizeOverlay 关掉拖动，松手恢复。
+  /// 因此按住时先按当前窗口尺寸原样重发一次 resizeOverlay 关掉拖动，松手恢复；
+  /// 与悬浮球的持久锁定共用同一个开关（任一为真都不允许拖动）。
   void _setDragLock(bool locked) {
-    // 栏位在关窗 / 重排时会被卸载，卸载途中补发的恢复请求直接丢弃：
+    if (_gestureDragLock == locked) return;
+    _gestureDragLock = locked;
+    _syncDragEnabled();
+  }
+
+  /// 是否处于「不允许拖动窗口」状态：持久锁定或长按调透明度期间。
+  bool get _dragDisabled => _dragLocked || _gestureDragLock;
+
+  /// 按当前锁定状态重发一次窗口尺寸，只为了改插件的拖动开关（尺寸不变）。
+  void _syncDragEnabled() {
+    // 栏位在关窗 / 重排时会被卸载，卸载途中补发的请求直接丢弃：
     // 此时窗口已不存在或即将重建，查 View 也会拿到已失活的祖先。
     if (!mounted) return;
-    if (_dragLocked == locked) return;
-    _dragLocked = locked;
     final Size physical = View.of(context).physicalSize;
     unawaited(
       setOverlayDragEnabled(
-        !locked,
+        !_dragDisabled,
         width: physical.width.round(),
         height: physical.height.round(),
       ),
     );
   }
 
+  /// 悬浮球菜单里的「锁定移动」开关。
+  void _toggleDragLock() {
+    setState(() {
+      _dragLocked = !_dragLocked;
+      _mergePatch(dragLocked: _dragLocked);
+    });
+    _syncDragEnabled();
+    _reportState();
+  }
+
+  /// 合并一次待落盘的偏好增量（同字段以最新值为准）。
+  void _mergePatch({
+    double? opacity,
+    double? fontSize,
+    double? windowWidth,
+    double? windowHeight,
+    bool? dragLocked,
+  }) {
+    final OverlayPrefsPatch base = _pendingPatch ?? const OverlayPrefsPatch();
+    _pendingPatch = OverlayPrefsPatch(
+      opacity: opacity ?? base.opacity,
+      fontSize: fontSize ?? base.fontSize,
+      windowWidth: windowWidth ?? base.windowWidth,
+      windowHeight: windowHeight ?? base.windowHeight,
+      dragLocked: dragLocked ?? base.dragLocked,
+    );
+  }
+
+  /// 悬浮球菜单里调全局透明度（只影响没有单栏覆盖的栏）。
+  void _setGlobalOpacity(double value) {
+    setState(() {
+      _opacity = clampOverlayOpacity(value);
+      _mergePatch(opacity: _opacity);
+    });
+    _scheduleReport();
+  }
+
+  /// 悬浮球菜单里调全局弹幕字号。
+  void _setGlobalFontSize(double value) {
+    setState(() {
+      _fontSize = clampDanmuFontSize(value);
+      _mergePatch(fontSize: _fontSize);
+    });
+    _scheduleReport();
+  }
+
+  /// 把窗口尺寸收敛到设备允许范围：主 App 下发过屏幕尺寸时按屏幕收敛，
+  /// 否则只按固定上下限收敛（悬浮窗引擎自己查不到屏幕尺寸）。
+  ({double width, double height}) _fitWindowSize(double width, double height) {
+    if (_screenWidth > 0 && _screenHeight > 0) {
+      return fitOverlaySize(
+        (width: width, height: height),
+        screenWidth: _screenWidth,
+        screenHeight: _screenHeight,
+      );
+    }
+    return (
+      width: clampOverlayWidth(width),
+      height: clampOverlayHeight(height),
+    );
+  }
+
+  /// 悬浮球菜单里改窗口尺寸：本地立刻重排，并记下待落盘的尺寸。
+  void _setWindowSize(double width, double height) {
+    final ({double width, double height}) next = _fitWindowSize(width, height);
+    if (next.width == _windowSize.width && next.height == _windowSize.height) {
+      return;
+    }
+    setState(() {
+      _windowSize = Size(next.width, next.height);
+      _mergePatch(windowWidth: next.width, windowHeight: next.height);
+    });
+    final double dpr = View.of(context).devicePixelRatio;
+    unawaited(
+      FlutterScreenOverlay.resizeOverlay(
+        (next.width * dpr).round(),
+        (next.height * dpr).round(),
+        !_dragDisabled,
+      ),
+    );
+    _scheduleReport();
+  }
+
+  /// 悬浮球菜单里「适配尺寸」：按当前栏数套用推荐尺寸。
+  void _fitWindowToPaneCount() {
+    final ({double width, double height}) recommended = _fitWindowSize(
+      recommendedOverlaySize(_webRids.length).width,
+      recommendedOverlaySize(_webRids.length).height,
+    );
+    _setWindowSize(recommended.width, recommended.height);
+  }
+
+  /// 悬浮球菜单里的「添加栏位」：从未绑定的主播里挑一个追加到末尾。
+  Future<void> _addPane() async {
+    final Set<String> bound = _webRids.toSet();
+    final List<RoomOption> candidates = <RoomOption>[
+      for (final RoomOption option in _roomOptions)
+        if (!bound.contains(option.webRid)) option,
+    ];
+    if (candidates.isEmpty) {
+      await _showNotice('没有可添加的主播', '请先在主 App 的主播管理里添加更多主播。');
+      return;
+    }
+    final String? picked = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => _RoomPickerDialog(
+        options: candidates,
+        current: '',
+        fontSize: paneFontSize(_fontSize, _webRids.length + 1),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _webRids = <String>[..._webRids, picked];
+      _reports.clear();
+    });
+    _reportState();
+  }
+
+  /// 悬浮球菜单里的「减少栏位」：移除最后一栏，至少保留一栏。
+  void _removePane() {
+    if (_webRids.length <= 1) return;
+    setState(() {
+      _webRids = _webRids.sublist(0, _webRids.length - 1);
+      // 栏位序号整体前移，旧上报作废；焦点与手势透明度也一并复位。
+      _reports.clear();
+      _focusIndex = null;
+      _gestureOpacity.clear();
+    });
+    _reportState();
+  }
+
+  /// 悬浮球菜单里的「栏位管理」：增删栏位、逐栏切换主播。
+  Future<void> _managePanes() async {
+    if (_roomOptions.isEmpty) {
+      await _showNotice('暂无可切换的主播', '请先在主 App 的主播管理里添加主播。');
+      return;
+    }
+    final List<String>? result = await showDialog<List<String>>(
+      context: context,
+      builder: (BuildContext context) => _PaneManagerDialog(
+        webRids: _webRids,
+        options: _roomOptions,
+        fontSize: _fontSize,
+      ),
+    );
+    if (result == null || !mounted) return;
+    if (_sameWebRids(result, _webRids)) return;
+    setState(() {
+      _webRids = result;
+      _reports.clear();
+      _focusIndex = null;
+      _gestureOpacity.clear();
+    });
+    _reportState();
+  }
+
+  bool _sameWebRids(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (int index = 0; index < a.length; index++) {
+      if (a[index] != b[index]) return false;
+    }
+    return true;
+  }
+
+  /// 悬浮窗内的轻提示（悬浮窗没有 Scaffold，用弹窗代替 SnackBar）。
+  Future<void> _showNotice(String title, String message) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 悬浮球菜单里的「关闭悬浮窗」：先卸载各栏断开连接，再关窗。
+  Future<void> _closeOverlayFromMenu() async {
+    setState(() {
+      _webRids = const <String>[];
+      _reports.clear();
+      _focusIndex = null;
+      _gestureOpacity.clear();
+      _menuOpen = false;
+    });
+    try {
+      await FlutterScreenOverlay.closeOverlay();
+    } on Object catch (exception) {
+      debugPrint('关闭悬浮窗失败（窗口可能已被系统移除）: $exception');
+    }
+  }
+
   /// 按栏位数把窗口切成 rows × columns 网格（prd F4）：
-  /// 1 栏铺满；2~4 栏 2 列；5~9 栏 3 列。每格为标题行 + 弹幕列表两层。
+  /// 1 栏铺满；2~4 栏 2 列；5 栏起 3 列。每格为标题行 + 弹幕列表两层。
   ///
+  /// 只渲染实际存在的栏位：最后一行的空位不再补空栏，否则 3 个主播会画出 4 个格子。
   /// 焦点模式（prd F7）下按行 / 列加权：缩小让位给 3:1，隐藏则用 100:1
   /// 把非焦点栏压到近似零尺寸（仍保留 state，连接不会断）。
   Widget _buildPanes() {
     final OverlayPalette palette = OverlayPalette.of(_lightTheme);
-    String roomAt(int index) =>
-        index < _webRids.length ? _webRids[index] : '';
-
     if (_grid.isSingle) {
-      return _buildPane(index: 0, webRid: roomAt(0), palette: palette);
+      return _buildPane(index: 0, webRid: _webRids.first, palette: palette);
     }
 
+    final int columns = _grid.columns;
+    final int rows = _grid.rows;
     final int? focus = _focusIndex;
     final bool hide = _focusBehavior == focusBehaviorHide;
-    final int focusRow = focus == null ? -1 : focus ~/ _grid.columns;
-    final int focusColumn = focus == null ? -1 : focus % _grid.columns;
+    final int focusRow = focus == null ? -1 : focus ~/ columns;
+    final int focusColumn = focus == null ? -1 : focus % columns;
 
     int rowFlex(int row) => focus == null
         ? 1
@@ -532,7 +970,7 @@ class _OverlayPageState extends State<OverlayPage> {
     /// 非焦点栏在「隐藏」档下保留在树上但不占空间，连接与缓存照旧。
     Widget paneAt(int index) {
       final Widget pane =
-          _buildPane(index: index, webRid: roomAt(index), palette: palette);
+          _buildPane(index: index, webRid: _webRids[index], palette: palette);
       if (focus != null && hide && index != focus) {
         return Visibility(
           visible: false,
@@ -546,15 +984,15 @@ class _OverlayPageState extends State<OverlayPage> {
 
     return Column(
       children: <Widget>[
-        for (int row = 0; row < _grid.rows; row++) ...<Widget>[
+        for (int row = 0; row < rows; row++) ...<Widget>[
           if (row > 0)
             Divider(height: 1, thickness: 1, color: palette.divider),
           Expanded(
             flex: rowFlex(row),
             child: Row(
               children: <Widget>[
-                for (int column = 0; column < _grid.columns; column++)
-                  ...<Widget>[
+                for (int column = 0; column < columns; column++)
+                  if (row * columns + column < _webRids.length) ...<Widget>[
                     if (column > 0)
                       VerticalDivider(
                         width: 1,
@@ -563,7 +1001,7 @@ class _OverlayPageState extends State<OverlayPage> {
                       ),
                     Expanded(
                       flex: columnFlex(row, column),
-                      child: paneAt(row * _grid.columns + column),
+                      child: paneAt(row * columns + column),
                     ),
                   ],
               ],
@@ -872,11 +1310,20 @@ class _OverlayPaneState extends State<_OverlayPane> {
   }
 
   /// 写入列表缓存并裁剪到展示上限。
+  ///
+  /// 暂停时不裁剪头部：裁剪会让列表整体上移，看起来像「暂停了还在滚动」。
+  /// 暂停期间只追加，等继续后（自动滚到底部）再按上限裁剪。
   void _addToRaw(DanmakuEvent event) {
     _raw.add(event);
-    if (_raw.length > _displayLimit) {
-      _raw.removeRange(0, _raw.length - _displayLimit);
+    if (_raw.length <= _displayLimit) return;
+    if (_paused) {
+      // 允许短时超出上限，避免暂停时列表位移；上限留一倍余量兜住内存。
+      if (_raw.length > _displayLimit * 2) {
+        _raw.removeRange(0, _displayLimit);
+      }
+      return;
     }
+    _raw.removeRange(0, _raw.length - _displayLimit);
   }
 
   void _report() {
@@ -1333,6 +1780,171 @@ class _RoomPickerDialog extends StatelessWidget {
         style: TextStyle(fontSize: smallerFontSize(fontSize, 4)),
       ),
       onTap: () => Navigator.of(context).pop(option.webRid),
+    );
+  }
+}
+
+/// 栏位管理弹窗（悬浮球菜单入口）：增 / 减栏位、逐栏切换主播。
+///
+/// 在弹窗里改的是一份副本，点「保存」才回传；取消则完全不动窗口。
+class _PaneManagerDialog extends StatefulWidget {
+  const _PaneManagerDialog({
+    required this.webRids,
+    required this.options,
+    required this.fontSize,
+  });
+
+  /// 当前各栏绑定的直播间号，按栏位顺序。
+  final List<String> webRids;
+
+  /// 全部候选房间（主 App 的主播列表），用于换绑。
+  final List<RoomOption> options;
+
+  /// 全局字号：弹窗文字按它缩小，小窗口里也不会撑破。
+  final double fontSize;
+
+  @override
+  State<_PaneManagerDialog> createState() => _PaneManagerDialogState();
+}
+
+class _PaneManagerDialogState extends State<_PaneManagerDialog> {
+  late final List<String> _webRids = List<String>.of(widget.webRids);
+
+  /// 未绑定的候选房间，用于「添加栏位」。
+  List<RoomOption> get _unbound => <RoomOption>[
+        for (final RoomOption option in widget.options)
+          if (!_webRids.contains(option.webRid)) option,
+      ];
+
+  String _label(String webRid) {
+    for (final RoomOption option in widget.options) {
+      if (option.webRid == webRid && option.name.isNotEmpty) return option.name;
+    }
+    return webRid;
+  }
+
+  Future<String?> _pickRoom({
+    required List<RoomOption> candidates,
+    required String current,
+  }) =>
+      showDialog<String>(
+        context: context,
+        builder: (BuildContext context) => _RoomPickerDialog(
+          options: candidates,
+          current: current,
+          fontSize: widget.fontSize,
+        ),
+      );
+
+  /// 换绑某栏（候选是全部主播，方便换回来）。
+  Future<void> _switch(int index) async {
+    final String? picked = await _pickRoom(
+      candidates: widget.options,
+      current: _webRids[index],
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _webRids[index] = picked);
+  }
+
+  Future<void> _add() async {
+    final List<RoomOption> candidates = _unbound;
+    if (candidates.isEmpty) return;
+    final String? picked = await _pickRoom(candidates: candidates, current: '');
+    if (picked == null || !mounted) return;
+    setState(() => _webRids.add(picked));
+  }
+
+  void _removeAt(int index) {
+    if (_webRids.length <= 1) return;
+    setState(() => _webRids.removeAt(index));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final double titleSize = smallerFontSize(widget.fontSize, 1);
+    final double subSize = smallerFontSize(widget.fontSize, 3);
+    return AlertDialog(
+      title: const Text('栏位管理'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              '当前 ${_webRids.length} 栏；栏位过多时单格会变小，可配合「适配尺寸」调大窗口。',
+              style: TextStyle(fontSize: subSize, color: Colors.grey),
+            ),
+            const SizedBox(height: 4),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 300),
+              child: ListView(
+                shrinkWrap: true,
+                children: <Widget>[
+                  for (int index = 0; index < _webRids.length; index++)
+                    ListTile(
+                      dense: true,
+                      title: Text(
+                        '第 ${index + 1} 栏',
+                        style: TextStyle(fontSize: titleSize),
+                      ),
+                      subtitle: Text(
+                        '${_label(_webRids[index])}（${_webRids[index]}）',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: subSize),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          TextButton(
+                            onPressed: () => _switch(index),
+                            style: TextButton.styleFrom(
+                              minimumSize: Size.zero,
+                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: Text('切换', style: TextStyle(fontSize: subSize)),
+                          ),
+                          IconButton(
+                            tooltip: '移除本栏',
+                            iconSize: 18,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: _webRids.length > 1
+                                ? () => _removeAt(index)
+                                : null,
+                            icon: const Icon(Icons.remove_circle_outline),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _unbound.isEmpty ? null : _add,
+                icon: const Icon(Icons.add, size: 18),
+                label: Text(
+                  _unbound.isEmpty ? '已无未添加的主播' : '添加栏位',
+                  style: TextStyle(fontSize: titleSize),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(List<String>.of(_webRids)),
+          child: const Text('保存'),
+        ),
+      ],
     );
   }
 }

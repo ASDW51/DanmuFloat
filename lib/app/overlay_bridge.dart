@@ -143,25 +143,24 @@ double overlayHeightLimit(double screenHeight) =>
       <= 2 => (width: 400, height: 320),
       <= 4 => (width: 400, height: 560),
       <= 6 => (width: 560, height: 560),
-      _ => (width: 560, height: 800),
+      <= 9 => (width: 560, height: 800),
+      _ => (width: 720, height: 900),
     };
-
-/// 悬浮窗最多支持的栏数（prd F3：3×3 网格）。
-const int maxPaneCount = 9;
 
 /// 无需二次确认的最大栏数（prd F4）：超过 4 栏属于高性能模式，切换前强制确认。
 const int maxStandardPaneCount = 4;
 
-/// 悬浮窗分栏网格（prd F3）：1~9 栏，最多 3 列 3 行。
+/// 悬浮窗分栏网格：不再限制栏位上限，列数按栏位数推导、行数向上取整。
 ///
 /// 布局完全由栏位数推导，没有额外选项，故不占用协议字段单独传递。
+/// 栏位过多时单格会变小，由用户自行配合窗口尺寸调整（悬浮球菜单里可增 / 减栏位）。
 class OverlayGrid {
   const OverlayGrid(this.count);
 
   /// 栏位数，等于本次要连接的房间数。
   final int count;
 
-  /// 列数：1 栏单列铺满；2~4 栏 2 列；5~9 栏 3 列。
+  /// 列数：1 栏单列铺满；2~4 栏 2 列；5 栏起 3 列。
   int get columns => count <= 1 ? 1 : (count <= 4 ? 2 : 3);
 
   /// 行数（向上取整）。
@@ -339,6 +338,7 @@ class OverlayConfig {
     this.lightTheme = false,
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
+    this.dragLocked = false,
   });
 
   /// 各栏绑定的直播间号，按栏位顺序排列（栏 0 在前）。
@@ -371,6 +371,9 @@ class OverlayConfig {
   /// 焦点模式下其余栏的处理方式（prd F7）：缩小或隐藏。
   final String focusBehavior;
 
+  /// 是否锁定窗口位置（prd F21 延伸）：锁定后窗口不能拖动，栏内列表才能正常滑动。
+  final bool dragLocked;
+
   /// 由房间数推导的网格布局。
   OverlayGrid get grid => OverlayGrid(webRids.length);
 
@@ -386,6 +389,7 @@ class OverlayConfig {
         'lightTheme': lightTheme,
         'showTitleBar': showTitleBar,
         'focusBehavior': clampFocusBehavior(focusBehavior),
+        'dragLocked': dragLocked,
       };
 
   /// 解析主 App 下发的消息；非 config 消息或没有任何有效房间时返回 null。
@@ -420,6 +424,7 @@ class OverlayConfig {
       lightTheme: raw['lightTheme'] == true,
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
+      dragLocked: raw['dragLocked'] == true,
     );
   }
 }
@@ -515,6 +520,9 @@ class OverlayStyle {
     this.lightTheme = false,
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
+    this.dragLocked = false,
+    this.screenWidth = 0,
+    this.screenHeight = 0,
   });
 
   final double opacity;
@@ -533,6 +541,14 @@ class OverlayStyle {
   /// 焦点模式下其余栏的处理方式（prd F7）。
   final String focusBehavior;
 
+  /// 是否锁定窗口位置；锁定后窗口不能拖动（悬浮球菜单可切换）。
+  final bool dragLocked;
+
+  /// 设备屏幕逻辑尺寸：悬浮窗引擎里查不到屏幕尺寸，只能由主 App 下发，
+  /// 供悬浮球菜单调整窗口尺寸时收敛（避免放大后溢出屏幕）。0 表示未知。
+  final double screenWidth;
+  final double screenHeight;
+
   Map<String, Object?> toJson() => <String, Object?>{
         'type': overlayStyleType,
         'opacity': clampOverlayOpacity(opacity),
@@ -542,6 +558,9 @@ class OverlayStyle {
         'lightTheme': lightTheme,
         'showTitleBar': showTitleBar,
         'focusBehavior': clampFocusBehavior(focusBehavior),
+        'dragLocked': dragLocked,
+        if (screenWidth > 0) 'screenWidth': screenWidth,
+        if (screenHeight > 0) 'screenHeight': screenHeight,
       };
 
   /// 解析样式消息；非 style 消息或缺少透明度时返回 null。
@@ -551,6 +570,8 @@ class OverlayStyle {
     if (opacity is! num) return null;
     final Object? fontSize = raw['fontSize'];
     final Object? scrollSpeed = raw['scrollSpeed'];
+    final Object? screenWidth = raw['screenWidth'];
+    final Object? screenHeight = raw['screenHeight'];
     return OverlayStyle(
       opacity: clampOverlayOpacity(opacity.toDouble()),
       fontSize: fontSize is num
@@ -563,6 +584,13 @@ class OverlayStyle {
       lightTheme: raw['lightTheme'] == true,
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
+      dragLocked: raw['dragLocked'] == true,
+      screenWidth: screenWidth is num && screenWidth > 0
+          ? screenWidth.toDouble()
+          : 0,
+      screenHeight: screenHeight is num && screenHeight > 0
+          ? screenHeight.toDouble()
+          : 0,
     );
   }
 }
@@ -603,6 +631,65 @@ class OverlayCredential {
 Map<String, Object?> buildOverlayCloseMessage() =>
     <String, Object?>{'type': overlayCloseType};
 
+/// 悬浮窗内改动、需要主 App 落盘的偏好增量（悬浮球菜单用）。
+///
+/// 悬浮窗引擎写不了主 App 的偏好文件（两个引擎不共享内存），用户在悬浮球里
+/// 改了透明度 / 尺寸 / 锁定后，把变化随状态上报，由主 App 合并进 [OverlayPrefs]。
+/// 字段为 null 表示本次没有改动，避免每秒上报都触发一次落盘。
+class OverlayPrefsPatch {
+  const OverlayPrefsPatch({
+    this.opacity,
+    this.fontSize,
+    this.windowWidth,
+    this.windowHeight,
+    this.dragLocked,
+  });
+
+  final double? opacity;
+  final double? fontSize;
+  final double? windowWidth;
+  final double? windowHeight;
+  final bool? dragLocked;
+
+  bool get isEmpty =>
+      opacity == null &&
+      fontSize == null &&
+      windowWidth == null &&
+      windowHeight == null &&
+      dragLocked == null;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+        if (opacity != null) 'opacity': clampOverlayOpacity(opacity!),
+        if (fontSize != null) 'fontSize': clampDanmuFontSize(fontSize!),
+        if (windowWidth != null) 'windowWidth': clampOverlayWidth(windowWidth!),
+        if (windowHeight != null)
+          'windowHeight': clampOverlayHeight(windowHeight!),
+        if (dragLocked != null) 'dragLocked': dragLocked,
+      };
+
+  /// 解析偏好增量；非对象或没有任何字段时返回 null。
+  static OverlayPrefsPatch? tryParse(Object? raw) {
+    if (raw is! Map) return null;
+    final Object? opacity = raw['opacity'];
+    final Object? fontSize = raw['fontSize'];
+    final Object? windowWidth = raw['windowWidth'];
+    final Object? windowHeight = raw['windowHeight'];
+    final Object? dragLocked = raw['dragLocked'];
+    final OverlayPrefsPatch patch = OverlayPrefsPatch(
+      opacity: opacity is num ? clampOverlayOpacity(opacity.toDouble()) : null,
+      fontSize:
+          fontSize is num ? clampDanmuFontSize(fontSize.toDouble()) : null,
+      windowWidth:
+          windowWidth is num ? clampOverlayWidth(windowWidth.toDouble()) : null,
+      windowHeight: windowHeight is num
+          ? clampOverlayHeight(windowHeight.toDouble())
+          : null,
+      dragLocked: dragLocked is bool ? dragLocked : null,
+    );
+    return patch.isEmpty ? null : patch;
+  }
+}
+
 /// 悬浮窗上报给主 App 的运行状态。
 ///
 /// 多栏布局下这里是**各栏聚合结果**：阶段取最需要注意的一栏，条数为各栏之和。
@@ -615,6 +702,7 @@ class OverlayStatus {
     this.error,
     this.permissionRevoked = false,
     this.webRids = const <String>[],
+    this.prefsPatch,
   });
 
   final LiveSessionStage stage;
@@ -630,6 +718,10 @@ class OverlayStatus {
   /// 悬浮窗把最新绑定回报给主 App，由主 App 写入本地偏好持久化。
   final List<String> webRids;
 
+  /// 悬浮球菜单里改动的偏好增量（透明度 / 字号 / 窗口尺寸 / 锁定）；
+  /// null 表示本次上报没有改动，主 App 不需要落盘。
+  final OverlayPrefsPatch? prefsPatch;
+
   Map<String, Object?> toJson() => <String, Object?>{
         'type': overlayStateType,
         'stage': stage.name,
@@ -638,6 +730,8 @@ class OverlayStatus {
         'error': error,
         'permissionRevoked': permissionRevoked,
         if (webRids.isNotEmpty) 'webRids': webRids,
+        if (prefsPatch != null && !prefsPatch!.isEmpty)
+          'prefs': prefsPatch!.toJson(),
       };
 
   /// 解析悬浮窗上报的消息；非 state 消息时返回 null。
@@ -665,6 +759,7 @@ class OverlayStatus {
                 if (item is String && item.trim().isNotEmpty) item.trim(),
             ]
           : const <String>[],
+      prefsPatch: OverlayPrefsPatch.tryParse(raw['prefs']),
     );
   }
 }

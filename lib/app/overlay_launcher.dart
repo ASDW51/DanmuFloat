@@ -22,6 +22,17 @@ bool _overlayShown = false;
 /// 窗口当前是否已建立（供调用方决定走建窗还是重排）。
 bool get overlayShown => _overlayShown;
 
+/// 窗口拖动是否已锁定（锁定后栏内列表才能正常上下滑动）。
+///
+/// 插件只通过 `resizeOverlay(w, h, enableDrag)` 写这个开关，因此每次改尺寸
+/// 都必须带上当前锁定状态，否则会把锁定冲掉。
+bool _dragLocked = false;
+
+/// 记录窗口拖动锁定状态（悬浮窗侧切换后主 App 落盘时同步过来）。
+void setOverlayDragLock(bool locked) {
+  _dragLocked = locked;
+}
+
 /// 只查询悬浮窗权限，不发起申请（首页常驻 banner 用）。
 ///
 /// 通道不可用（非 Android 运行）或查询抛错时按「未授予」处理：首页只会多显示
@@ -55,7 +66,8 @@ Future<void> resizeOverlayWindow(
   await FlutterScreenOverlay.resizeOverlay(
     (size.width * devicePixelRatio).round(),
     (size.height * devicePixelRatio).round(),
-    true,
+    // 改尺寸时必须带上当前锁定状态，否则插件会把拖动重新打开。
+    !_dragLocked,
   );
 }
 
@@ -92,6 +104,7 @@ Future<void> resizeOverlay(
   required ({double width, double height}) size,
 }) async {
   _overlayShown = true;
+  _dragLocked = config.dragLocked;
   await resizeOverlayWindow(size, devicePixelRatio: devicePixelRatio);
   // 凭证先于配置下发：新栏位在收到 config 后立刻开始连接，先到才能生效。
   await shareOverlayCredential(manualCookies);
@@ -108,12 +121,13 @@ Future<void> openOverlay(
     width: (size.width * devicePixelRatio).round(),
     height: (size.height * devicePixelRatio).round(),
     alignment: OverlayAlignment.centerRight,
-    enableDrag: true,
+    enableDrag: !config.dragLocked,
     positionGravity: PositionGravity.auto,
     overlayTitle: 'DanmuFloat',
     overlayContent: '正在显示弹幕悬浮窗',
   );
   _overlayShown = true;
+  _dragLocked = config.dragLocked;
   // 窗口建立后下发配置：此时悬浮窗引擎已随主 App 启动预热完毕。
   await shareOverlayCredential(manualCookies);
   await shareOverlayConfig(config);
@@ -130,7 +144,7 @@ Future<void> shareOverlayCredential(String? cookies) async {
 Future<void> shareOverlayConfig(OverlayConfig config) =>
     FlutterScreenOverlay.shareData(config.toJson());
 
-/// 只推样式（透明度 + 字号 + 滚动速度 + 各栏覆盖 + 皮肤 / 标识 / 焦点行为），
+/// 只推样式（透明度 + 字号 + 滚动速度 + 各栏覆盖 + 皮肤 / 标识 / 焦点行为 / 锁定），
 /// 不动各栏已绑定的房间：设置页调样式走这里。
 ///
 /// 窗口没开时直接忽略：消息通道另一端没有监听者。
@@ -142,7 +156,12 @@ Future<void> shareOverlayStyle({
   bool lightTheme = false,
   bool showTitleBar = true,
   String focusBehavior = defaultFocusBehavior,
+  bool dragLocked = false,
+  double screenWidth = 0,
+  double screenHeight = 0,
 }) async {
+  // 主 App 侧的偏好是权威值：先记下锁定状态，后续改尺寸才不会被拖动开关冲掉。
+  _dragLocked = dragLocked;
   if (!_overlayShown) return;
   await FlutterScreenOverlay.shareData(
     OverlayStyle(
@@ -153,6 +172,9 @@ Future<void> shareOverlayStyle({
       lightTheme: lightTheme,
       showTitleBar: showTitleBar,
       focusBehavior: focusBehavior,
+      dragLocked: dragLocked,
+      screenWidth: screenWidth,
+      screenHeight: screenHeight,
     ).toJson(),
   );
 }
