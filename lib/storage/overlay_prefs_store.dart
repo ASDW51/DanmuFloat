@@ -28,6 +28,7 @@ class OverlayPrefs {
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
     this.dragLocked = false,
+    this.ballCorner = 0,
   });
 
   /// 上次勾选的主播，按栏位顺序排列（下次打开多栏弹窗时据此预勾选）。
@@ -63,6 +64,9 @@ class OverlayPrefs {
   /// 是否锁定窗口位置：锁定后窗口不能拖动，栏内弹幕列表才能正常上下滑动。
   final bool dragLocked;
 
+  /// 悬浮球吸附在窗口的哪个角（0 左上 / 1 右上 / 2 左下 / 3 右下）。
+  final int ballCorner;
+
   /// 窗口尺寸，供建窗 / 重排窗口时使用。
   ({double width, double height}) get windowSize => (
         width: clampOverlayWidth(windowWidth),
@@ -81,6 +85,7 @@ class OverlayPrefs {
     bool? showTitleBar,
     String? focusBehavior,
     bool? dragLocked,
+    int? ballCorner,
   }) =>
       OverlayPrefs(
         webRids: webRids ?? this.webRids,
@@ -94,6 +99,7 @@ class OverlayPrefs {
         showTitleBar: showTitleBar ?? this.showTitleBar,
         focusBehavior: focusBehavior ?? this.focusBehavior,
         dragLocked: dragLocked ?? this.dragLocked,
+        ballCorner: ballCorner ?? this.ballCorner,
       );
 
   /// 合并悬浮窗上报的偏好增量（悬浮球菜单改的部分）。
@@ -109,6 +115,7 @@ class OverlayPrefs {
         showTitleBar: showTitleBar,
         focusBehavior: focusBehavior,
         dragLocked: patch.dragLocked ?? dragLocked,
+        ballCorner: patch.ballCorner ?? ballCorner,
       );
 
   /// 组装成下发给悬浮窗的配置。
@@ -134,6 +141,7 @@ class OverlayPrefs {
         showTitleBar: showTitleBar,
         focusBehavior: clampFocusBehavior(focusBehavior),
         dragLocked: dragLocked,
+        ballCorner: clampBallCorner(ballCorner),
       );
 
   /// 只保留当前绑定的房间的样式，避免下发时带上已解绑房间的冗余覆盖。
@@ -159,6 +167,7 @@ class OverlayPrefs {
         'showTitleBar': showTitleBar,
         'focusBehavior': clampFocusBehavior(focusBehavior),
         'dragLocked': dragLocked,
+        'ballCorner': clampBallCorner(ballCorner),
         'window': <String, Object?>{
           'width': clampOverlayWidth(windowWidth),
           'height': clampOverlayHeight(windowHeight),
@@ -197,6 +206,7 @@ class OverlayPrefs {
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
       dragLocked: raw['dragLocked'] == true,
+      ballCorner: clampBallCorner(raw['ballCorner']),
     );
   }
 

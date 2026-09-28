@@ -181,6 +181,31 @@ void main() {
         defaultFocusBehavior,
       );
     });
+
+    test('悬浮球吸附角经 JSON 往返后保留，缺省与越界都回落左上角', () {
+      final OverlayPrefs? parsed = OverlayPrefs.tryParse(
+        const OverlayPrefs(ballCorner: 2).toJson(),
+      );
+      expect(parsed!.ballCorner, 2);
+      // 吸附角随 config 下发给悬浮窗，否则重开窗会回到左上角。
+      expect(parsed.toConfig(<String>['735']).ballCorner, 2);
+
+      expect(OverlayPrefs.tryParse(const OverlayPrefs().toJson())!.ballCorner, 0);
+      expect(
+        OverlayPrefs.tryParse(const OverlayPrefs(ballCorner: 9).toJson())!
+            .ballCorner,
+        0,
+      );
+    });
+
+    test('悬浮球吸附角走偏好增量合并，未改动的字段原样保留', () {
+      const OverlayPrefs prefs = OverlayPrefs(ballCorner: 1, opacity: 0.5);
+      final OverlayPrefs merged = prefs.appliedPatch(
+        const OverlayPrefsPatch(ballCorner: 3),
+      );
+      expect(merged.ballCorner, 3);
+      expect(merged.opacity, 0.5);
+    });
   });
 
   group('encodeOverlayPrefs / decodeOverlayPrefs', () {

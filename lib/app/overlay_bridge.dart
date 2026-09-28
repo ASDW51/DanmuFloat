@@ -78,6 +78,16 @@ const String defaultFocusBehavior = focusBehaviorShrink;
 String clampFocusBehavior(Object? value) =>
     value == focusBehaviorHide ? focusBehaviorHide : focusBehaviorShrink;
 
+/// 悬浮球在窗口内的吸附角：0 左上 / 1 右上 / 2 左下 / 3 右下。
+const int ballCornerCount = 4;
+
+/// 四个吸附角在菜单里的显示名，顺序与 [clampBallCorner] 的取值一致。
+const List<String> ballCornerLabels = <String>['左上', '右上', '左下', '右下'];
+
+/// 收敛悬浮球吸附角：不认识的值一律回落左上角。
+int clampBallCorner(Object? value) =>
+    value is int && value >= 0 && value < ballCornerCount ? value : 0;
+
 /// 设备实际允许的窗口宽度上限：固定上限与屏幕宽度取小。
 ///
 /// 插件把宽高换算成物理像素后直接写进 Android WindowManager，
@@ -339,6 +349,7 @@ class OverlayConfig {
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
     this.dragLocked = false,
+    this.ballCorner = 0,
   });
 
   /// 各栏绑定的直播间号，按栏位顺序排列（栏 0 在前）。
@@ -374,6 +385,9 @@ class OverlayConfig {
   /// 是否锁定窗口位置（prd F21 延伸）：锁定后窗口不能拖动，栏内列表才能正常滑动。
   final bool dragLocked;
 
+  /// 悬浮球吸附在窗口的哪个角（0 左上 / 1 右上 / 2 左下 / 3 右下）。
+  final int ballCorner;
+
   /// 由房间数推导的网格布局。
   OverlayGrid get grid => OverlayGrid(webRids.length);
 
@@ -390,6 +404,7 @@ class OverlayConfig {
         'showTitleBar': showTitleBar,
         'focusBehavior': clampFocusBehavior(focusBehavior),
         'dragLocked': dragLocked,
+        'ballCorner': clampBallCorner(ballCorner),
       };
 
   /// 解析主 App 下发的消息；非 config 消息或没有任何有效房间时返回 null。
@@ -425,6 +440,7 @@ class OverlayConfig {
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
       dragLocked: raw['dragLocked'] == true,
+      ballCorner: clampBallCorner(raw['ballCorner']),
     );
   }
 }
@@ -643,6 +659,7 @@ class OverlayPrefsPatch {
     this.windowWidth,
     this.windowHeight,
     this.dragLocked,
+    this.ballCorner,
   });
 
   final double? opacity;
@@ -650,13 +667,15 @@ class OverlayPrefsPatch {
   final double? windowWidth;
   final double? windowHeight;
   final bool? dragLocked;
+  final int? ballCorner;
 
   bool get isEmpty =>
       opacity == null &&
       fontSize == null &&
       windowWidth == null &&
       windowHeight == null &&
-      dragLocked == null;
+      dragLocked == null &&
+      ballCorner == null;
 
   Map<String, Object?> toJson() => <String, Object?>{
         if (opacity != null) 'opacity': clampOverlayOpacity(opacity!),
@@ -665,6 +684,7 @@ class OverlayPrefsPatch {
         if (windowHeight != null)
           'windowHeight': clampOverlayHeight(windowHeight!),
         if (dragLocked != null) 'dragLocked': dragLocked,
+        if (ballCorner != null) 'ballCorner': clampBallCorner(ballCorner!),
       };
 
   /// 解析偏好增量；非对象或没有任何字段时返回 null。
@@ -675,6 +695,7 @@ class OverlayPrefsPatch {
     final Object? windowWidth = raw['windowWidth'];
     final Object? windowHeight = raw['windowHeight'];
     final Object? dragLocked = raw['dragLocked'];
+    final Object? ballCorner = raw['ballCorner'];
     final OverlayPrefsPatch patch = OverlayPrefsPatch(
       opacity: opacity is num ? clampOverlayOpacity(opacity.toDouble()) : null,
       fontSize:
@@ -685,6 +706,7 @@ class OverlayPrefsPatch {
           ? clampOverlayHeight(windowHeight.toDouble())
           : null,
       dragLocked: dragLocked is bool ? dragLocked : null,
+      ballCorner: ballCorner is int ? clampBallCorner(ballCorner) : null,
     );
     return patch.isEmpty ? null : patch;
   }

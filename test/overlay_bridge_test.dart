@@ -601,6 +601,44 @@ void main() {
     });
   });
 
+  group('悬浮球吸附角与偏好增量', () {
+    test('clampBallCorner 只放行 0~3，其余回落左上角', () {
+      expect(clampBallCorner(3), 3);
+      expect(clampBallCorner(-1), 0);
+      expect(clampBallCorner(ballCornerCount), 0);
+      expect(clampBallCorner('右下'), 0);
+      expect(clampBallCorner(null), 0);
+    });
+
+    test('config 经 JSON 往返保留吸附角，缺省回落左上角', () {
+      final OverlayConfig? parsed = OverlayConfig.tryParse(
+        roundTrip(const OverlayConfig(
+          webRids: <String>['735'],
+          ballCorner: 3,
+        ).toJson()),
+      );
+      expect(parsed!.ballCorner, 3);
+      final OverlayConfig? legacy = OverlayConfig.tryParse(
+        roundTrip(const OverlayConfig(webRids: <String>['735']).toJson()),
+      );
+      expect(legacy!.ballCorner, 0);
+    });
+
+    test('偏好增量只带改过的字段，全空时解析为 null', () {
+      final OverlayPrefsPatch? patch = OverlayPrefsPatch.tryParse(
+        roundTrip(const OverlayPrefsPatch(ballCorner: 2).toJson()),
+      );
+      expect(patch!.ballCorner, 2);
+      expect(patch.opacity, isNull);
+      expect(patch.dragLocked, isNull);
+      expect(patch.isEmpty, isFalse);
+      expect(
+        OverlayPrefsPatch.tryParse(roundTrip(const <String, Object?>{})),
+        isNull,
+      );
+    });
+  });
+
   test('close 指令识别，主 App 构造的关闭载荷可被悬浮窗识别', () {
     expect(isOverlayCloseMessage(roundTrip(buildOverlayCloseMessage())), isTrue);
     expect(isOverlayCloseMessage(roundTrip(<String, Object?>{'type': 'close'})),

@@ -241,6 +241,13 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 悬浮球菜单是否展开。
   bool _menuOpen = false;
 
+  /// 悬浮球吸附在窗口的哪个角（0 左上 / 1 右上 / 2 左下 / 3 右下）。
+  int _ballCorner = 0;
+
+  /// 是否临时隐藏悬浮球（仅本次会话有效）：隐藏后双击窗口任意位置唤回，
+  /// 不落盘——否则下次开窗用户会找不到入口。
+  bool _ballHidden = false;
+
   /// 本窗口当前的逻辑尺寸；展开菜单时取一次，之后随本地改尺寸同步。
   Size _windowSize = Size.zero;
 
@@ -339,6 +346,7 @@ class _OverlayPageState extends State<OverlayPage> {
       _showTitleBar = config.showTitleBar;
       _focusBehavior = config.focusBehavior;
       _dragLocked = config.dragLocked;
+      _ballCorner = config.ballCorner;
       // 布局或房间变化会重建对应栏位，旧栏位的上报先作废。
       _reports.clear();
       // 栏位重排后原来的焦点与手势透明度都不再对应同一栏，一并复位。
@@ -495,14 +503,17 @@ class _OverlayPageState extends State<OverlayPage> {
             ),
             // 悬浮球：点开是一个功能菜单（锁定移动 / 栏位增删与切换 / 尺寸 / 透明度）。
             // 悬浮窗没有系统控件，窗口内的操作入口只能自己画。
-            Positioned(left: 3, top: 3, child: _buildBall(palette)),
-            if (_menuOpen)
-              Positioned(
-                left: 3,
-                top: 30,
-                right: 3,
-                bottom: 3,
-                child: _buildMenu(palette),
+            if (!_ballHidden) _buildBallLayer(palette),
+            if (_menuOpen && !_ballHidden) _buildMenuLayer(palette),
+            // 悬浮球隐藏后唯一的唤回入口：双击窗口任意位置。
+            // 用 translucent 命中，弹幕列表的滑动不受影响。
+            if (_ballHidden)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onDoubleTap: _revealBall,
+                  child: const SizedBox.expand(),
+                ),
               ),
           ],
         ),
@@ -510,24 +521,54 @@ class _OverlayPageState extends State<OverlayPage> {
     );
   }
 
+  /// 悬浮球所在的角：吸附到用户选的位置；右下角要让开合规角标（prd F25 硬要求）。
+  Widget _buildBallLayer(OverlayPalette palette) {
+    final bool right = _ballCorner.isOdd;
+    final bool bottom = _ballCorner >= 2;
+    return Positioned(
+      left: right ? null : 3,
+      right: right ? 3 : null,
+      top: bottom ? null : 3,
+      bottom: bottom ? (right ? 22 : 3) : null,
+      child: _buildBall(palette),
+    );
+  }
+
+  /// 悬浮球菜单：铺满窗口在球反侧的剩余空间，球在下方时从下往上展开。
+  Widget _buildMenuLayer(OverlayPalette palette) {
+    final bool bottom = _ballCorner >= 2;
+    return Positioned(
+      left: 3,
+      right: 3,
+      top: bottom ? 3 : 30,
+      bottom: bottom ? 30 : 3,
+      child: _buildMenu(palette),
+    );
+  }
+
   /// 悬浮球：未展开时是「调节」图标，展开后变成关闭图标。
-  Widget _buildBall(OverlayPalette palette) => Material(
-        color: palette.isLight ? Colors.white70 : Colors.black54,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () => setState(() {
-            _menuOpen = !_menuOpen;
-            // 展开时按当前实际窗口尺寸初始化滑杆取值。
-            if (_menuOpen) _windowSize = MediaQuery.sizeOf(context);
-          }),
-          child: SizedBox(
-            width: 24,
-            height: 24,
-            child: Icon(
-              _menuOpen ? Icons.close : Icons.tune,
-              size: 15,
-              color: palette.chrome,
+  ///
+  /// 闲置时半透明，避免一个小圆钮一直压在弹幕上；展开或按下时加深到接近不透明。
+  Widget _buildBall(OverlayPalette palette) => Opacity(
+        opacity: _menuOpen ? 0.95 : 0.4,
+        child: Material(
+          color: palette.isLight ? Colors.white70 : Colors.black54,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () => setState(() {
+              _menuOpen = !_menuOpen;
+              // 展开时按当前实际窗口尺寸初始化滑杆取值。
+              if (_menuOpen) _windowSize = MediaQuery.sizeOf(context);
+            }),
+            child: SizedBox(
+              width: 24,
+              height: 24,
+              child: Icon(
+                _menuOpen ? Icons.close : Icons.tune,
+                size: 15,
+                color: palette.chrome,
+              ),
             ),
           ),
         ),
@@ -589,6 +630,25 @@ class _OverlayPageState extends State<OverlayPage> {
                   _webRids.length > 1 ? _removePane : null,
                 ),
                 _menuButton(palette, label, '栏位管理', _managePanes),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '悬浮球位置',
+              style: TextStyle(color: palette.chrome, fontSize: label),
+            ),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: <Widget>[
+                for (int corner = 0; corner < ballCornerCount; corner++)
+                  _menuButton(
+                    palette,
+                    label,
+                    ballCornerLabels[corner],
+                    corner == _ballCorner ? null : () => _setBallCorner(corner),
+                  ),
+                _menuButton(palette, label, '隐藏悬浮球', _hideBall),
               ],
             ),
             _menuSlider(
@@ -764,6 +824,7 @@ class _OverlayPageState extends State<OverlayPage> {
     double? windowWidth,
     double? windowHeight,
     bool? dragLocked,
+    int? ballCorner,
   }) {
     final OverlayPrefsPatch base = _pendingPatch ?? const OverlayPrefsPatch();
     _pendingPatch = OverlayPrefsPatch(
@@ -772,8 +833,32 @@ class _OverlayPageState extends State<OverlayPage> {
       windowWidth: windowWidth ?? base.windowWidth,
       windowHeight: windowHeight ?? base.windowHeight,
       dragLocked: dragLocked ?? base.dragLocked,
+      ballCorner: ballCorner ?? base.ballCorner,
     );
   }
+
+  /// 悬浮球吸附到窗口的某个角（0 左上 / 1 右上 / 2 左下 / 3 右下）。
+  void _setBallCorner(int corner) {
+    final int next = clampBallCorner(corner);
+    if (next == _ballCorner) return;
+    setState(() {
+      _ballCorner = next;
+      _mergePatch(ballCorner: next);
+    });
+    _reportState();
+  }
+
+  /// 隐藏悬浮球：入口临时收起，双击窗口任意位置唤回（仅本次会话有效）。
+  void _hideBall() {
+    setState(() {
+      _ballHidden = true;
+      _menuOpen = false;
+    });
+    unawaited(_showNotice('悬浮球已隐藏', '双击悬浮窗内任意位置即可重新显示。'));
+  }
+
+  /// 重新显示悬浮球（隐藏态下的双击唤回）。
+  void _revealBall() => setState(() => _ballHidden = false);
 
   /// 悬浮球菜单里调全局透明度（只影响没有单栏覆盖的栏）。
   void _setGlobalOpacity(double value) {
