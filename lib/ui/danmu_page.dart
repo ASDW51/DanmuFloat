@@ -206,16 +206,23 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
           }
         } else {
           _latestEntry = event;
+          // 在类型筛选里勾选了「进场」时同样入列（prd F13），否则勾了没有效果。
+          if (isListKind(event.kind, _filter)) _addToRaw(event);
         }
       } else if (event.kind != DanmakuKind.roomStats) {
         // 其余相关弹幕先全部入缓存，展示与否在 build 时按过滤口径派生。
-        _raw.add(event);
-        if (_raw.length > _displayLimit) {
-          _raw.removeRange(0, _raw.length - _displayLimit);
-        }
+        _addToRaw(event);
       }
     });
     if (!_paused) _autoScroller.schedule();
+  }
+
+  /// 写入列表缓存并裁剪到展示上限。
+  void _addToRaw(DanmakuEvent event) {
+    _raw.add(event);
+    if (_raw.length > _displayLimit) {
+      _raw.removeRange(0, _raw.length - _displayLimit);
+    }
   }
 
   /// 按当前过滤口径派生的可见列表（prd F10 / F13）。

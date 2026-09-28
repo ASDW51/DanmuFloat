@@ -14,12 +14,15 @@ bool isChatKind(DanmakuKind kind) =>
 
 /// 弹幕流是否与本会话相关。
 ///
+/// 除累计在线人数（[DanmakuKind.roomUserSeq]，推送滞后且只用于在线人数）外，
+/// 所有已登记类型都放行：是否入列由界面按 [FilterPrefs.visibleKinds] 决定
+/// （prd F13）。若在这里提前挡掉礼物 / 点赞 / 关注 / 榜单，设置里勾选这些
+/// 类型后将永远收不到数据，表现为「勾了也不生效」。
+///
 /// 房间统计必须放行：它不进列表，但在线人数只看它
 /// （`DanmakuEvent.onlineCount`），挡掉会让人数一直为 0。
 bool isStreamRelevant(DanmakuKind kind) =>
-    kind == DanmakuKind.member ||
-    kind == DanmakuKind.roomStats ||
-    isChatKind(kind);
+    kind != DanmakuKind.roomUserSeq && kind != DanmakuKind.other;
 
 /// 弹幕类型前缀：普通弹幕无前缀，其余带前缀（prd F6 / F13）。
 ///

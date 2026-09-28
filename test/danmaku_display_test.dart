@@ -14,13 +14,28 @@ void main() {
     expect(isChatKind(DanmakuKind.other), isFalse);
   });
 
-  test('订阅范围含房间统计：它不进列表但在线人数只看它', () {
+  test('订阅范围含房间统计与全部可展示类型：是否入列交给类型筛选决定', () {
     expect(isStreamRelevant(DanmakuKind.roomStats), isTrue);
     expect(isStreamRelevant(DanmakuKind.member), isTrue);
     expect(isStreamRelevant(DanmakuKind.chat), isTrue);
-    expect(isStreamRelevant(DanmakuKind.gift), isFalse);
-    expect(isStreamRelevant(DanmakuKind.roomRank), isFalse);
+    // 礼物 / 点赞 / 关注 / 榜单必须在流层放行，否则设置里勾选这些类型后
+    // 永远收不到数据，表现为「勾了也不生效」。
+    expect(isStreamRelevant(DanmakuKind.gift), isTrue);
+    expect(isStreamRelevant(DanmakuKind.like), isTrue);
+    expect(isStreamRelevant(DanmakuKind.social), isTrue);
+    expect(isStreamRelevant(DanmakuKind.roomRank), isTrue);
+    // 累计观看人次推送滞后、只用于在线人数兜底，不入列也不订阅；
+    // 未登记 method 的文本是 method 名占位，同样不订阅。
+    expect(isStreamRelevant(DanmakuKind.roomUserSeq), isFalse);
     expect(isStreamRelevant(DanmakuKind.other), isFalse);
+  });
+
+  test('勾选某类型后它进入可见列表，未勾选的类型不入列', () {
+    const FilterPrefs onlyGift =
+        FilterPrefs(visibleKinds: <DanmakuKind>{DanmakuKind.gift});
+    expect(isListKind(DanmakuKind.gift, onlyGift), isTrue);
+    expect(isListKind(DanmakuKind.chat, onlyGift), isFalse);
+    expect(isListKind(DanmakuKind.member, onlyGift), isFalse);
   });
 
   test('类型前缀：普通弹幕无前缀', () {

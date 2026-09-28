@@ -857,19 +857,26 @@ class _OverlayPaneState extends State<_OverlayPane> {
           }
         } else {
           _latestEntry = event;
+          // 在类型筛选里勾选了「进场」时同样入列（prd F13），否则勾了没有效果。
+          if (isListKind(event.kind, widget.filter)) _addToRaw(event);
         }
       } else if (event.kind != DanmakuKind.roomStats) {
         // 其余相关弹幕先全部入缓存，展示与否在 build 时按过滤口径决定
         // （这样改屏蔽词 / 类型能立刻作用到已收到的弹幕）。
-        _raw.add(event);
-        if (_raw.length > _displayLimit) {
-          _raw.removeRange(0, _raw.length - _displayLimit);
-        }
+        _addToRaw(event);
       }
     });
     // 暂停时不自动滚动，但弹幕已照常写入缓存，继续后可回看（prd F9 / F12）。
     if (!_paused) _autoScroller.schedule();
     _report();
+  }
+
+  /// 写入列表缓存并裁剪到展示上限。
+  void _addToRaw(DanmakuEvent event) {
+    _raw.add(event);
+    if (_raw.length > _displayLimit) {
+      _raw.removeRange(0, _raw.length - _displayLimit);
+    }
   }
 
   void _report() {
