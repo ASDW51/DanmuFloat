@@ -1232,6 +1232,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
             for (final HighlightSegment segment in splitHighlights(
               event.text,
               widget.filter.highlightKeywords,
+              regex: widget.filter.regexEnabled,
             ))
               TextSpan(
                 text: segment.text,

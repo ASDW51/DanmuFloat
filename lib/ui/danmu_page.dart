@@ -570,6 +570,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
             for (final HighlightSegment segment in splitHighlights(
               event.text,
               _filter.highlightKeywords,
+              regex: _filter.regexEnabled,
             ))
               TextSpan(
                 text: segment.text,

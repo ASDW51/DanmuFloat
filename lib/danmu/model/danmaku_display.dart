@@ -84,6 +84,7 @@ class FilterPrefs {
     this.blockedUsers = const <String>[],
     this.highlightKeywords = const <String>[],
     this.visibleKinds = defaultListKinds,
+    this.regexEnabled = false,
   });
 
   /// 屏蔽关键词：内容包含任一即整条不展示（不区分大小写）。
@@ -98,11 +99,19 @@ class FilterPrefs {
   /// 列表展示哪些类型；默认只聊天类。
   final Set<DanmakuKind> visibleKinds;
 
+  /// 是否把屏蔽词 / 高亮词按正则表达式解析（prd F10 / F11）。
+  ///
+  /// 关闭时按「内容包含该子串」匹配；开启后每条规则都是一个正则表达式，
+  /// 支持 `\d+`、`^开头`、`(a|b)` 等写法。单条规则非法（如括号不闭合）
+  /// 只跳过该条，不影响其它规则。屏蔽用户列表始终按精确匹配，不受此开关影响。
+  final bool regexEnabled;
+
   /// 是否为空偏好（三项都为默认）——用于跳过无谓的重算。
   bool get isDefault =>
       blockedKeywords.isEmpty &&
       blockedUsers.isEmpty &&
       highlightKeywords.isEmpty &&
+      !regexEnabled &&
       _sameKinds(visibleKinds, defaultListKinds);
 
   FilterPrefs copyWith({
@@ -110,12 +119,14 @@ class FilterPrefs {
     List<String>? blockedUsers,
     List<String>? highlightKeywords,
     Set<DanmakuKind>? visibleKinds,
+    bool? regexEnabled,
   }) =>
       FilterPrefs(
         blockedKeywords: blockedKeywords ?? this.blockedKeywords,
         blockedUsers: blockedUsers ?? this.blockedUsers,
         highlightKeywords: highlightKeywords ?? this.highlightKeywords,
         visibleKinds: visibleKinds ?? this.visibleKinds,
+        regexEnabled: regexEnabled ?? this.regexEnabled,
       );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -126,12 +137,13 @@ class FilterPrefs {
           for (final DanmakuKind kind in selectableListKinds)
             if (visibleKinds.contains(kind)) kind.name,
         ],
+        'regexEnabled': regexEnabled,
       };
 
   @override
   String toString() => 'FilterPrefs(blocked: ${blockedKeywords.length}, '
       'users: ${blockedUsers.length}, highlight: ${highlightKeywords.length}, '
-      'kinds: ${visibleKinds.length})';
+      'kinds: ${visibleKinds.length}, regex: $regexEnabled)';
 }
 
 bool _sameKinds(Set<DanmakuKind> a, Set<DanmakuKind> b) =>
@@ -154,16 +166,46 @@ List<String> normalizeKeywordList(List<Object?> raw) {
 bool isListKind(DanmakuKind kind, FilterPrefs prefs) =>
     prefs.visibleKinds.contains(kind);
 
+/// 把一条过滤规则编译成正则（不区分大小写）。
+///
+/// 空规则或写法非法（如括号不闭合、`[` 未配对）时返回 null，由调用方跳过；
+/// 不抛出，避免用户输错一条正则就让整条弹幕流水线报错。
+RegExp? compileFilterRule(String rule) {
+  final String value = rule.trim();
+  if (value.isEmpty) return null;
+  try {
+    return RegExp(value, caseSensitive: false);
+  } on FormatException {
+    return null;
+  }
+}
+
+/// 规则列表里是否有写法非法的正则（设置页提示用，prd F10）。
+List<String> invalidFilterRules(List<String> rules) => <String>[
+      for (final String rule in rules)
+        if (rule.trim().isNotEmpty && compileFilterRule(rule) == null) rule,
+    ];
+
 /// 是否被屏蔽（prd F10）：命中屏蔽词或屏蔽用户。
 ///
+/// 屏蔽词在 [FilterPrefs.regexEnabled] 开启时按正则匹配，关闭时按子串包含；
+/// 屏蔽用户始终按精确匹配（昵称或用户 ID 全等）。
 /// 只做本地 UI 过滤，WebSocket 消息仍照收、仍在缓存之外被丢弃。
 bool isBlockedBy(DanmakuEvent event, FilterPrefs prefs) {
   if (prefs.blockedKeywords.isNotEmpty) {
-    final String content = event.text.toLowerCase();
+    final String content = event.text;
     if (content.isNotEmpty) {
-      for (final String keyword in prefs.blockedKeywords) {
-        if (keyword.isEmpty) continue;
-        if (content.contains(keyword.toLowerCase())) return true;
+      if (prefs.regexEnabled) {
+        for (final String rule in prefs.blockedKeywords) {
+          final RegExp? pattern = compileFilterRule(rule);
+          if (pattern != null && pattern.hasMatch(content)) return true;
+        }
+      } else {
+        final String lower = content.toLowerCase();
+        for (final String keyword in prefs.blockedKeywords) {
+          if (keyword.isEmpty) continue;
+          if (lower.contains(keyword.toLowerCase())) return true;
+        }
       }
     }
   }
@@ -192,29 +234,18 @@ class HighlightSegment {
 
 /// 按高亮词把文本切成若干片段（prd F11）：命中片段 [highlighted] 为真。
 ///
-/// 不区分大小写；多个命中区间重叠时合并，保证片段首尾相接、无重复。
-List<HighlightSegment> splitHighlights(String text, List<String> keywords) {
+/// 不区分大小写；[regex] 为真时每条规则按正则匹配（对应
+/// [FilterPrefs.regexEnabled]），非法规则跳过不报错。
+/// 多个命中区间重叠时合并，保证片段首尾相接、无重复。
+List<HighlightSegment> splitHighlights(
+  String text,
+  List<String> keywords, {
+  bool regex = false,
+}) {
   if (text.isEmpty) return const <HighlightSegment>[];
-  final List<String> usable = <String>[
-    for (final String keyword in keywords)
-      if (keyword.trim().isNotEmpty) keyword.trim().toLowerCase(),
-  ];
-  if (usable.isEmpty) {
-    return <HighlightSegment>[HighlightSegment(text, highlighted: false)];
-  }
-
-  final String lower = text.toLowerCase();
-  final List<({int start, int end})> ranges = <({int start, int end})>[];
-  for (final String keyword in usable) {
-    int from = 0;
-    while (true) {
-      final int index = lower.indexOf(keyword, from);
-      if (index < 0) break;
-      ranges.add((start: index, end: index + keyword.length));
-      // 从命中末尾继续找，避免同一位置重复命中。
-      from = index + keyword.length;
-    }
-  }
+  final List<({int start, int end})> ranges = regex
+      ? _regexHighlightRanges(text, keywords)
+      : _substringHighlightRanges(text, keywords);
   if (ranges.isEmpty) {
     return <HighlightSegment>[HighlightSegment(text, highlighted: false)];
   }
@@ -248,6 +279,49 @@ List<HighlightSegment> splitHighlights(String text, List<String> keywords) {
     segments.add(HighlightSegment(text.substring(cursor), highlighted: false));
   }
   return segments;
+}
+
+/// 普通模式：按子串包含找所有命中区间。
+List<({int start, int end})> _substringHighlightRanges(
+  String text,
+  List<String> keywords,
+) {
+  final List<String> usable = <String>[
+    for (final String keyword in keywords)
+      if (keyword.trim().isNotEmpty) keyword.trim().toLowerCase(),
+  ];
+  if (usable.isEmpty) return const <({int start, int end})>[];
+  final String lower = text.toLowerCase();
+  final List<({int start, int end})> ranges = <({int start, int end})>[];
+  for (final String keyword in usable) {
+    int from = 0;
+    while (true) {
+      final int index = lower.indexOf(keyword, from);
+      if (index < 0) break;
+      ranges.add((start: index, end: index + keyword.length));
+      // 从命中末尾继续找，避免同一位置重复命中。
+      from = index + keyword.length;
+    }
+  }
+  return ranges;
+}
+
+/// 正则模式：每条规则编译后取全部匹配区间；空匹配（如 `a*`）不产生区间。
+List<({int start, int end})> _regexHighlightRanges(
+  String text,
+  List<String> keywords,
+) {
+  final List<({int start, int end})> ranges = <({int start, int end})>[];
+  for (final String rule in keywords) {
+    final RegExp? pattern = compileFilterRule(rule);
+    if (pattern == null) continue;
+    for (final RegExpMatch match in pattern.allMatches(text)) {
+      if (match.end > match.start) {
+        ranges.add((start: match.start, end: match.end));
+      }
+    }
+  }
+  return ranges;
 }
 
 /// 在线人数：过万折算为「x.x万」，与平台展示口径一致。

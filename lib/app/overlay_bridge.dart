@@ -410,6 +410,8 @@ FilterPrefs parseFilterPrefs(Object? raw) {
         : const <String>[],
     visibleKinds:
         visibleKinds is List ? _kindsFromNames(visibleKinds) : defaultListKinds,
+    // 老版本下发的 filter 没有这个键，缺省按关闭处理，等价于原来的子串匹配。
+    regexEnabled: raw['regexEnabled'] == true,
   );
 }
 

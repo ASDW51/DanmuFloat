@@ -11,11 +11,11 @@ import 'package:danmu_float/app/overlay_launcher.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
-import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/theme_store.dart';
 import 'package:danmu_float/ui/disclaimer_page.dart';
+import 'package:danmu_float/ui/filter_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -68,9 +68,42 @@ class _SettingsPageState extends State<SettingsPage> {
   late final FilterStore _filterStore = widget.filterStore ?? FilterStore();
   late final ThemeStore _themeStore = widget.themeStore ?? ThemeStore();
 
+  /// 当前过滤偏好：进二级页面改完回退后要能刷新入口摘要。
+  late FilterPrefs _filter = widget.filter;
+
   void _apply(OverlayPrefs next, {required bool persist}) {
     setState(() => _prefs = next);
     widget.onChanged(next, persist: persist);
+  }
+
+  /// 过滤偏好的落盘由二级页面负责，这里只更新快照并转发给悬浮窗引擎。
+  void _applyFilter(FilterPrefs next) {
+    setState(() => _filter = next);
+    widget.onFilterChanged?.call(next);
+  }
+
+  Future<void> _openFilterPage() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => FilterSettingsPage(
+          prefs: _filter,
+          store: _filterStore,
+          onChanged: _applyFilter,
+        ),
+      ),
+    );
+  }
+
+  /// 入口行摘要：一眼看出当前屏蔽 / 高亮规模与是否开启正则。
+  String _filterSummary() {
+    final FilterPrefs filter = _filter;
+    final StringBuffer buffer = StringBuffer()
+      ..write('屏蔽 ${filter.blockedKeywords.length} 词 / ')
+      ..write('${filter.blockedUsers.length} 用户 · ')
+      ..write('高亮 ${filter.highlightKeywords.length} 词 · ')
+      ..write('类型 ${filter.visibleKinds.length} 种');
+    if (filter.regexEnabled) buffer.write(' · 已开启正则');
+    return buffer.toString();
   }
 
   /// 切换主 App 主题（prd F20）：先改全局通知量让界面立刻换肤，再落盘。
@@ -201,10 +234,12 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const Divider(height: 1),
           const _SectionTitle('屏蔽与高亮'),
-          _FilterSection(
-            prefs: widget.filter,
-            store: _filterStore,
-            onChanged: widget.onFilterChanged,
+          ListTile(
+            leading: const Icon(Icons.filter_alt_outlined),
+            title: const Text('屏蔽关键词 / 屏蔽用户 / 高亮词'),
+            subtitle: Text(_filterSummary(), style: const TextStyle(fontSize: 12)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _openFilterPage,
           ),
           const Divider(height: 1),
           const _SectionTitle('悬浮窗尺寸（整体）'),
@@ -677,203 +712,6 @@ class _SliderGroup extends StatelessWidget {
           ],
         ),
       );
-}
-
-/// 「屏蔽与高亮」分区（prd F10 / F11 / F13）。
-///
-/// 三类关键词（屏蔽词 / 屏蔽用户 / 高亮词）各一行一个词；类型为多选。
-/// 任一改动都会立即落盘并回调外层，外层再把过滤偏好推给悬浮窗引擎。
-class _FilterSection extends StatefulWidget {
-  const _FilterSection({
-    required this.prefs,
-    required this.store,
-    this.onChanged,
-  });
-
-  final FilterPrefs prefs;
-  final FilterStore store;
-  final void Function(FilterPrefs prefs)? onChanged;
-
-  @override
-  State<_FilterSection> createState() => _FilterSectionState();
-}
-
-class _FilterSectionState extends State<_FilterSection> {
-  late FilterPrefs _prefs = widget.prefs;
-
-  void _apply(FilterPrefs next) {
-    setState(() => _prefs = next);
-    widget.onChanged?.call(next);
-    unawaited(widget.store.save(next));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        _KeywordListEditor(
-          title: '屏蔽关键词',
-          hint: '弹幕内容包含任一关键词即不展示（不区分大小写）',
-          values: _prefs.blockedKeywords,
-          onChanged: (List<String> values) =>
-              _apply(_prefs.copyWith(blockedKeywords: values)),
-        ),
-        const Divider(height: 1),
-        _KeywordListEditor(
-          title: '屏蔽用户',
-          hint: '填写用户昵称或用户 ID，命中即不展示其弹幕与进场',
-          values: _prefs.blockedUsers,
-          onChanged: (List<String> values) =>
-              _apply(_prefs.copyWith(blockedUsers: values)),
-        ),
-        const Divider(height: 1),
-        _KeywordListEditor(
-          title: '高亮词',
-          hint: '命中片段会以高亮色显示',
-          values: _prefs.highlightKeywords,
-          onChanged: (List<String> values) =>
-              _apply(_prefs.copyWith(highlightKeywords: values)),
-        ),
-        const Divider(height: 1),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Text('列表显示的类型'),
-        ),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 2, 16, 4),
-          child: Text(
-            '默认只显示聊天类弹幕；勾选后可把礼物 / 进场 / 点赞等一并列入',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: <Widget>[
-              for (final DanmakuKind kind in selectableListKinds)
-                FilterChip(
-                  label: Text(danmakuKindLabel(kind)),
-                  selected: _prefs.visibleKinds.contains(kind),
-                  onSelected: (bool selected) => _apply(
-                    _prefs.copyWith(
-                      visibleKinds: _toggleKind(kind, selected),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Set<DanmakuKind> _toggleKind(DanmakuKind kind, bool selected) {
-    final Set<DanmakuKind> next = <DanmakuKind>{..._prefs.visibleKinds};
-    if (selected) {
-      next.add(kind);
-    } else {
-      next.remove(kind);
-    }
-    return next;
-  }
-}
-
-/// 一行一个词的编辑控件：已添加的以 Chip 展示，可单个删除。
-class _KeywordListEditor extends StatefulWidget {
-  const _KeywordListEditor({
-    required this.title,
-    required this.hint,
-    required this.values,
-    required this.onChanged,
-  });
-
-  final String title;
-  final String hint;
-  final List<String> values;
-  final ValueChanged<List<String>> onChanged;
-
-  @override
-  State<_KeywordListEditor> createState() => _KeywordListEditorState();
-}
-
-class _KeywordListEditorState extends State<_KeywordListEditor> {
-  final TextEditingController _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _add() {
-    final List<String> next = normalizeKeywordList(<Object?>[
-      ...widget.values,
-      _controller.text,
-    ]);
-    _controller.clear();
-    // 空输入或重复项不产生变化，跳过回调避免无谓落盘。
-    if (next.length == widget.values.length) return;
-    widget.onChanged(next);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(widget.title),
-          const SizedBox(height: 4),
-          Text(
-            widget.hint,
-            style: const TextStyle(fontSize: 12, color: Colors.grey),
-          ),
-          if (widget.values.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 2,
-              children: <Widget>[
-                for (final String value in widget.values)
-                  InputChip(
-                    label: Text(value),
-                    onDeleted: () => widget.onChanged(
-                      normalizeKeywordList(<Object?>[
-                        for (final String item in widget.values)
-                          if (item != value) item,
-                      ]),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 8),
-          TextField(
-            controller: _controller,
-            decoration: const InputDecoration(
-              isDense: true,
-              border: OutlineInputBorder(),
-              hintText: '输入后点右侧「添加」',
-            ),
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _add(),
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: _add,
-              icon: const Icon(Icons.add),
-              label: const Text('添加'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 /// 主 App 主题模式选项（prd F20）。

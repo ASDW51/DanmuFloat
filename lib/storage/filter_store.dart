@@ -42,6 +42,8 @@ FilterPrefs decodeFilterPrefs(String raw) {
         ? normalizeKeywordList(List<Object?>.from(highlightKeywords))
         : const <String>[],
     visibleKinds: kinds,
+    // 老配置文件没有这个键，缺省按关闭处理，保持原有子串匹配行为。
+    regexEnabled: decoded['regexEnabled'] == true,
   );
 }
 

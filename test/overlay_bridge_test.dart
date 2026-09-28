@@ -522,6 +522,46 @@ void main() {
     });
   });
 
+  group('过滤偏好（prd F10 / F11 / F13）', () {
+    test('OverlayFilter 经 JSON 往返保留关键词、类型与正则开关', () {
+      final FilterPrefs? parsed = OverlayFilter.tryParse(
+        roundTrip(const OverlayFilter(FilterPrefs(
+          blockedKeywords: <String>[r'^6{3,}$'],
+          blockedUsers: <String>['张三'],
+          highlightKeywords: <String>[r'(抽奖|福利)'],
+          regexEnabled: true,
+        )).toJson()),
+      );
+      expect(parsed, isNotNull);
+      expect(parsed!.blockedKeywords, <String>[r'^6{3,}$']);
+      expect(parsed.blockedUsers, <String>['张三']);
+      expect(parsed.highlightKeywords, <String>[r'(抽奖|福利)']);
+      expect(parsed.regexEnabled, isTrue);
+    });
+
+    test('缺省 regexEnabled 按关闭处理：旧版消息不会意外切到正则匹配', () {
+      final FilterPrefs? legacy = OverlayFilter.tryParse(
+        roundTrip(const <String, Object?>{
+          'type': 'filter',
+          'filter': <String, Object?>{
+            'blockedKeywords': <String>['加群'],
+          },
+        }),
+      );
+      expect(legacy!.regexEnabled, isFalse);
+      expect(legacy.blockedKeywords, <String>['加群']);
+    });
+
+    test('非 filter 消息与结构异常时回落默认偏好', () {
+      expect(
+        OverlayFilter.tryParse(roundTrip(<String, Object?>{'type': 'style'})),
+        isNull,
+      );
+      final FilterPrefs defaults = parseFilterPrefs('不是 Map');
+      expect(defaults.isDefault, isTrue);
+    });
+  });
+
   test('close 指令识别，主 App 构造的关闭载荷可被悬浮窗识别', () {
     expect(isOverlayCloseMessage(roundTrip(buildOverlayCloseMessage())), isTrue);
     expect(isOverlayCloseMessage(roundTrip(<String, Object?>{'type': 'close'})),
