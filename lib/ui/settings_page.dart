@@ -71,6 +71,9 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 当前过滤偏好：进二级页面改完回退后要能刷新入口摘要。
   late FilterPrefs _filter = widget.filter;
 
+  /// 上一次构建时的屏幕逻辑尺寸，用于感知横竖屏切换。
+  Size? _lastScreenSize;
+
   void _apply(OverlayPrefs next, {required bool persist}) {
     setState(() => _prefs = next);
     widget.onChanged(next, persist: persist);
@@ -106,6 +109,34 @@ class _SettingsPageState extends State<SettingsPage> {
     return buffer.toString();
   }
 
+  /// 屏幕尺寸变化时按比例换算窗口尺寸并落盘（prd F2）。
+  ///
+  /// 本页的偏好是进入时的快照，横竖屏切换若只改首页的状态，本页滑杆会显示旧值，
+  /// 再拖一下又把旧尺寸推回去，故这里同样跟一次。
+  void _syncWindowSizeWithScreen(Size screen) {
+    final Size? previous = _lastScreenSize;
+    _lastScreenSize = screen;
+    if (previous == null || previous == screen) return;
+    final ({double width, double height}) scaled = scaleOverlaySizeToScreen(
+      _prefs.windowSize,
+      oldScreenWidth: previous.width,
+      oldScreenHeight: previous.height,
+      newScreenWidth: screen.width,
+      newScreenHeight: screen.height,
+    );
+    if (scaled.width == _prefs.windowWidth &&
+        scaled.height == _prefs.windowHeight) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _apply(
+        _prefs.copyWith(windowWidth: scaled.width, windowHeight: scaled.height),
+        persist: true,
+      );
+    });
+  }
+
   /// 切换主 App 主题（prd F20）：先改全局通知量让界面立刻换肤，再落盘。
   ///
   /// 落盘失败不回滚：本次会话内主题已生效，下次启动回落到上次成功保存的值。
@@ -123,6 +154,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     // 窗口不能大于屏幕，滑杆上限按当前设备收紧；存量偏好超出时显示值也一并收敛。
     final Size screen = MediaQuery.sizeOf(context);
+    _syncWindowSizeWithScreen(screen);
     final double widthLimit = overlayWidthLimit(screen.width);
     final double heightLimit = overlayHeightLimit(screen.height);
     final double widthValue =

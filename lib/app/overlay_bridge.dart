@@ -105,6 +105,37 @@ double overlayHeightLimit(double screenHeight) =>
           .clamp(minOverlayHeight, overlayHeightLimit(screenHeight)),
     );
 
+/// 屏幕尺寸变化（横竖屏切换 / 折叠屏展开）时按比例换算窗口尺寸。
+///
+/// 尺寸记的是 dp：竖屏下 400dp 可能占了大半个屏宽，旋到横屏后同样 400dp
+/// 只剩窄窄一条，观感突变（prd F2「尺寸按比例」）。这里按新老屏幕尺寸的比值
+/// 等比缩放，保持相对占屏比例不变，最后收敛到新屏幕允许的范围内。
+///
+/// 老屏幕尺寸缺失或非法时不做换算，只按新屏幕收敛。
+({double width, double height}) scaleOverlaySizeToScreen(
+  ({double width, double height}) size, {
+  required double oldScreenWidth,
+  required double oldScreenHeight,
+  required double newScreenWidth,
+  required double newScreenHeight,
+}) {
+  if (oldScreenWidth <= 0 || oldScreenHeight <= 0) {
+    return fitOverlaySize(
+      size,
+      screenWidth: newScreenWidth,
+      screenHeight: newScreenHeight,
+    );
+  }
+  return fitOverlaySize(
+    (
+      width: size.width * (newScreenWidth / oldScreenWidth),
+      height: size.height * (newScreenHeight / oldScreenHeight),
+    ),
+    screenWidth: newScreenWidth,
+    screenHeight: newScreenHeight,
+  );
+}
+
 /// 按栏数推荐的窗口尺寸，设置页「按栏数推荐」按钮用。
 ({double width, double height}) recommendedOverlaySize(int paneCount) =>
     switch (paneCount) {

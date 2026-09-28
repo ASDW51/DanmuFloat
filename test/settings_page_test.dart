@@ -147,6 +147,32 @@ void main() {
     expect(persisted.last, isTrue);
   });
 
+  testWidgets('横竖屏切换时按屏幕比例换算窗口尺寸并落盘', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    OverlayPrefs latest =
+        const OverlayPrefs(windowWidth: 400, windowHeight: 560);
+    final List<bool> persisted = <bool>[];
+    await tester.pumpWidget(_wrap(
+      latest,
+      (OverlayPrefs prefs, {required bool persist}) {
+        latest = prefs;
+        persisted.add(persist);
+      },
+    ));
+    await tester.pumpAndSettle();
+
+    // 竖屏 → 横屏：宽按 2 倍、高按 0.5 倍换算，保持相对占屏不变。
+    tester.view.physicalSize = const Size(1600, 800);
+    await tester.pumpAndSettle();
+
+    expect(latest.windowWidth, 800);
+    expect(latest.windowHeight, 280);
+    expect(persisted.last, isTrue);
+  });
+
   testWidgets('凭证状态行按来源显示，粘贴合法凭证后切换为手动粘贴', (WidgetTester tester) async {
     _useFullScreen(tester);
     final CredentialStore store =

@@ -562,6 +562,45 @@ void main() {
     });
   });
 
+  group('横竖屏换算窗口尺寸（prd F2）', () {
+    test('按屏幕比例等比缩放，保持相对占屏不变', () {
+      final ({double width, double height}) scaled = scaleOverlaySizeToScreen(
+        (width: 400, height: 560),
+        oldScreenWidth: 800,
+        oldScreenHeight: 1600,
+        newScreenWidth: 1600,
+        newScreenHeight: 800,
+      );
+      expect(scaled.width, 800);
+      expect(scaled.height, 280);
+    });
+
+    test('换算结果收敛在固定上限与最小尺寸之间', () {
+      // 宽度放大到 2400 被固定上限收敛；高度缩到 60 被最小高度托底。
+      final ({double width, double height}) scaled = scaleOverlaySizeToScreen(
+        (width: 600, height: 1200),
+        oldScreenWidth: 400,
+        oldScreenHeight: 1600,
+        newScreenWidth: 1600,
+        newScreenHeight: 80,
+      );
+      expect(scaled.width, maxOverlayWidth);
+      expect(scaled.height, minOverlayHeight);
+    });
+
+    test('老屏幕尺寸缺失时不做换算，只按新屏幕收敛', () {
+      final ({double width, double height}) scaled = scaleOverlaySizeToScreen(
+        (width: 2000, height: 100),
+        oldScreenWidth: 0,
+        oldScreenHeight: 0,
+        newScreenWidth: 500,
+        newScreenHeight: 700,
+      );
+      expect(scaled.width, 500);
+      expect(scaled.height, minOverlayHeight);
+    });
+  });
+
   test('close 指令识别，主 App 构造的关闭载荷可被悬浮窗识别', () {
     expect(isOverlayCloseMessage(roundTrip(buildOverlayCloseMessage())), isTrue);
     expect(isOverlayCloseMessage(roundTrip(<String, Object?>{'type': 'close'})),

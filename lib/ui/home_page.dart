@@ -70,6 +70,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 监听悬浮窗上报：权限被撤销时悬浮窗会自行断开，这里同步按钮状态。
   StreamSubscription<OverlayStatus>? _overlaySubscription;
 
+  /// 本地偏好是否已读回：读回前不动窗口尺寸，否则会把默认值当成用户设置。
+  bool _prefsReady = false;
+
+  /// 上一次构建时的屏幕逻辑尺寸，用于感知横竖屏切换。
+  Size? _lastScreenSize;
+
   @override
   void initState() {
     super.initState();
@@ -180,7 +186,37 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _loadPrefs() async {
     final OverlayPrefs prefs = await _prefsStore.load();
     if (!mounted) return;
-    setState(() => _prefs = prefs);
+    setState(() {
+      _prefs = prefs;
+      _prefsReady = true;
+    });
+  }
+
+  /// 屏幕尺寸变化时按比例换算窗口尺寸并落盘（prd F2）。
+  ///
+  /// 只在尺寸真的变了时动手，且延后到本帧结束再改：build 期间不能 setState。
+  void _syncWindowSizeWithScreen(Size screen) {
+    final Size? previous = _lastScreenSize;
+    _lastScreenSize = screen;
+    if (!_prefsReady || previous == null || previous == screen) return;
+    final ({double width, double height}) scaled = scaleOverlaySizeToScreen(
+      _prefs.windowSize,
+      oldScreenWidth: previous.width,
+      oldScreenHeight: previous.height,
+      newScreenWidth: screen.width,
+      newScreenHeight: screen.height,
+    );
+    if (scaled.width == _prefs.windowWidth &&
+        scaled.height == _prefs.windowHeight) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _onPrefsChanged(
+        _prefs.copyWith(windowWidth: scaled.width, windowHeight: scaled.height),
+        persist: true,
+      );
+    });
   }
 
   Future<void> _loadFilter() async {
@@ -480,6 +516,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // 横竖屏切换时按屏幕比例换算窗口尺寸（prd F2「尺寸按比例」）。
+    _syncWindowSizeWithScreen(MediaQuery.sizeOf(context));
     return Scaffold(
       appBar: AppBar(
         title: const Text('主播管理'),
