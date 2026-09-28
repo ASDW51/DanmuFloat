@@ -193,8 +193,14 @@ class _PaneReport {
 class _OverlayPageState extends State<OverlayPage> {
   StreamSubscription<dynamic>? _bridgeSubscription;
 
-  OverlayGrid _grid = const OverlayGrid(0);
   List<String> _webRids = const <String>[];
+
+  /// 栏位网格由当前栏位数实时推导。
+  ///
+  /// 不再跟着 config 下发缓存成字段：本地增 / 减栏位后布局必须立刻生效，
+  /// 否则新增的栏位会被旧网格的行列数裁掉，看起来「栏位加了但没显示」。
+  OverlayGrid get _grid => OverlayGrid(_webRids.length);
+
   double _opacity = defaultOverlayOpacity;
   double _fontSize = defaultDanmuFontSize;
   double _scrollSpeed = defaultDanmuScrollSpeed;
@@ -323,7 +329,6 @@ class _OverlayPageState extends State<OverlayPage> {
     if (config == null) return;
     setState(() {
       _webRids = config.webRids;
-      _grid = config.grid;
       _opacity = config.opacity;
       _fontSize = config.fontSize;
       _scrollSpeed = config.scrollSpeed;
