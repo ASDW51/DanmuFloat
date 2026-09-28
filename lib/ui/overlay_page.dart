@@ -36,7 +36,6 @@ class OverlayPalette {
     required this.bannerBg,
     required this.maskColor,
     required this.border,
-    required this.badge,
     required this.userAccent,
     required this.levelColor,
     required this.fanLevelColor,
@@ -68,9 +67,6 @@ class OverlayPalette {
   /// 窗口边框色。
   final Color border;
 
-  /// 合规角标色（prd F25）。
-  final Color badge;
-
   /// 用户昵称色。
   final Color userAccent;
 
@@ -95,7 +91,6 @@ class OverlayPalette {
     bannerBg: Colors.white10,
     maskColor: Colors.black,
     border: Colors.white24,
-    badge: Colors.white38,
     userAccent: Colors.lightBlueAccent,
     levelColor: Colors.amber,
     fanLevelColor: Colors.purpleAccent,
@@ -116,7 +111,6 @@ class OverlayPalette {
     bannerBg: Colors.black12,
     maskColor: Colors.white,
     border: Colors.black26,
-    badge: Colors.black38,
     userAccent: Color(0xFF1565C0),
     levelColor: Color(0xFF8D6E00),
     fanLevelColor: Color(0xFF7B1FA2),
@@ -493,14 +487,6 @@ class _OverlayPageState extends State<OverlayPage> {
             Positioned.fill(
               child: _webRids.isEmpty ? _buildPlaceholder() : _buildPanes(),
             ),
-            // 常驻合规角标（prd F25 硬要求）：右下角半透明「仅供学习研究」。
-            Positioned(
-              right: 6,
-              bottom: 3,
-              child: IgnorePointer(
-                child: _ComplianceBadge(color: palette.badge),
-              ),
-            ),
             // 悬浮球：点开是一个功能菜单（锁定移动 / 栏位增删与切换 / 尺寸 / 透明度）。
             // 悬浮窗没有系统控件，窗口内的操作入口只能自己画。
             if (!_ballHidden) _buildBallLayer(palette),
@@ -521,7 +507,10 @@ class _OverlayPageState extends State<OverlayPage> {
     );
   }
 
-  /// 悬浮球所在的角：吸附到用户选的位置；右下角要让开合规角标（prd F25 硬要求）。
+  /// 悬浮球所在的角：吸附到用户选的位置。
+  ///
+  /// 四角都贴边 3dp；菜单在球的反侧收边 30dp（球径 24 + 间隙），
+  /// 展开时球正好落在菜单外侧，不会被菜单盖住。
   Widget _buildBallLayer(OverlayPalette palette) {
     final bool right = _ballCorner.isOdd;
     final bool bottom = _ballCorner >= 2;
@@ -529,7 +518,7 @@ class _OverlayPageState extends State<OverlayPage> {
       left: right ? null : 3,
       right: right ? 3 : null,
       top: bottom ? null : 3,
-      bottom: bottom ? (right ? 22 : 3) : null,
+      bottom: bottom ? 3 : null,
       child: _buildBall(palette),
     );
   }
@@ -2039,22 +2028,4 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
       ],
     );
   }
-}
-
-/// 悬浮窗常驻合规角标（prd F25 硬要求）：右下角半透明「仅供学习研究」。
-class _ComplianceBadge extends StatelessWidget {
-  const _ComplianceBadge({required this.color});
-
-  /// 与当前皮肤匹配的角标色。
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Text(
-        '仅供学习研究',
-        style: TextStyle(
-          color: color,
-          fontSize: 8,
-          height: 1.1,
-        ),
-      );
 }
