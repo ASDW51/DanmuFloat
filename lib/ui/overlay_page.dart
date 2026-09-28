@@ -730,12 +730,14 @@ class _OverlayPageState extends State<OverlayPage> {
     // 栏位在关窗 / 重排时会被卸载，卸载途中补发的请求直接丢弃：
     // 此时窗口已不存在或即将重建，查 View 也会拿到已失活的祖先。
     if (!mounted) return;
-    final Size physical = View.of(context).physicalSize;
+    // 插件 resizeOverlay 按 dp 换算物理像素，所以这里要传当前窗口的**逻辑尺寸**，
+    // 不能传 View 的物理尺寸（否则会被再乘一次像素比，窗口撑满屏幕）。
+    final Size size = MediaQuery.sizeOf(context);
     unawaited(
       setOverlayDragEnabled(
         !_dragDisabled,
-        width: physical.width.round(),
-        height: physical.height.round(),
+        width: size.width.round(),
+        height: size.height.round(),
       ),
     );
   }
@@ -812,11 +814,11 @@ class _OverlayPageState extends State<OverlayPage> {
       _windowSize = Size(next.width, next.height);
       _mergePatch(windowWidth: next.width, windowHeight: next.height);
     });
-    final double dpr = View.of(context).devicePixelRatio;
+    // 插件 resizeOverlay 按 dp 换算物理像素，这里传逻辑尺寸。
     unawaited(
       FlutterScreenOverlay.resizeOverlay(
-        (next.width * dpr).round(),
-        (next.height * dpr).round(),
+        next.width.round(),
+        next.height.round(),
         !_dragDisabled,
       ),
     );

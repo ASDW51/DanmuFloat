@@ -275,7 +275,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           screenWidth: screen.width,
           screenHeight: screen.height,
         ),
-        devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
       );
     }
     if (persist) unawaited(_prefsStore.save(prefs));
@@ -324,7 +323,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           screenWidth: screen.width,
           screenHeight: screen.height,
         ),
-        devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
       );
     }
   }
@@ -514,7 +512,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     if (overlayShown) {
       // 已建窗（含在弹幕页开的单栏窗）：按新尺寸重排并重新下发房间，无需关闭重开。
-      await resizeOverlay(config, devicePixelRatio: dpr, size: size);
+      await resizeOverlay(config, size: size);
     } else {
       if (!await ensureOverlayPermission()) {
         if (!mounted) return;

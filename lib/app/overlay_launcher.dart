@@ -8,8 +8,11 @@ import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 
-/// 窗口尺寸（dp）由设置页决定（prd 4.2 只约束单栏最小 200×150）；
-/// 插件按物理像素设置窗口，调用处需乘设备像素比。
+/// 窗口尺寸（dp）由设置页决定（prd 4.2 只约束单栏最小 200×150）。
+///
+/// 插件两个尺寸 API 的单位不一致：建窗用的 `showOverlay` 收物理像素（故 [openOverlay]
+/// 里乘了设备像素比），改尺寸用的 `resizeOverlay` 内部自行按 dp 换算（故 [resizeOverlayWindow]
+/// 传 dp）。混用会把窗口放大一个像素比，撑满屏幕。
 ///
 /// 这里的宽高是**整个悬浮窗**的尺寸，内部各栏自动平分，不需要按栏数分别设置。
 
@@ -59,59 +62,54 @@ Future<bool> ensureOverlayPermission() async {
 
 /// 只调整窗口尺寸，不下发配置：设置页改大小时走这里，
 /// 不动各栏已绑定的房间（窗口里绑了哪些房间由持有窗口的页面决定）。
-Future<void> resizeOverlayWindow(
-  ({double width, double height}) size, {
-  required double devicePixelRatio,
-}) async {
+///
+/// 注意插件两个 API 的单位不一致：`resizeOverlay` 内部会按 dp 换算成物理像素，
+/// 所以这里要传 dp；而 `showOverlay` 直接把宽高当物理像素用（见 [openOverlay]）。
+Future<void> resizeOverlayWindow(({double width, double height}) size) async {
   await FlutterScreenOverlay.resizeOverlay(
-    (size.width * devicePixelRatio).round(),
-    (size.height * devicePixelRatio).round(),
+    size.width.round(),
+    size.height.round(),
     // 改尺寸时必须带上当前锁定状态，否则插件会把拖动重新打开。
     !_dragLocked,
   );
 }
 
 ({double width, double height})? _pendingSize;
-double _pendingDevicePixelRatio = 1;
 Timer? _resizeTimer;
 
 /// 实时改窗口尺寸：窗口没开时静默忽略，开了才 resize。
 ///
 /// 拖滑杆会以帧级频率触发，这里把同一帧内的多次调用合并成一次下发，
 /// 免得并发调用插件导致最终尺寸不是用户停手时的值。
-void updateOverlaySize(
-  ({double width, double height}) size, {
-  required double devicePixelRatio,
-}) {
+void updateOverlaySize(({double width, double height}) size) {
   if (!_overlayShown) return;
   _pendingSize = size;
-  _pendingDevicePixelRatio = devicePixelRatio;
   _resizeTimer ??= Timer(const Duration(milliseconds: 16), () {
     _resizeTimer = null;
     final ({double width, double height})? pending = _pendingSize;
     _pendingSize = null;
     if (pending == null || !_overlayShown) return;
-    unawaited(
-      resizeOverlayWindow(pending, devicePixelRatio: _pendingDevicePixelRatio),
-    );
+    unawaited(resizeOverlayWindow(pending));
   });
 }
 
 /// 已建窗时按新尺寸重排并重新下发房间，无需关闭重开。
 Future<void> resizeOverlay(
   OverlayConfig config, {
-  required double devicePixelRatio,
   required ({double width, double height}) size,
 }) async {
   _overlayShown = true;
   _dragLocked = config.dragLocked;
-  await resizeOverlayWindow(size, devicePixelRatio: devicePixelRatio);
+  await resizeOverlayWindow(size);
   // 凭证先于配置下发：新栏位在收到 config 后立刻开始连接，先到才能生效。
   await shareOverlayCredential(manualCookies);
   await shareOverlayConfig(config);
 }
 
 /// 建窗并下发配置。
+///
+/// `showOverlay` 的宽高按**物理像素**设置（插件内部不再换算），故这里乘设备像素比；
+/// 后续改尺寸走 [resizeOverlayWindow]，那条路径传的是 dp。
 Future<void> openOverlay(
   OverlayConfig config, {
   required double devicePixelRatio,
