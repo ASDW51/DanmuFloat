@@ -251,6 +251,10 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 开启后窗口不接收触摸，点击直接落到下层画面，窗内所有交互失效。
   bool _clickThrough = false;
 
+  /// 最近一次原生上报的窗口位置（dp）；用于去重，位置没变就不必重复落盘。
+  double? _windowX;
+  double? _windowY;
+
   /// 设备屏幕逻辑尺寸，随样式消息从主 App 下发（悬浮窗引擎查不到屏幕尺寸）；
   /// 0 表示未知，此时改尺寸只按固定上下限收敛。
   double _screenWidth = 0;
@@ -362,6 +366,15 @@ class _OverlayPageState extends State<OverlayPage> {
       _setClickThrough(clickThrough.value);
       return;
     }
+    // 原生上报窗口位置（拖动结束 / 贴边吸附收敛）：并入偏好增量交主 App 落盘，
+    // 下次开窗按保存的位置还原。
+    final OverlayWindowPosition? position = OverlayWindowPosition.tryParse(
+      message,
+    );
+    if (position != null) {
+      _onWindowPosition(position);
+      return;
+    }
     // 候选房间更新（prd F14 / F15）：只刷新切换弹窗里的可选项，不动各栏绑定。
     final List<RoomOption>? options = OverlayRooms.tryParse(message);
     if (options != null) {
@@ -385,6 +398,9 @@ class _OverlayPageState extends State<OverlayPage> {
       _dragLocked = config.dragLocked;
       _ballCorner = config.ballCorner;
       _clickThrough = config.clickThrough;
+      // 建窗时已按保存位置还原过，记下来当去重基准（旧配置没有该字段则不覆盖）。
+      if (config.windowX != null) _windowX = config.windowX;
+      if (config.windowY != null) _windowY = config.windowY;
       // 布局或房间变化会重建对应栏位，旧栏位的上报先作废。
       _reports.clear();
       // 栏位重排后原来的焦点与手势透明度都不再对应同一栏，一并复位。
@@ -950,6 +966,8 @@ class _OverlayPageState extends State<OverlayPage> {
     bool? dragLocked,
     int? ballCorner,
     bool? clickThrough,
+    double? windowX,
+    double? windowY,
   }) {
     final OverlayPrefsPatch base = _pendingPatch ?? const OverlayPrefsPatch();
     _pendingPatch = OverlayPrefsPatch(
@@ -960,7 +978,19 @@ class _OverlayPageState extends State<OverlayPage> {
       dragLocked: dragLocked ?? base.dragLocked,
       ballCorner: ballCorner ?? base.ballCorner,
       clickThrough: clickThrough ?? base.clickThrough,
+      windowX: windowX ?? base.windowX,
+      windowY: windowY ?? base.windowY,
     );
+  }
+
+  /// 原生上报窗口位置（拖动结束 / 贴边吸附收敛后）：与上次不同才记入待落盘
+  /// 增量并回报主 App，避免每次点按都重复写盘。
+  void _onWindowPosition(OverlayWindowPosition position) {
+    if (position.x == _windowX && position.y == _windowY) return;
+    _windowX = position.x;
+    _windowY = position.y;
+    _mergePatch(windowX: position.x, windowY: position.y);
+    _reportState();
   }
 
   /// 悬浮球吸附到窗口的某个角（0 左上 / 1 右上 / 2 左下 / 3 右下）。

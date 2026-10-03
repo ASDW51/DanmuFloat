@@ -112,10 +112,13 @@ Future<void> resizeOverlay(
 ///
 /// `showOverlay` 的宽高按**物理像素**设置（插件内部不再换算），故这里乘设备像素比；
 /// 后续改尺寸走 [resizeOverlayWindow]，那条路径传的是 dp。
+///
+/// [screen] 是当前屏幕的逻辑尺寸：保存过窗口位置时用它把越界的存量坐标收敛回来。
 Future<void> openOverlay(
   OverlayConfig config, {
   required double devicePixelRatio,
   required ({double width, double height}) size,
+  required ({double width, double height}) screen,
 }) async {
   await FlutterScreenOverlay.showOverlay(
     width: (size.width * devicePixelRatio).round(),
@@ -123,6 +126,8 @@ Future<void> openOverlay(
     alignment: OverlayAlignment.centerRight,
     enableDrag: !config.dragLocked,
     positionGravity: PositionGravity.auto,
+    // 有保存过位置就按它还原；没保存过（null）交给插件按默认位置摆放。
+    startPosition: _resolveStartPosition(config, size: size, screen: screen),
     // 建窗时就要带上穿透状态：窗口一旦不可触摸，窗内没有入口改回来。
     flag: config.clickThrough
         ? OverlayFlag.clickThrough
@@ -135,6 +140,26 @@ Future<void> openOverlay(
   // 窗口建立后下发配置：此时悬浮窗引擎已随主 App 启动预热完毕。
   await shareOverlayCredential(manualCookies);
   await shareOverlayConfig(config);
+}
+
+/// 还原上次保存的窗口位置（dp）；从未保存过或只有一个坐标时返回 null。
+///
+/// 存量坐标在换设备 / 旋转后可能越界，建窗前先用 [fitOverlayOffset] 收敛到当前屏幕内。
+OverlayPosition? _resolveStartPosition(
+  OverlayConfig config, {
+  required ({double width, double height}) size,
+  required ({double width, double height}) screen,
+}) {
+  final double? x = config.windowX;
+  final double? y = config.windowY;
+  if (x == null || y == null) return null;
+  final ({double x, double y}) offset = fitOverlayOffset(
+    (x: x, y: y),
+    size: size,
+    screenWidth: screen.width,
+    screenHeight: screen.height,
+  );
+  return OverlayPosition(offset.x, offset.y);
 }
 
 /// 把手动粘贴的凭证同步给悬浮窗引擎（prd F27）；null 表示回到匿名自动获取。

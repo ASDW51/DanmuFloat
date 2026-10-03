@@ -239,15 +239,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
             return START_NOT_STICKY;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
-            windowManager.getDefaultDisplay().getSize(szWindow);
-        } else {
-            DisplayMetrics displaymetrics = new DisplayMetrics();
-            windowManager.getDefaultDisplay().getMetrics(displaymetrics);
-            int w = displaymetrics.widthPixels;
-            int h = displaymetrics.heightPixels;
-            szWindow.set(w, h);
-        }
+        refreshScreenSize();
         int dx = startX == OverlayConstants.DEFAULT_XY ? 0 : startX;
         int dy = startY == OverlayConstants.DEFAULT_XY ? -statusBarHeightPx() : startY;
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
@@ -619,6 +611,59 @@ public class OverlayService extends Service implements View.OnTouchListener {
         return mResources.getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
     }
 
+    /** 刷新缓存的屏幕像素尺寸 szWindow：建窗与横竖屏切换后都要重取。 */
+    private void refreshScreenSize() {
+        if (windowManager == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+            windowManager.getDefaultDisplay().getSize(szWindow);
+        } else {
+            DisplayMetrics displaymetrics = new DisplayMetrics();
+            windowManager.getDefaultDisplay().getMetrics(displaymetrics);
+            szWindow.set(displaymetrics.widthPixels, displaymetrics.heightPixels);
+        }
+    }
+
+    /**
+     * 把窗口偏移收敛回屏幕可见范围内（旋转 / 改尺寸后避免窗口被摆到屏幕外）。
+     *
+     * 水平方向贴左 / 贴右都是从对应边缘起算，可用范围同为 0 ~ 屏幕宽-窗宽；
+     * 垂直方向按 TOP / CENTER / BOTTOM 分别换算。
+     */
+    private void clampPositionToScreen(WindowManager.LayoutParams params) {
+        int width = flutterView != null ? flutterView.getWidth() : 0;
+        int height = flutterView != null ? flutterView.getHeight() : 0;
+        if (width <= 0) width = params.width > 0 ? params.width : szWindow.x;
+        if (height <= 0) height = params.height > 0 ? params.height : szWindow.y;
+        int maxX = Math.max(0, szWindow.x - width);
+        params.x = Math.max(0, Math.min(params.x, maxX));
+        int maxY = Math.max(0, szWindow.y - height);
+        int verticalGravity = params.gravity & Gravity.VERTICAL_GRAVITY_MASK;
+        if (verticalGravity == Gravity.CENTER_VERTICAL) {
+            int half = maxY / 2;
+            params.y = Math.max(-half, Math.min(params.y, half));
+        } else if (verticalGravity == Gravity.BOTTOM) {
+            params.y = Math.max(0, Math.min(params.y, maxY));
+        } else {
+            params.y = Math.max(0, Math.min(params.y, maxY));
+        }
+    }
+
+    /**
+     * 上报窗口当前位置（dp）给悬浮窗，由其并入偏好增量交主 App 落盘。
+     *
+     * 只在拖动结束（无吸附）或贴边吸附动画收敛时调用，必须在平台主线程上执行。
+     */
+    private void reportOverlayPosition() {
+        if (overlayMessageChannel == null || flutterView == null) return;
+        WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
+        if (params == null) return;
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("type", "position");
+        payload.put("x", pxToDp(params.x));
+        payload.put("y", pxToDp(params.y));
+        overlayMessageChannel.send(payload);
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
@@ -626,13 +671,18 @@ public class OverlayService extends Service implements View.OnTouchListener {
         // dimensions remain valid (portrait vs landscape heights differ).
         if (windowManager == null || flutterView == null) return;
         try {
+            // 必须刷新缓存屏幕尺寸：贴边吸附按 szWindow 计算水平停靠点，沿用旧值会把
+            // 横屏下的可拖动范围压回竖屏宽度（用户反馈横屏拖不动）。
+            refreshScreenSize();
             WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
             // Only adjust full-height overlays; fixed-size overlays (booking card) are left alone.
             if (params.height < 0) {
                 params.height = screenHeight();
-                windowManager.updateViewLayout(flutterView, params);
-                Log.d("OverlayService", "onConfigurationChanged: overlay height updated to " + params.height);
             }
+            // 旋转后窗口可能落到屏幕外：把水平 / 垂直偏移收敛回可见范围。
+            clampPositionToScreen(params);
+            windowManager.updateViewLayout(flutterView, params);
+            Log.d("OverlayService", "onConfigurationChanged: overlay layout refreshed");
         } catch (Exception e) {
             Log.e("OverlayService", "onConfigurationChanged: failed to update overlay layout", e);
         }
@@ -681,6 +731,8 @@ public class OverlayService extends Service implements View.OnTouchListener {
             case MotionEvent.ACTION_CANCEL:
                 // Re-check flutterView: detachOverlayView() may have run between ACTION_DOWN and ACTION_UP.
                 if (flutterView == null || windowManager == null) return false;
+                // 只是点了一下没有位移：位置没变，不必上报。
+                if (!dragging) return false;
                 lastYPosition = params.y;
                 if (WindowSetup.positionGravity != null && !WindowSetup.positionGravity.equals("none")) {
                     try {
@@ -696,6 +748,9 @@ public class OverlayService extends Service implements View.OnTouchListener {
                     } catch (Exception e) {
                         Log.e("OverlayService", "onTouch ACTION_UP: layout update or timer failed", e);
                     }
+                } else {
+                    // 无吸附：松手位置即最终位置，直接上报给悬浮窗落盘。
+                    reportOverlayPosition();
                 }
                 return false;
             default:
@@ -765,6 +820,8 @@ public class OverlayService extends Service implements View.OnTouchListener {
                     return;
                 }
                 if (Math.abs(params.x - mDestX) < 2 && Math.abs(params.y - mDestY) < 2) {
+                    // 收敛到吸附点：此刻才是最终位置，上报给悬浮窗落盘。
+                    reportOverlayPosition();
                     TrayAnimationTimerTask.this.cancel();
                     mTrayAnimationTimer.cancel();
                 }

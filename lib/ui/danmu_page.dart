@@ -282,6 +282,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
         screenWidth: screen.width,
         screenHeight: screen.height,
       ),
+      screen: (width: screen.width, height: screen.height),
     );
     if (!mounted) return;
     setState(() => _overlayVisible = true);

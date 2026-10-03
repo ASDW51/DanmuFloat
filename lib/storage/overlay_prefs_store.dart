@@ -30,6 +30,8 @@ class OverlayPrefs {
     this.dragLocked = false,
     this.ballCorner = 0,
     this.clickThrough = false,
+    this.windowX,
+    this.windowY,
   });
 
   /// 上次勾选的主播，按栏位顺序排列（下次打开多栏弹窗时据此预勾选）。
@@ -71,6 +73,12 @@ class OverlayPrefs {
   /// 是否开启点击穿透：开启后悬浮窗不接收触摸，点击落到下层画面（prd F2 延伸）。
   final bool clickThrough;
 
+  /// 窗口在屏幕上的水平位置（dp，从屏幕右边缘起算）；null 表示未保存过。
+  final double? windowX;
+
+  /// 窗口在屏幕上的垂直位置（dp，从屏幕垂直中心起算）。
+  final double? windowY;
+
   /// 窗口尺寸，供建窗 / 重排窗口时使用。
   ({double width, double height}) get windowSize => (
     width: clampOverlayWidth(windowWidth),
@@ -91,6 +99,8 @@ class OverlayPrefs {
     bool? dragLocked,
     int? ballCorner,
     bool? clickThrough,
+    double? windowX,
+    double? windowY,
   }) => OverlayPrefs(
     webRids: webRids ?? this.webRids,
     opacity: opacity ?? this.opacity,
@@ -105,6 +115,8 @@ class OverlayPrefs {
     dragLocked: dragLocked ?? this.dragLocked,
     ballCorner: ballCorner ?? this.ballCorner,
     clickThrough: clickThrough ?? this.clickThrough,
+    windowX: windowX ?? this.windowX,
+    windowY: windowY ?? this.windowY,
   );
 
   /// 合并悬浮窗上报的偏好增量（悬浮球菜单改的部分）。
@@ -122,6 +134,8 @@ class OverlayPrefs {
     dragLocked: patch.dragLocked ?? dragLocked,
     ballCorner: patch.ballCorner ?? ballCorner,
     clickThrough: patch.clickThrough ?? clickThrough,
+    windowX: patch.windowX ?? windowX,
+    windowY: patch.windowY ?? windowY,
   );
 
   /// 组装成下发给悬浮窗的配置。
@@ -148,6 +162,8 @@ class OverlayPrefs {
     dragLocked: dragLocked,
     ballCorner: clampBallCorner(ballCorner),
     clickThrough: clickThrough,
+    windowX: windowX,
+    windowY: windowY,
   );
 
   /// 只保留当前绑定的房间的样式，避免下发时带上已解绑房间的冗余覆盖。
@@ -178,6 +194,8 @@ class OverlayPrefs {
     'window': <String, Object?>{
       'width': clampOverlayWidth(windowWidth),
       'height': clampOverlayHeight(windowHeight),
+      if (windowX != null) 'x': windowX,
+      if (windowY != null) 'y': windowY,
     },
   };
 
@@ -191,6 +209,8 @@ class OverlayPrefs {
     final Object? window = raw['window'];
     final Object? width = window is Map ? window['width'] : null;
     final Object? height = window is Map ? window['height'] : null;
+    final Object? windowX = window is Map ? window['x'] : null;
+    final Object? windowY = window is Map ? window['y'] : null;
     return OverlayPrefs(
       webRids: panes is List ? _parsePanes(panes) : const <String>[],
       paneStyles: panes is List
@@ -217,6 +237,8 @@ class OverlayPrefs {
       dragLocked: raw['dragLocked'] == true,
       ballCorner: clampBallCorner(raw['ballCorner']),
       clickThrough: raw['clickThrough'] == true,
+      windowX: windowX is num ? windowX.toDouble() : null,
+      windowY: windowY is num ? windowY.toDouble() : null,
     );
   }
 

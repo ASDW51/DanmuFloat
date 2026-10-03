@@ -779,4 +779,90 @@ void main() {
       expect(status!.filter, isNull);
     });
   });
+
+  group('窗口位置持久化（悬浮窗贴边吸附）', () {
+    test('fitOverlayOffset 把窗口位置收敛到屏幕可见范围内', () {
+      // 窗口比屏幕还宽：水平可用范围被压到 0（x 是从屏幕右边缘起算的偏移）。
+      expect(
+        fitOverlayOffset(
+          (x: 999.0, y: 0.0),
+          size: (width: 400, height: 560),
+          screenWidth: 360,
+          screenHeight: 800,
+        ),
+        (x: 0.0, y: 0.0),
+      );
+      // 屏幕足够大时按上限收敛；y 以垂直中心为原点，超出半个余量被夹回。
+      expect(
+        fitOverlayOffset(
+          (x: 500.0, y: 400.0),
+          size: (width: 400, height: 560),
+          screenWidth: 800,
+          screenHeight: 1000,
+        ),
+        (x: 400.0, y: 220.0),
+      );
+    });
+
+    test('原生上报的位置消息经 JSON 往返后保留，非法值被丢弃', () {
+      final OverlayWindowPosition? position = OverlayWindowPosition.tryParse(
+        roundTrip(const OverlayWindowPosition(x: 12.0, y: -30.0).toJson()),
+      );
+      expect(position!.x, 12);
+      expect(position.y, -30);
+      // 缺字段 / NaN（这里不经 JSON，JSON 无法编码 NaN）/ 非 position 消息都返回 null。
+      expect(
+        OverlayWindowPosition.tryParse(<String, Object?>{
+          'type': 'position',
+          'x': 1,
+        }),
+        isNull,
+      );
+      expect(
+        OverlayWindowPosition.tryParse(<String, Object?>{
+          'type': 'position',
+          'x': double.nan,
+          'y': 0,
+        }),
+        isNull,
+      );
+      expect(
+        OverlayWindowPosition.tryParse(<String, Object?>{'type': 'state'}),
+        isNull,
+      );
+    });
+
+    test('config / 偏好增量携带窗口位置，缺省为未保存', () {
+      final OverlayConfig? config = OverlayConfig.tryParse(
+        roundTrip(
+          const OverlayConfig(
+            webRids: <String>['735'],
+            windowX: 120.0,
+            windowY: -40.0,
+          ).toJson(),
+        ),
+      );
+      expect(config!.windowX, 120);
+      expect(config.windowY, -40);
+      // 老版本下发的 config 没有该字段：按「未保存」处理，交由插件默认摆放。
+      final OverlayConfig? legacy = OverlayConfig.tryParse(
+        roundTrip(const OverlayConfig(webRids: <String>['735']).toJson()),
+      );
+      expect(legacy!.windowX, isNull);
+      expect(legacy.windowY, isNull);
+
+      final OverlayPrefsPatch? patch = OverlayPrefsPatch.tryParse(
+        roundTrip(
+          const OverlayPrefsPatch(windowX: 10.0, windowY: 20.0).toJson(),
+        ),
+      );
+      expect(patch!.windowX, 10);
+      expect(patch.windowY, 20);
+      expect(patch.opacity, isNull);
+      expect(
+        OverlayPrefsPatch.tryParse(roundTrip(const <String, Object?>{})),
+        isNull,
+      );
+    });
+  });
 }

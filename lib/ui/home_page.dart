@@ -526,7 +526,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _snack('未授予悬浮窗权限，无法开启；已降级为 App 内查看');
         return;
       }
-      await openOverlay(config, devicePixelRatio: dpr, size: size);
+      await openOverlay(
+        config,
+        devicePixelRatio: dpr,
+        size: size,
+        screen: (width: screen.width, height: screen.height),
+      );
       if (!mounted) return;
       setState(() => _overlayPermissionDenied = false);
     }

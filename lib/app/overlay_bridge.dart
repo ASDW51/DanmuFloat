@@ -29,6 +29,12 @@ const String overlayClipboardType = 'clipboard';
 /// 原生 → 悬浮窗：通知栏「关闭点击穿透」按钮触发，让悬浮窗把本地开关同步回关闭。
 const String overlayClickThroughType = 'clickThrough';
 
+/// 原生 → 悬浮窗：窗口拖动结束（或贴边吸附收敛）后上报窗口在屏幕上的位置。
+///
+/// 悬浮窗引擎拿不到原生侧的窗口 LayoutParams，只能由 OverlayService 上报，
+/// 再随偏好增量交给主 App 落盘，下次开窗按保存的位置还原。
+const String overlayPositionType = 'position';
+
 /// 弹幕背景蒙版不透明度的可调范围（prd F2）：0 为全透明（只见弹幕文字）、
 /// 1 为完全不透明（完全遮住直播画面）。注意作用对象是蒙版，不是窗口整体。
 const double minOverlayOpacity = 0.0;
@@ -124,6 +130,25 @@ double overlayHeightLimit(double screenHeight) =>
     size.height,
   ).clamp(minOverlayHeight, overlayHeightLimit(screenHeight)),
 );
+
+/// 把窗口在屏幕上的位置收敛到可见范围内（dp）。
+///
+/// 坐标系与插件一致：本项目窗口贴右（`OverlayAlignment.centerRight`），
+/// x 从屏幕右边缘起算、向右为正，y 从屏幕垂直中心起算。存量位置在换设备 /
+/// 旋转后可能越界，开窗还原前用它兜一次，避免窗口被摆到屏幕外。
+({double x, double y}) fitOverlayOffset(
+  ({double x, double y}) offset, {
+  required ({double width, double height}) size,
+  required double screenWidth,
+  required double screenHeight,
+}) {
+  final double maxX = (screenWidth - size.width).clamp(0.0, double.infinity);
+  final double maxY = ((screenHeight - size.height) / 2).clamp(
+    0.0,
+    double.infinity,
+  );
+  return (x: offset.x.clamp(0.0, maxX), y: offset.y.clamp(-maxY, maxY));
+}
 
 /// 屏幕尺寸变化（横竖屏切换 / 折叠屏展开）时按比例换算窗口尺寸。
 ///
@@ -361,6 +386,8 @@ class OverlayConfig {
     this.dragLocked = false,
     this.ballCorner = 0,
     this.clickThrough = false,
+    this.windowX,
+    this.windowY,
   });
 
   /// 各栏绑定的直播间号，按栏位顺序排列（栏 0 在前）。
@@ -403,6 +430,13 @@ class OverlayConfig {
   /// 代价是窗内所有交互（悬浮球菜单、列表滚动、长按调透明度）都会失效。
   final bool clickThrough;
 
+  /// 上次保存的窗口水平位置（dp，从屏幕右边缘起算）；null 表示未保存过，
+  /// 建窗时交给插件按默认位置（贴右居中）摆放。
+  final double? windowX;
+
+  /// 上次保存的窗口垂直位置（dp，从屏幕垂直中心起算）。
+  final double? windowY;
+
   /// 由房间数推导的网格布局。
   OverlayGrid get grid => OverlayGrid(webRids.length);
 
@@ -421,6 +455,8 @@ class OverlayConfig {
     'dragLocked': dragLocked,
     'ballCorner': clampBallCorner(ballCorner),
     'clickThrough': clickThrough,
+    if (windowX != null) 'windowX': windowX,
+    if (windowY != null) 'windowY': windowY,
   };
 
   /// 解析主 App 下发的消息；非 config 消息或没有任何有效房间时返回 null。
@@ -438,6 +474,8 @@ class OverlayConfig {
     final Object? opacity = raw['opacity'];
     final Object? fontSize = raw['fontSize'];
     final Object? scrollSpeed = raw['scrollSpeed'];
+    final Object? windowX = raw['windowX'];
+    final Object? windowY = raw['windowY'];
     return OverlayConfig(
       webRids: parsed,
       opacity: opacity is num
@@ -458,6 +496,8 @@ class OverlayConfig {
       dragLocked: raw['dragLocked'] == true,
       ballCorner: clampBallCorner(raw['ballCorner']),
       clickThrough: raw['clickThrough'] == true,
+      windowX: windowX is num ? windowX.toDouble() : null,
+      windowY: windowY is num ? windowY.toDouble() : null,
     );
   }
 }
@@ -691,6 +731,8 @@ class OverlayPrefsPatch {
     this.dragLocked,
     this.ballCorner,
     this.clickThrough,
+    this.windowX,
+    this.windowY,
   });
 
   final double? opacity;
@@ -701,6 +743,10 @@ class OverlayPrefsPatch {
   final int? ballCorner;
   final bool? clickThrough;
 
+  /// 窗口在屏幕上的位置（dp），拖动 / 吸附收敛后由原生上报。
+  final double? windowX;
+  final double? windowY;
+
   bool get isEmpty =>
       opacity == null &&
       fontSize == null &&
@@ -708,7 +754,9 @@ class OverlayPrefsPatch {
       windowHeight == null &&
       dragLocked == null &&
       ballCorner == null &&
-      clickThrough == null;
+      clickThrough == null &&
+      windowX == null &&
+      windowY == null;
 
   Map<String, Object?> toJson() => <String, Object?>{
     if (opacity != null) 'opacity': clampOverlayOpacity(opacity!),
@@ -718,6 +766,8 @@ class OverlayPrefsPatch {
     if (dragLocked != null) 'dragLocked': dragLocked,
     if (ballCorner != null) 'ballCorner': clampBallCorner(ballCorner!),
     if (clickThrough != null) 'clickThrough': clickThrough,
+    if (windowX != null) 'windowX': windowX,
+    if (windowY != null) 'windowY': windowY,
   };
 
   /// 解析偏好增量；非对象或没有任何字段时返回 null。
@@ -730,6 +780,8 @@ class OverlayPrefsPatch {
     final Object? dragLocked = raw['dragLocked'];
     final Object? ballCorner = raw['ballCorner'];
     final Object? clickThrough = raw['clickThrough'];
+    final Object? windowX = raw['windowX'];
+    final Object? windowY = raw['windowY'];
     final OverlayPrefsPatch patch = OverlayPrefsPatch(
       opacity: opacity is num ? clampOverlayOpacity(opacity.toDouble()) : null,
       fontSize: fontSize is num
@@ -744,6 +796,8 @@ class OverlayPrefsPatch {
       dragLocked: dragLocked is bool ? dragLocked : null,
       ballCorner: ballCorner is int ? clampBallCorner(ballCorner) : null,
       clickThrough: clickThrough is bool ? clickThrough : null,
+      windowX: windowX is num ? windowX.toDouble() : null,
+      windowY: windowY is num ? windowY.toDouble() : null,
     );
     return patch.isEmpty ? null : patch;
   }
@@ -877,5 +931,40 @@ class OverlayClickThrough {
     final Object? value = raw['value'];
     if (value is! bool) return null;
     return OverlayClickThrough(value);
+  }
+}
+
+/// 原生 → 悬浮窗：窗口在屏幕上的位置（dp）。
+///
+/// 坐标系与插件一致（本项目窗口贴右）：x 从屏幕右边缘起算、向右为正，
+/// y 从屏幕垂直中心起算。拖动结束或贴边吸附收敛后由 OverlayService 上报，
+/// 悬浮窗把它并入偏好增量交给主 App 落盘，下次开窗按 [OverlayConfig] 里的位置还原。
+class OverlayWindowPosition {
+  const OverlayWindowPosition({required this.x, required this.y});
+
+  final double x;
+  final double y;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'type': overlayPositionType,
+    'x': x,
+    'y': y,
+  };
+
+  /// 解析位置消息；非 position 消息或坐标非法（缺字段 / NaN / 无穷）时返回 null。
+  static OverlayWindowPosition? tryParse(Object? raw) {
+    if (raw is! Map || raw['type'] != overlayPositionType) return null;
+    final Object? x = raw['x'];
+    final Object? y = raw['y'];
+    if (x is! num || y is! num) return null;
+    final double valueX = x.toDouble();
+    final double valueY = y.toDouble();
+    if (valueX.isNaN ||
+        valueY.isNaN ||
+        valueX.isInfinite ||
+        valueY.isInfinite) {
+      return null;
+    }
+    return OverlayWindowPosition(x: valueX, y: valueY);
   }
 }

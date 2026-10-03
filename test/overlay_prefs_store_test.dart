@@ -240,6 +240,39 @@ void main() {
         0.5,
       );
     });
+
+    test('窗口位置经 JSON 往返后保留，并随 config 下发与偏好增量合并', () {
+      final OverlayPrefs? parsed = OverlayPrefs.tryParse(
+        const OverlayPrefs(windowX: 150.0, windowY: -60.0).toJson(),
+      );
+      expect(parsed!.windowX, 150);
+      expect(parsed.windowY, -60);
+      // 必须随 config 下发：建窗时按它还原窗口位置。
+      final OverlayConfig config = parsed.toConfig(<String>['735']);
+      expect(config.windowX, 150);
+      expect(config.windowY, -60);
+
+      // 未保存过时为 null，交给插件按默认位置摆放。
+      final OverlayPrefs fresh = OverlayPrefs.tryParse(
+        const OverlayPrefs().toJson(),
+      )!;
+      expect(fresh.windowX, isNull);
+      expect(fresh.windowY, isNull);
+      expect(fresh.toConfig(<String>['735']).windowX, isNull);
+
+      // 原生上报的位置经增量合并回主 App 的偏好，未改动字段保持原样。
+      const OverlayPrefs prefs = OverlayPrefs(
+        opacity: 0.5,
+        windowX: 10.0,
+        windowY: 20.0,
+      );
+      final OverlayPrefs merged = prefs.appliedPatch(
+        const OverlayPrefsPatch(windowX: 30.0, windowY: 40.0),
+      );
+      expect(merged.windowX, 30);
+      expect(merged.windowY, 40);
+      expect(merged.opacity, 0.5);
+    });
   });
 
   group('encodeOverlayPrefs / decodeOverlayPrefs', () {
