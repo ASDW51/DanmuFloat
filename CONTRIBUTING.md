@@ -29,6 +29,8 @@ flutter analyze             # 静态检查（提交前必须通过）
 flutter test                # 单元测试（提交前必须通过）
 ```
 
+> 没有仓库写权限的外部贡献者请先 Fork，clone 自己的分支而非上面这条地址，具体见「[分支与 PR 流程](#分支与-pr-流程)」。
+
 如需验证 Release 构建，先按 [README](README.md) 的「签名说明」配置签名：
 
 ```powershell
@@ -74,12 +76,50 @@ feat(overlay): 持久化悬浮窗位置并修复横屏吸附范围
 
 ## 分支与 PR 流程
 
-1. 从 `master` 拉出特性分支，分支名建议 `<类型>/<简短描述>`，例如 `fix/overlay-drag`。
-2. 完成改动并跑通本地检查。
-3. 提交 PR，并填写 [PR 模板](.github/PULL_REQUEST_TEMPLATE.md) 中的内容。
-4. 等待 CI 通过与维护者 review。
+### 一、外部贡献者（没有仓库写权限）
 
-请保持 PR 聚焦单一目的，避免把无关的重构与功能改动混在同一个 PR 中。
+先在网页上 Fork 本仓库，然后：
+
+```bash
+# 1. clone 你自己的 fork
+git clone https://github.com/<你的用户名>/DanmuFloat.git
+cd DanmuFloat
+
+# 2. 把上游仓库加为第二个 remote，方便后续同步
+git remote add upstream https://github.com/ASDW51/DanmuFloat.git
+
+# 3. 从上游最新的 main 拉出特性分支（不要直接在自己 fork 的 main 上改）
+git fetch upstream
+git checkout -b fix/overlay-drag upstream/main
+
+# 4. 开发并提交（规范见下文「提交前检查」与「提交信息规范」）
+git commit -m "fix(overlay): 修复锁定后窗口撑满屏幕"
+
+# 5. 推送到自己的 fork
+git push origin fix/overlay-drag
+```
+
+推送后在网页开 PR，base 选择 `ASDW51/DanmuFloat` 的 `main` 分支，并按 [PR 模板](.github/PULL_REQUEST_TEMPLATE.md) 填写内容。
+
+### 二、协作者（有仓库写权限）
+
+不需要 Fork，直接在仓库内拉分支：
+
+```bash
+git fetch origin
+git checkout -b fix/overlay-drag origin/main
+
+# ... 开发与提交 ...
+
+git push origin fix/overlay-drag
+```
+
+### 通用约定
+
+- 分支名建议 `<类型>/<简短描述>`，例如 `fix/overlay-drag`。
+- 分支一律从上游最新的 `main` 拉出，保证 PR 里只有你自己的改动。
+- 保持 PR 聚焦单一目的，避免把无关的重构与功能改动混在同一个 PR 中。
+- 等待 CI（`flutter analyze` + `flutter test`）通过并完成 review。review 后如需修改，请**追加提交**而不是 force push，否则历史评论会失去上下文。
 
 ## 代码风格
 
