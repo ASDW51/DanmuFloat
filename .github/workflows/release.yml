@@ -128,7 +128,8 @@ jobs:
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           set -euo pipefail
-          flutter build apk --release --split-per-abi
+          # 限定 android-arm64 + split-per-abi：只编 arm64 一个 ABI，避免白编另外两个拆分包的产物
+          flutter build apk --release --target-platform android-arm64 --split-per-abi
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "dist/DanmuFloat-${TAG}-arm64-v8a.apk"
 
