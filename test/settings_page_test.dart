@@ -260,6 +260,35 @@ void main() {
     expect(resets, 1);
   });
 
+  testWidgets('设置页可重进权限申请引导，完成后返回设置页', (WidgetTester tester) async {
+    _useFullScreen(tester);
+    await tester.pumpWidget(_wrapFull(
+      prefs: const OverlayPrefs(),
+      store: CredentialStore(backend: FakeCredentialBackend()),
+    ));
+    await tester.pumpAndSettle();
+
+    // 「权限」分区在页面靠后位置，先滚动到入口再点。
+    await tester.scrollUntilVisible(
+      find.text('权限申请引导'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('权限申请引导'));
+    await tester.pumpAndSettle();
+
+    // 进入引导页：首次跳过后仍能回来补授权。
+    expect(find.text('1. 悬浮窗权限'), findsOneWidget);
+    expect(find.text('5. 前台服务类型声明'), findsOneWidget);
+
+    // 点「完成」只关闭引导页，不改动合规状态、返回设置页。
+    await tester.tap(find.widgetWithText(FilledButton, '完成'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1. 悬浮窗权限'), findsNothing);
+    expect(find.text('权限申请引导'), findsOneWidget);
+  });
+
   testWidgets('主题三选写回全局通知量并触发落盘，皮肤与栏位开关写回偏好', (WidgetTester tester) async {
     _useLongScreen(tester);
     appThemeMode.value = ThemeMode.system;
