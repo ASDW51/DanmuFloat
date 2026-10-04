@@ -35,16 +35,21 @@ DanmuFloat 是一个 Android 端的弹幕悬浮窗应用。添加直播间后，
 ## 构建与运行
 
 ```bash
-git clone https://gitee.com/ASDW51/danmu-float.git
-cd danmu-float
+git clone https://github.com/ASDW51/DanmuFloat.git
+cd DanmuFloat
 flutter pub get
 
-flutter run              # 连接设备后调试运行
-flutter test             # 运行单元测试
-flutter build apk --debug  # 构建调试包
+flutter run                 # 连接设备后调试运行
+flutter test                # 运行单元测试
+flutter build apk --debug   # 构建调试包
+flutter build apk --release # 构建发布包（需先配置签名，见下）
 ```
 
-> Release 构建目前沿用 debug 签名，正式发布前请自行配置签名（见 `android/app/build.gradle.kts`）。
+> **签名说明**：Release 包使用 `android/key.properties` 指定的签名。本地执行
+> `scripts/generate-keystore.ps1` 即可生成 keystore 与 `key.properties`（两者均已被
+> `.gitignore` 忽略，不会入库，请离线备份）。未配置时构建会回退 debug 签名并打印警告，
+> 仅供本地调试，不可用于发布。正式发布由 [`.github/workflows/release.yml`](.github/workflows/release.yml)
+> 从仓库 Secrets 还原签名文件后自动构建，产物与 SHA256 校验和见 [Releases](https://github.com/ASDW51/DanmuFloat/releases)。
 
 ## 权限说明
 
@@ -112,16 +117,23 @@ It does exactly one thing — display danmaku. It does not log in, send comments
 ### Build and Run
 
 ```bash
-git clone https://gitee.com/ASDW51/danmu-float.git
-cd danmu-float
+git clone https://github.com/ASDW51/DanmuFloat.git
+cd DanmuFloat
 flutter pub get
 
-flutter run              # debug run on a connected device
-flutter test             # run unit tests
-flutter build apk --debug  # build a debug APK
+flutter run                 # debug run on a connected device
+flutter test                # run unit tests
+flutter build apk --debug   # build a debug APK
+flutter build apk --release # build a release APK (signing config required, see below)
 ```
 
-> Release builds currently use the debug signing config. Configure your own signing before publishing (see `android/app/build.gradle.kts`).
+> **Signing**: release APKs are signed with the config in `android/key.properties`. Run
+> `scripts/generate-keystore.ps1` locally to create the keystore and `key.properties` (both are
+> git-ignored and never committed — keep an offline backup). If the file is missing, the build
+> falls back to the debug signing config and prints a warning; that is for local debugging only and
+> must not be published. Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml),
+> which restores the keystore from repository secrets; downloads and SHA256 checksums are on the
+> [Releases](https://github.com/ASDW51/DanmuFloat/releases) page.
 
 ### Permissions
 
