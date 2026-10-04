@@ -20,7 +20,8 @@ env:
 
 jobs:
   test:
-    name: 静态分析与单元测试
+    # 检查项名称保持英文，便于分支保护规则与第三方工具匹配
+    name: analyze-and-test
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
