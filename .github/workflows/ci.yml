@@ -1,0 +1,49 @@
+name: CI
+
+# 提交与 PR 的门禁检查：静态分析 + 单元测试。
+# 发布构建（含签名、打包、发 Release）见 release.yml。
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# 同一分支的重复推送只保留最新一次，避免排队堆积
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.38.10
+  JAVA_VERSION: '17'
+
+jobs:
+  test:
+    name: 静态分析与单元测试
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: 获取依赖
+        run: flutter pub get
+
+      - name: 静态检查
+        run: flutter analyze
+
+      - name: 单元测试
+        run: flutter test
