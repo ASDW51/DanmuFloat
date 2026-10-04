@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 自适应图标底色，与 assets/icon/app_icon.png 的圆角底一致 -->
+    <color name="ic_launcher_background">#101319</color>
+</resources>

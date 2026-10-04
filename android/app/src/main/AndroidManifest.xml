@@ -14,7 +14,8 @@
     <application
         android:label="DanmuFloat"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round">
         <!-- 悬浮窗前台服务：flutter_screen_overlay 的 OverlayService。
              specialUse 的用途说明为 Google Play 上架申报所需，自用/侧载亦需填写。 -->
         <service
