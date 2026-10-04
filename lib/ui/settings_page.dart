@@ -17,6 +17,7 @@ import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/theme_store.dart';
 import 'package:danmu_float/ui/disclaimer_page.dart';
 import 'package:danmu_float/ui/filter_page.dart';
+import 'package:danmu_float/ui/onboarding_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -443,6 +444,18 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: widget.onResetAll == null ? null : _clearAllData,
           ),
           const Divider(height: 1),
+          const _SectionTitle('权限'),
+          ListTile(
+            leading: const Icon(Icons.verified_user_outlined),
+            title: const Text('权限申请引导'),
+            subtitle: const Text(
+              '重新查看并申请悬浮窗 / 通知 / 电池优化等权限；未授权仅影响悬浮窗',
+              style: TextStyle(fontSize: 12),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _openOnboarding,
+          ),
+          const Divider(height: 1),
           const _SectionTitle('合规'),
           ListTile(
             leading: const Icon(Icons.gavel_outlined),
@@ -461,6 +474,22 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const Divider(height: 1),
         ],
+      ),
+    );
+  }
+
+  /// 从设置页重进首次启动引导（prd 4.10）：首次启动跳过后仍可随时回来补授权。
+  ///
+  /// 引导完成标志此时已置位，这里只作为常驻的权限申请入口；点「完成 / 稍后设置」
+  /// 仅关闭本页，不改动合规状态。
+  void _openOnboarding() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => OnboardingPage(
+          onDone: () async {
+            if (context.mounted) Navigator.of(context).pop();
+          },
+        ),
       ),
     );
   }
