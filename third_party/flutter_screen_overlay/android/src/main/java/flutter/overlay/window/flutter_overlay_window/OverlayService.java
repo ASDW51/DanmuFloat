@@ -778,9 +778,28 @@ public class OverlayService extends Service implements View.OnTouchListener {
             params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
             mDestY = lastYPosition;
             switch (WindowSetup.positionGravity) {
-                case "auto":
-                    mDestX = (params.x + (flutterView.getWidth() / 2)) <= szWindow.x / 2 ? 0 : szWindow.x - flutterView.getWidth();
+                case "auto": {
+                    // 仅在窗口越过左右屏幕边界时才吸附到对应边缘；未越界则停在松手处，
+                    // 允许窗口落在屏幕上的任意位置（不再吸附到最近边缘）。
+                    int width = flutterView.getWidth();
+                    boolean invertX = WindowSetup.gravity == (Gravity.TOP | Gravity.RIGHT)
+                            || WindowSetup.gravity == (Gravity.CENTER | Gravity.RIGHT)
+                            || WindowSetup.gravity == (Gravity.BOTTOM | Gravity.RIGHT);
+                    // 换算成窗口左边缘的屏幕绝对坐标，便于与屏幕边界比较。
+                    int absLeft = invertX ? szWindow.x - params.x - width : params.x;
+                    if (absLeft < 0) {
+                        // 越过左边界：吸附左边（左重力 offset=0，右重力 offset=屏宽-窗宽）。
+                        mDestX = invertX ? szWindow.x - width : 0;
+                    } else if (absLeft + width > szWindow.x) {
+                        // 越过右边界：吸附右边（左重力 offset=屏宽-窗宽，右重力 offset=0）。
+                        mDestX = invertX ? 0 : szWindow.x - width;
+                    } else {
+                        // 未越界：不吸附，停在松手位置。
+                        mDestX = params.x;
+                        mDestY = params.y;
+                    }
                     return;
+                }
                 case "left":
                     mDestX = 0;
                     return;

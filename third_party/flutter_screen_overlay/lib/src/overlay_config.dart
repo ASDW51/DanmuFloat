@@ -22,7 +22,8 @@ enum PositionGravity {
   /// The `PositionGravity.left` will allow the overlay to stick on the left side of the screen.
   left,
 
-  /// The `PositionGravity.auto` will allow the overlay to stick either on the left or right side of the screen depending on the overlay position.
+  /// The `PositionGravity.auto` keeps the overlay where it is dropped; it only sticks to
+  /// the left or right side when the overlay is dragged across the corresponding screen edge.
   auto,
 }
 
