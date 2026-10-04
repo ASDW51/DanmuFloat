@@ -65,10 +65,6 @@ class _DisclaimerPageState extends State<DisclaimerPage> {
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
                 const SizedBox(height: 16),
-                const _SectionHeader('合规前提'),
-                for (final String item in _compliancePremises)
-                  _BulletItem(item),
-                const SizedBox(height: 12),
                 const _SectionHeader('免责声明'),
                 for (int index = 0; index < _disclaimerPoints.length; index++)
                   _BulletItem(
@@ -76,11 +72,7 @@ class _DisclaimerPageState extends State<DisclaimerPage> {
                   ),
                 const SizedBox(height: 12),
                 const _SectionHeader('数据与隐私'),
-                const _BulletItem('不存储账号密码，不代替用户登录任何账号。'),
-                const _BulletItem('不持久化任何弹幕数据，弹幕仅保留在内存中，App 关闭即清空。'),
-                const _BulletItem(
-                  '凭证默认不落盘、不明文打印、不上传、不向第三方转发，并提供清除入口。',
-                ),
+                for (final String item in _privacyPoints) _BulletItem(item),
               ],
             ),
           ),
