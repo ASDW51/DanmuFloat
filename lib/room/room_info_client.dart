@@ -40,7 +40,17 @@ String buildWebEnterParams(String webRid) {
 
 /// 解析 web 接口响应体。独立为顶层函数以便离线单测。
 RoomInfo parseWebEnterResponse(String body, {required String webRid}) {
-  final Object? decoded = jsonDecode(body);
+  final String trimmed = body.trim();
+  if (trimmed.isEmpty) {
+    // 接口在 Cookie 缺 ttwid / 被风控时会以 200 + 空 body 静默失败。
+    throw RoomInfoException('接口返回空响应，Cookie 可能缺少有效 ttwid 或被风控拦截');
+  }
+  final Object? decoded;
+  try {
+    decoded = jsonDecode(trimmed);
+  } on FormatException catch (error) {
+    throw RoomInfoException('响应不是合法 JSON：${error.message}');
+  }
   if (decoded is! Map<String, dynamic>) {
     throw RoomInfoException('响应不是合法 JSON 对象');
   }
@@ -99,8 +109,14 @@ class RoomInfoClient {
   final Abogus Function() _abogusFactory;
 
   /// 由 webRid 取房间信息（含 liveId）。
-  Future<RoomInfo> fetchByWebRid(String webRid) async {
-    final String cookies = await _cookieProvider.getCookies();
+  ///
+  /// [credentialCookies] 为主播指定的凭证（见 CookieProvider）；不传时走匿名自动获取。
+  Future<RoomInfo> fetchByWebRid(
+    String webRid, {
+    String? credentialCookies,
+  }) async {
+    final String cookies = normalizeCredentialCookies(credentialCookies) ??
+        await _cookieProvider.getCookies();
     final AbogusResult abogus =
         _abogusFactory().sign(buildWebEnterParams(webRid));
     final Uri uri =

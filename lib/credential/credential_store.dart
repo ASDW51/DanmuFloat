@@ -1,16 +1,15 @@
 // 凭证管理（prd F27 / 3.2 / design.md 2.2）。
 //
 // 产品级策略：
-// - 默认匿名自动获取，仅内存、不落盘（见 cookie_provider.dart）
-// - 仅用户手动粘贴的凭证才加密持久化：Android Keystore 派生密钥托管在
+// - 默认匿名自动获取 ttwid，仅内存、不落盘（见 cookie_provider.dart）
+// - 用户可全局配置多份凭证，每份可命名，供不同主播分别指定使用
+// - 只有用户手动配置的凭证才加密持久化：Android Keystore 派生密钥托管在
 //   flutter_secure_storage 内，密文存 App 私有存储
 // - 提供「清除本地凭证」入口，清除后回到匿名自动获取
-// - 不展示完整凭证明文（设置页粘贴框用 obscure，不回显）
-import 'package:danmu_float/credential/cookie_provider.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+// - 不展示完整凭证明文（设置页输入框用 obscure，不回显）
+import 'dart:convert';
 
-/// 手动凭证的长度上限：防止用户误把整段网页 / 日志粘进来。
-const int maxManualCookiesLength = 4096;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Cookie 名允许的字符集（RFC 6265 的 token）。
 final RegExp cookieNamePattern = RegExp(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$");
@@ -25,9 +24,6 @@ final RegExp invalidCookieValuePattern = RegExp(r'[\x00-\x08\x0a-\x1f\x7f]');
 String? validateManualCookies(String raw) {
   final String value = raw.trim();
   if (value.isEmpty) return '凭证不能为空';
-  if (value.length > maxManualCookiesLength) {
-    return '凭证过长，请只粘贴 Cookie 内容';
-  }
   if (value.contains('\n') || value.contains('\r')) return '凭证不能包含换行';
   for (final String segment in value.split(';')) {
     final String part = segment.trim();
@@ -42,25 +38,98 @@ String? validateManualCookies(String raw) {
   return null;
 }
 
-/// 凭证来源，供设置页状态行展示（prd F27）。
-enum CredentialSource {
-  /// 匿名自动获取（仅内存）。
-  anonymous,
+/// 一份用户配置的凭证：可全局配置多份，主播按 [CredentialProfile.id] 指定使用哪一份。
+class CredentialProfile {
+  const CredentialProfile({
+    required this.id,
+    required this.name,
+    required this.cookies,
+    required this.createdAt,
+  });
 
-  /// 用户手动粘贴（加密落盘）。
-  manual,
+  /// 稳定标识，用于主播绑定与增删改。
+  final String id;
+
+  /// 用户起的名字，便于在主播上指定时辨认。
+  final String name;
+
+  /// Cookie 请求头串；明文只在内存与设置页输入时存在，落盘的是加密密文。
+  final String cookies;
+
+  /// 创建时间（epoch 毫秒）。
+  final int createdAt;
+
+  CredentialProfile copyWith({String? name, String? cookies}) => CredentialProfile(
+        id: id,
+        name: name ?? this.name,
+        cookies: cookies ?? this.cookies,
+        createdAt: createdAt,
+      );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+        'id': id,
+        'name': name,
+        'cookies': cookies,
+        'created_at': createdAt,
+      };
+
+  /// 解析单份凭证；缺 id 或内容时返回 null（按坏数据跳过）。
+  static CredentialProfile? tryParse(Object? raw) {
+    if (raw is! Map) return null;
+    final Object? id = raw['id'];
+    final Object? cookies = raw['cookies'];
+    if (id is! String || id.trim().isEmpty) return null;
+    if (cookies is! String || cookies.trim().isEmpty) return null;
+    final String value = cookies.trim();
+    if (validateManualCookies(value) != null) return null;
+    return CredentialProfile(
+      id: id.trim(),
+      name: _asString(raw['name']).trim(),
+      cookies: value,
+      createdAt: _asInt(raw['created_at']),
+    );
+  }
+
+  static String _asString(Object? value) => value is String ? value : '';
+
+  static int _asInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
 }
 
-/// 启动时加载凭证的结果。
-enum CredentialLoadResult {
-  /// 没有手动凭证，走匿名自动获取。
-  anonymous,
+/// 序列化凭证列表（写入加密后端前的内容）。
+String encodeCredentialProfiles(List<CredentialProfile> profiles) =>
+    jsonEncode(
+      profiles.map((CredentialProfile profile) => profile.toJson()).toList(),
+    );
 
-  /// 手动凭证已加载并生效。
-  manual,
+/// 解析已保存的凭证列表。
+///
+/// 兼容旧版本「只存一份明文 cookie 串」的格式：解析不出列表时按单份迁移，
+/// 命名为「默认凭证」，避免升级后已保存的凭证被当成坏数据丢掉。
+List<CredentialProfile> decodeCredentialProfiles(String? raw) {
+  final String value = raw?.trim() ?? '';
+  if (value.isEmpty) return const <CredentialProfile>[];
 
-  /// 已保存的凭证解密失败：按 prd 3.2 不静默降级，需提示用户重新输入。
-  decryptFailed,
+  Object? decoded;
+  try {
+    decoded = jsonDecode(value);
+  } on FormatException {
+    decoded = null;
+  }
+  if (decoded is List) {
+    return decoded
+        .map(CredentialProfile.tryParse)
+        .whereType<CredentialProfile>()
+        .toList(growable: false);
+  }
+  if (validateManualCookies(value) != null) return const <CredentialProfile>[];
+  return <CredentialProfile>[
+    CredentialProfile(id: 'legacy', name: '默认凭证', cookies: value, createdAt: 0),
+  ];
 }
 
 /// 加密存储后端；单测注入内存实现，不依赖 Android 插件通道。
@@ -85,7 +154,7 @@ class SecureCredentialBackend implements CredentialBackend {
               aOptions: AndroidOptions(resetOnError: false),
             );
 
-  /// 存储键（design.md 2.3 的「凭证存储」）。
+  /// 存储键（design.md 2.3 的「凭证存储」）。内容为凭证列表的密文。
   static const String storageKey = 'ttwid_encrypted';
 
   final FlutterSecureStorage _storage;
@@ -101,82 +170,147 @@ class SecureCredentialBackend implements CredentialBackend {
   Future<void> delete() => _storage.delete(key: storageKey);
 }
 
-/// 手动凭证的加密持久化与内存同步。
-///
-/// 生效路径：`load()` / `saveManual()` 成功后调用 [setManualCookies]，
-/// 让所有 CookieProvider（主 App 与悬浮窗各自实例）统一优先读手动凭证。
+/// 多份凭证的加密持久化与内存同步。
 class CredentialStore {
   CredentialStore({CredentialBackend? backend})
       : _backend = backend ?? SecureCredentialBackend();
 
   final CredentialBackend _backend;
 
-  CredentialSource _source = CredentialSource.anonymous;
+  List<CredentialProfile> _profiles = const <CredentialProfile>[];
   bool _decryptFailed = false;
 
-  /// 当前凭证来源。
-  CredentialSource get source => _source;
+  /// 当前保存的凭证列表（只读快照）。
+  List<CredentialProfile> get profiles => List<CredentialProfile>.unmodifiable(_profiles);
 
-  /// 上次加载是否解密失败：设置页据此提示用户重新粘贴。
+  /// 是否至少配置了一份凭证。
+  bool get hasProfiles => _profiles.isNotEmpty;
+
+  /// 上次加载是否解密失败：设置页据此提示用户重新配置。
   bool get decryptFailed => _decryptFailed;
 
-  /// 是否处于手动粘贴模式。
-  bool get isManual => _source == CredentialSource.manual;
+  /// 按 id 取一份凭证；未命中返回 null（调用方按匿名自动获取处理）。
+  CredentialProfile? profileOf(String? id) {
+    if (id == null) return null;
+    for (final CredentialProfile profile in _profiles) {
+      if (profile.id == id) return profile;
+    }
+    return null;
+  }
 
-  /// 读取已加密保存的手动凭证并接管取值。
+  /// 读取并解密本地保存的凭证列表。
   ///
   /// 读取或解密失败时按 prd 3.2 不静默降级：仅把状态标记出来，
-  /// 由设置页提示用户重新输入。
-  Future<CredentialLoadResult> load() async {
+  /// 由设置页提示用户重新配置。
+  Future<bool> load() async {
     try {
       final String? saved = await _backend.read();
-      if (saved == null || saved.trim().isEmpty) {
-        setManualCookies(null);
-        _source = CredentialSource.anonymous;
-        _decryptFailed = false;
-        return CredentialLoadResult.anonymous;
-      }
-      setManualCookies(saved);
-      _source = CredentialSource.manual;
+      _profiles = decodeCredentialProfiles(saved);
       _decryptFailed = false;
-      return CredentialLoadResult.manual;
+      return true;
     } on Object {
-      setManualCookies(null);
-      _source = CredentialSource.anonymous;
+      _profiles = const <CredentialProfile>[];
       _decryptFailed = true;
-      return CredentialLoadResult.decryptFailed;
+      return false;
     }
   }
 
-  /// 保存手动粘贴的凭证；校验不通过时返回错误提示，不改动任何状态。
-  Future<String?> saveManual(String raw) async {
+  /// 新增（[id] 为 null）或更新一份凭证；校验不通过时返回错误提示，不改动任何状态。
+  ///
+  /// [name] 留空时：新增用「凭证 N」占位，更新保留原名字。
+  Future<String?> saveProfile({
+    String? id,
+    required String name,
+    required String raw,
+  }) async {
     final String? error = validateManualCookies(raw);
     if (error != null) return error;
 
-    final String value = raw.trim();
-    try {
-      await _backend.write(value);
-    } on Object catch (exception) {
-      // 加密写入失败：不接管取值，避免出现「界面显示已保存、实际没存」的假象。
-      return '凭证保存失败：$exception';
+    final String cookies = raw.trim();
+    final String trimmedName = name.trim();
+    final List<CredentialProfile> next = List<CredentialProfile>.of(_profiles);
+    final int index =
+        id == null ? -1 : next.indexWhere((CredentialProfile p) => p.id == id);
+    if (index >= 0) {
+      next[index] = next[index].copyWith(
+        name: trimmedName.isEmpty ? next[index].name : trimmedName,
+        cookies: cookies,
+      );
+    } else {
+      next.add(
+        CredentialProfile(
+          id: _newProfileId(next),
+          name: trimmedName.isEmpty ? '凭证 ${next.length + 1}' : trimmedName,
+          cookies: cookies,
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
     }
-    setManualCookies(value);
-    _source = CredentialSource.manual;
+
+    final String? writeError = await _persist(next);
+    if (writeError != null) return writeError;
+    _profiles = next;
     _decryptFailed = false;
     return null;
   }
 
-  /// 清除本地凭证（prd F26「清除本地凭证」）：删除密文，回到匿名自动获取。
+  /// 只改名字，不换内容；名字留空时保持原样。
+  Future<String?> renameProfile(String id, String name) async {
+    final String trimmedName = name.trim();
+    if (trimmedName.isEmpty) return null;
+    final List<CredentialProfile> next = List<CredentialProfile>.of(_profiles);
+    final int index = next.indexWhere((CredentialProfile p) => p.id == id);
+    if (index < 0) return null;
+    next[index] = next[index].copyWith(name: trimmedName);
+    final String? writeError = await _persist(next);
+    if (writeError != null) return writeError;
+    _profiles = next;
+    return null;
+  }
+
+  /// 删除一份凭证；返回错误提示，成功返回 null。
+  Future<String?> deleteProfile(String id) async {
+    final List<CredentialProfile> next = _profiles
+        .where((CredentialProfile profile) => profile.id != id)
+        .toList(growable: false);
+    if (next.length == _profiles.length) return null;
+    final String? writeError = await _persist(next);
+    if (writeError != null) return writeError;
+    _profiles = next;
+    return null;
+  }
+
+  /// 清除全部本地凭证（prd F26「清除本地凭证」）：删除密文，回到匿名自动获取。
   ///
   /// 只影响凭证，不动主播列表 / 样式偏好 / 合规状态。
-  Future<void> clearManual() async {
+  Future<void> clearAll() async {
     try {
       await _backend.delete();
     } on Object {
       // 密文可能本就不存在或设备已卸载过 Keystore 条目，清内存即可。
     }
-    setManualCookies(null);
-    _source = CredentialSource.anonymous;
+    _profiles = const <CredentialProfile>[];
     _decryptFailed = false;
+  }
+
+  Future<String?> _persist(List<CredentialProfile> profiles) async {
+    try {
+      await _backend.write(encodeCredentialProfiles(profiles));
+      return null;
+    } on Object catch (exception) {
+      // 加密写入失败：不接管取值，避免出现「界面显示已保存、实际没存」的假象。
+      return '凭证保存失败：$exception';
+    }
+  }
+
+  /// 生成不重复的凭证 id（创建时刻 + 必要时加序号）。
+  static String _newProfileId(List<CredentialProfile> existing) {
+    final String base = DateTime.now().microsecondsSinceEpoch.toString();
+    if (existing.every((CredentialProfile p) => p.id != base)) return base;
+    int suffix = 1;
+    while (existing.any((CredentialProfile p) => p.id == '$base-$suffix')) {
+      suffix++;
+    }
+    return '$base-$suffix';
   }
 }

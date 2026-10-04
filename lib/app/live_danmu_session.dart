@@ -52,12 +52,15 @@ class LiveDanmuSession {
     required this.webRid,
     RoomInfoClient? roomInfoClient,
     CookieProvider? cookieProvider,
+    String? credentialCookies,
     DanmuSigner? signer,
     DanmuSocketFactory? socketFactory,
     String Function()? userUniqueIdFactory,
     this.bufferCapacity = 500,
   })  : _roomInfoClient = roomInfoClient ?? RoomInfoClient(),
-        _cookieProvider = cookieProvider ?? CookieProvider(),
+        _cookieProvider =
+            cookieProvider ?? CookieProvider(credentialCookies: credentialCookies),
+        _credentialCookies = normalizeCredentialCookies(credentialCookies),
         _signer = signer ?? WebmssdkDanmuSigner(),
         _socketFactory = socketFactory ?? _defaultSocketFactory,
         _userUniqueIdFactory = userUniqueIdFactory ?? generateUserUniqueId,
@@ -81,6 +84,7 @@ class LiveDanmuSession {
 
   final RoomInfoClient _roomInfoClient;
   final CookieProvider _cookieProvider;
+  final String? _credentialCookies;
   final DanmuSigner _signer;
   final DanmuSocketFactory _socketFactory;
   final String Function() _userUniqueIdFactory;
@@ -140,7 +144,10 @@ class LiveDanmuSession {
 
     final RoomInfo roomInfo;
     try {
-      roomInfo = await _roomInfoClient.fetchByWebRid(webRid);
+      roomInfo = await _roomInfoClient.fetchByWebRid(
+        webRid,
+        credentialCookies: _credentialCookies,
+      );
     } on Object catch (error) {
       _fail('房间信息获取失败：$error');
       return;

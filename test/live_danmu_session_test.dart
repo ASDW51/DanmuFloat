@@ -16,10 +16,15 @@ class FakeRoomInfoClient extends RoomInfoClient {
   final RoomInfo result;
   Object? error;
   final List<String> calls = <String>[];
+  final List<String?> credentialCalls = <String?>[];
 
   @override
-  Future<RoomInfo> fetchByWebRid(String webRid) async {
+  Future<RoomInfo> fetchByWebRid(
+    String webRid, {
+    String? credentialCookies,
+  }) async {
     calls.add(webRid);
+    credentialCalls.add(credentialCookies);
     if (error != null) throw error!;
     return result;
   }
@@ -131,10 +136,12 @@ void main() {
     late List<Map<String, String>> socketArgs;
     late FakeSocket socket;
 
-    LiveDanmuSession build({String webRid = '12345'}) => LiveDanmuSession(
+    LiveDanmuSession build({String webRid = '12345', String? credentialCookies}) =>
+        LiveDanmuSession(
           webRid: webRid,
           roomInfoClient: roomClient,
           cookieProvider: cookieProvider,
+          credentialCookies: credentialCookies,
           signer: signer,
           socketFactory: ({
             required String liveId,
@@ -196,6 +203,31 @@ void main() {
 
       await session.stop();
       expect(socket.stopped, isTrue);
+    });
+
+    test('指定凭证时透传给房间信息客户端', () async {
+      final LiveDanmuSession session =
+          build(credentialCookies: 'ttwid=abc; msToken=xyz');
+      await session.start();
+
+      expect(roomClient.credentialCalls.single, 'ttwid=abc; msToken=xyz');
+      await session.stop();
+    });
+
+    test('凭证为空白时按未指定处理，透传 null', () async {
+      final LiveDanmuSession session = build(credentialCookies: '   ');
+      await session.start();
+
+      expect(roomClient.credentialCalls.single, isNull);
+      await session.stop();
+    });
+
+    test('未指定凭证时透传 null', () async {
+      final LiveDanmuSession session = build();
+      await session.start();
+
+      expect(roomClient.credentialCalls.single, isNull);
+      await session.stop();
     });
 
     test('弹幕进入缓冲并推送到 danmu 流，连接成功后进入 live', () async {

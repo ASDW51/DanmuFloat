@@ -175,59 +175,68 @@ void main() {
     expect(persisted.last, isTrue);
   });
 
-  testWidgets('凭证状态行按来源显示，粘贴合法凭证后切换为手动粘贴', (WidgetTester tester) async {
+  testWidgets('凭证状态行按来源显示，添加凭证后切换为已配置', (WidgetTester tester) async {
     _useFullScreen(tester);
-    final CredentialStore store =
-        CredentialStore(backend: FakeCredentialBackend());
+    final FakeCredentialBackend backend = FakeCredentialBackend();
+    final CredentialStore store = CredentialStore(backend: backend);
     await tester.pumpWidget(_wrapFull(prefs: const OverlayPrefs(), store: store));
     await tester.pumpAndSettle();
     expect(find.text('匿名自动获取（仅内存）'), findsOneWidget);
 
-    await tester.enterText(_credentialField, 'ttwid=abc');
-    await tester.tap(find.widgetWithText(FilledButton, '加密保存'));
+    await tester.tap(find.widgetWithText(FilledButton, '添加凭证'));
+    await tester.pumpAndSettle();
+    // 内容框用 obscure 输入，不回显明文。
+    expect(tester.widget<TextField>(_credentialCookieField).obscureText, isTrue);
+
+    await tester.enterText(_credentialNameField, '主号');
+    await tester.enterText(_credentialCookieField, 'ttwid=abc');
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
     await tester.pumpAndSettle();
 
-    expect(store.isManual, isTrue);
-    expect(find.text('手动粘贴'), findsOneWidget);
-    // 保存后清空输入框，不回显明文。
-    expect(tester.widget<TextField>(_credentialField).controller?.text, '');
+    expect(store.hasProfiles, isTrue);
+    expect(store.profiles.single.name, '主号');
+    expect(backend.stored, isNotNull);
+    expect(find.text('已配置 1 份凭证'), findsOneWidget);
+    expect(find.text('主号'), findsOneWidget);
   });
 
-  testWidgets('畸形凭证不保存，给出错误提示', (WidgetTester tester) async {
+  testWidgets('畸形凭证不保存，弹窗内给出错误提示', (WidgetTester tester) async {
     _useFullScreen(tester);
     final FakeCredentialBackend backend = FakeCredentialBackend();
-    await tester.pumpWidget(_wrapFull(
-      prefs: const OverlayPrefs(),
-      store: CredentialStore(backend: backend),
-    ));
+    final CredentialStore store = CredentialStore(backend: backend);
+    await tester.pumpWidget(_wrapFull(prefs: const OverlayPrefs(), store: store));
     await tester.pumpAndSettle();
 
-    await tester.enterText(_credentialField, '不是 cookie');
-    await tester.tap(find.widgetWithText(FilledButton, '加密保存'));
+    await tester.tap(find.widgetWithText(FilledButton, '添加凭证'));
+    await tester.pumpAndSettle();
+    await tester.enterText(_credentialCookieField, '不是 cookie');
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
     await tester.pumpAndSettle();
 
     expect(backend.stored, isNull);
+    expect(store.hasProfiles, isFalse);
     expect(find.text('格式应为 name=value，段之间用分号分隔'), findsOneWidget);
+    // 弹窗未关闭，列表仍是匿名状态。
     expect(find.text('匿名自动获取（仅内存）'), findsOneWidget);
   });
 
   testWidgets('清除本地凭证需确认，确认后删除密文并回到匿名', (WidgetTester tester) async {
     _useFullScreen(tester);
-    final FakeCredentialBackend backend = FakeCredentialBackend()
-      ..stored = 'ttwid=abc';
-    await tester.pumpWidget(_wrapFull(
-      prefs: const OverlayPrefs(),
-      store: CredentialStore(backend: backend),
-    ));
-    await tester.pumpAndSettle();
-    expect(find.text('手动粘贴'), findsOneWidget);
+    final FakeCredentialBackend backend = FakeCredentialBackend();
+    final CredentialStore store = CredentialStore(backend: backend);
+    await store.saveProfile(name: '主号', raw: 'ttwid=abc');
 
-    await tester.tap(find.text('清除本地凭证'));
+    await tester.pumpWidget(_wrapFull(prefs: const OverlayPrefs(), store: store));
+    await tester.pumpAndSettle();
+    expect(find.text('已配置 1 份凭证'), findsOneWidget);
+
+    await tester.tap(find.text('清除本地凭证').first);
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '清除'));
     await tester.pumpAndSettle();
 
     expect(backend.stored, isNull);
+    expect(store.hasProfiles, isFalse);
     expect(find.text('匿名自动获取（仅内存）'), findsOneWidget);
   });
 
@@ -483,10 +492,16 @@ class FakeDataTransfer implements LocalDataTransfer {
 const double _screenWidth = 800;
 const double _screenHeight = 600;
 
-/// 凭证粘贴框：按 labelText 定位，避免与「屏蔽与高亮」分区的关键词输入框混淆。
-final Finder _credentialField = find.byWidgetPredicate(
+/// 凭证弹窗里的名称输入框。
+final Finder _credentialNameField = find.byWidgetPredicate(
   (Widget widget) =>
-      widget is TextField && widget.decoration?.labelText == '手动粘贴凭证（兜底）',
+      widget is TextField && widget.decoration?.labelText == '凭证名称（可选）',
+);
+
+/// 凭证弹窗里的内容输入框（obscure 不回显）。
+final Finder _credentialCookieField = find.byWidgetPredicate(
+  (Widget widget) =>
+      widget is TextField && widget.decoration?.labelText == 'Cookie 内容',
 );
 
 /// 加高视口后的逻辑高度：设置页比默认测试视口高，五条滑杆要全部完成布局

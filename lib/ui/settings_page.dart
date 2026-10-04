@@ -27,6 +27,7 @@ class SettingsPage extends StatefulWidget {
     required this.onChanged,
     this.onResetAll,
     this.credentialStore,
+    this.onCredentialsChanged,
     this.filter = const FilterPrefs(),
     this.filterStore,
     this.onFilterChanged,
@@ -47,6 +48,9 @@ class SettingsPage extends StatefulWidget {
 
   /// 凭证存储；单测可注入内存后端。
   final CredentialStore? credentialStore;
+
+  /// 凭证被增删改后的回调：调用方负责重建「主播 → 凭证」绑定并同步给悬浮窗。
+  final VoidCallback? onCredentialsChanged;
 
   /// 进入页面时的过滤偏好快照（prd F10 / F11 / F13）。
   final FilterPrefs filter;
@@ -408,7 +412,10 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const Divider(height: 1),
           const _SectionTitle('连接与凭证'),
-          _CredentialSection(store: _credentialStore),
+          _CredentialSection(
+            store: _credentialStore,
+            onChanged: widget.onCredentialsChanged,
+          ),
           const Divider(height: 1),
           const _SectionTitle('数据与隐私'),
           ListTile(
@@ -477,21 +484,24 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  /// 清除本地凭证（prd F26）：二次确认后删除密文并同步给悬浮窗引擎。
+  /// 清除本地凭证（prd F26）：二次确认后删除全部密文并同步给悬浮窗引擎。
   Future<void> _clearCredential() async {
     final bool confirmed = await _confirm(
       title: '清除本地凭证',
       content:
-          '将删除已加密保存的手动凭证，之后回退为匿名自动获取。'
+          '将删除全部已加密保存的凭证，之后回退为匿名自动获取。'
           '已建立的连接不受影响，下次连接按新凭证取。',
       confirmText: '清除',
     );
     if (!confirmed || !mounted) return;
 
-    await _credentialStore.clearManual();
-    await shareOverlayCredential(null);
+    await _credentialStore.clearAll();
+    // 绑定映射随凭证一起清空：主播全部回到匿名自动获取。
+    setRoomCookieBindings(const <String, String>{});
+    await shareOverlayCredential(const <String, String>{});
     if (!mounted) return;
     setState(() {});
+    widget.onCredentialsChanged?.call();
     _snack('已清除本地凭证');
   }
 
@@ -619,8 +629,7 @@ class _SettingsPageState extends State<SettingsPage> {
           '（悬浮窗${_prefs.lightTheme ? '浅色' : '深色'}皮肤）',
       '栏目标识：${_prefs.showTitleBar ? '显示' : '隐藏'}'
           '；焦点模式其余栏${_prefs.focusBehavior == focusBehaviorHide ? '隐藏' : '缩小'}',
-      '凭证来源：'
-          '${_credentialStore.isManual ? '手动粘贴（已加密保存）' : '匿名自动获取（仅内存）'}',
+      '凭证：${_credentialStore.hasProfiles ? '已配置 ${_credentialStore.profiles.length} 份（加密保存）' : '未配置，主播走匿名自动获取'}',
       '悬浮窗：${overlayShown ? '已开启' : '未开启'}',
     ].join('\n');
     await Clipboard.setData(ClipboardData(text: summary));
@@ -635,34 +644,29 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// 「连接与凭证」分区：状态行 + 手动粘贴兜底（prd F27）。
+/// 「连接与凭证」分区：凭证列表 + 新增 / 改名 / 更新内容 / 删除（prd F27）。
 ///
-/// 粘贴框用 obscure，已保存的凭证不回显，只展示来源状态。
+/// 已保存的凭证不回显明文，只展示名字与创建日期；内容用 obscure 输入。
 class _CredentialSection extends StatefulWidget {
-  const _CredentialSection({required this.store});
+  const _CredentialSection({required this.store, this.onChanged});
 
   final CredentialStore store;
+
+  /// 凭证被增删改后回调外层，重建「主播 → 凭证」绑定。
+  final VoidCallback? onChanged;
 
   @override
   State<_CredentialSection> createState() => _CredentialSectionState();
 }
 
 class _CredentialSectionState extends State<_CredentialSection> {
-  final TextEditingController _controller = TextEditingController();
-  bool _saving = false;
-  String? _error;
+  bool _busy = false;
 
   @override
   void initState() {
     super.initState();
-    // 读一次已保存的凭证，保证状态行与实际一致（明文不落到界面）。
+    // 读一次已保存的凭证，保证列表与实际一致（明文不落到界面）。
     unawaited(_refresh());
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
   }
 
   Future<void> _refresh() async {
@@ -671,47 +675,103 @@ class _CredentialSectionState extends State<_CredentialSection> {
     setState(() {});
   }
 
-  Future<void> _save() async {
-    final String raw = _controller.text;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    final String? error = await widget.store.saveManual(raw);
+  /// 新增（[profile] 为 null）或编辑一份凭证。
+  Future<void> _openEditor({CredentialProfile? profile}) async {
+    final _CredentialEditResult? result =
+        await showDialog<_CredentialEditResult>(
+      context: context,
+      builder: (BuildContext context) => _CredentialEditDialog(profile: profile),
+    );
+    if (result == null || !mounted) return;
+
+    setState(() => _busy = true);
+    final String? error;
+    if (profile == null) {
+      error = await widget.store.saveProfile(
+        name: result.name,
+        raw: result.cookies,
+      );
+    } else if (result.cookies.isEmpty) {
+      error = await widget.store.renameProfile(profile.id, result.name);
+    } else {
+      error = await widget.store.saveProfile(
+        id: profile.id,
+        name: result.name,
+        raw: result.cookies,
+      );
+    }
     if (!mounted) return;
-    setState(() => _saving = false);
+    setState(() => _busy = false);
     if (error != null) {
-      setState(() => _error = error);
+      _snack(error);
       return;
     }
-    // 立刻把新凭证同步给悬浮窗引擎，之后新建的栏位按它取。
-    await shareOverlayCredential(manualCookies);
-    if (!mounted) return;
-    _controller.clear();
     setState(() {});
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('凭证已加密保存')));
+    widget.onChanged?.call();
+    _snack(profile == null ? '凭证已加密保存' : '凭证已更新');
   }
+
+  Future<void> _delete(CredentialProfile profile) async {
+    final bool confirmed = await _confirmDelete(profile.name);
+    if (!confirmed || !mounted) return;
+    final String? error = await widget.store.deleteProfile(profile.id);
+    if (!mounted) return;
+    if (error != null) {
+      _snack(error);
+      return;
+    }
+    setState(() {});
+    widget.onChanged?.call();
+    _snack('已删除「${profile.name}」');
+  }
+
+  Future<bool> _confirmDelete(String name) async {
+    final bool? result = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('删除凭证'),
+        content: Text('删除「$name」后，指定了它的主播会回到匿名自动获取。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
+  void _snack(String message) => ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
 
   @override
   Widget build(BuildContext context) {
     final CredentialStore store = widget.store;
-    final bool manual = store.isManual;
+    final List<CredentialProfile> profiles = store.profiles;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         ListTile(
           dense: true,
           leading: Icon(
-            manual ? Icons.key_outlined : Icons.public_outlined,
-            color: manual ? Colors.orange : Colors.blueGrey,
+            store.hasProfiles ? Icons.key_outlined : Icons.public_outlined,
+            color: store.hasProfiles ? Colors.orange : Colors.blueGrey,
           ),
-          title: Text(manual ? '手动粘贴' : '匿名自动获取（仅内存）'),
+          title: Text(
+            store.hasProfiles
+                ? '已配置 ${profiles.length} 份凭证'
+                : '匿名自动获取（仅内存）',
+          ),
           subtitle: Text(
-            manual
-                ? '使用你粘贴的凭证，已加密保存在本机；可随时清除'
-                : '启动时自动获取 ttwid，仅在内存中持有，App 关闭即失效',
+            store.hasProfiles
+                ? '加密保存在本机；在主播长按菜单里指定用哪一份，未指定的走匿名自动获取'
+                : '未配置凭证时，主播一律自动获取 ttwid（仅内存，App 关闭即失效）',
             style: const TextStyle(fontSize: 12),
           ),
         ),
@@ -719,39 +779,45 @@ class _CredentialSectionState extends State<_CredentialSection> {
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
             child: Text(
-              '已保存的凭证解密失败，请在下方重新粘贴',
+              '已保存的凭证解密失败，请重新添加',
               style: TextStyle(fontSize: 12, color: Colors.redAccent),
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: TextField(
-            controller: _controller,
-            // 凭证明文不回显（prd F27）。
-            obscureText: true,
-            maxLines: 1,
-            decoration: InputDecoration(
-              labelText: '手动粘贴凭证（兜底）',
-              hintText: '仅在自动获取失败时使用，形如 ttwid=xxx; ...',
-              errorText: _error,
-              border: const OutlineInputBorder(),
-              isDense: true,
+        for (final CredentialProfile profile in profiles)
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.vpn_key_outlined, size: 20),
+            title: Text(
+              profile.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              '已加密保存${profile.createdAt > 0 ? ' · ${_formatDate(profile.createdAt)}' : ''}',
+              style: const TextStyle(fontSize: 12),
+            ),
+            trailing: PopupMenuButton<String>(
+              onSelected: (String value) {
+                if (value == 'edit') unawaited(_openEditor(profile: profile));
+                if (value == 'delete') unawaited(_delete(profile));
+              },
+              itemBuilder: (BuildContext context) =>
+                  const <PopupMenuEntry<String>>[
+                PopupMenuItem<String>(
+                  value: 'edit',
+                  child: Text('重命名 / 更新内容'),
+                ),
+                PopupMenuItem<String>(value: 'delete', child: Text('删除')),
+              ],
             ),
           ),
-        ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
           child: Row(
             children: <Widget>[
               FilledButton(
-                onPressed: _saving ? null : _save,
-                child: _saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('加密保存'),
+                onPressed: _busy ? null : () => unawaited(_openEditor()),
+                child: const Text('添加凭证'),
               ),
               const SizedBox(width: 12),
               const Expanded(
@@ -766,6 +832,106 @@ class _CredentialSectionState extends State<_CredentialSection> {
       ],
     );
   }
+}
+
+/// 把 epoch 毫秒格式化成 `yyyy-MM-dd`，用于凭证列表的创建日期。
+String _formatDate(int epochMillis) {
+  final DateTime time = DateTime.fromMillisecondsSinceEpoch(epochMillis);
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${time.year}-${two(time.month)}-${two(time.day)}';
+}
+
+/// 凭证编辑结果：名字 + 内容；编辑时内容留空表示只改名。
+class _CredentialEditResult {
+  const _CredentialEditResult({required this.name, required this.cookies});
+
+  final String name;
+  final String cookies;
+}
+
+/// 新增 / 编辑凭证弹窗：内容用 obscure 输入，不回显已保存的明文。
+class _CredentialEditDialog extends StatefulWidget {
+  const _CredentialEditDialog({this.profile});
+
+  /// 编辑对象；null 表示新增。
+  final CredentialProfile? profile;
+
+  @override
+  State<_CredentialEditDialog> createState() => _CredentialEditDialogState();
+}
+
+class _CredentialEditDialogState extends State<_CredentialEditDialog> {
+  late final TextEditingController _nameController =
+      TextEditingController(text: widget.profile?.name ?? '');
+  final TextEditingController _cookiesController = TextEditingController();
+  String? _error;
+
+  bool get _isEdit => widget.profile != null;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _cookiesController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final String cookies = _cookiesController.text;
+    // 编辑时留空表示只改名，不做内容校验。
+    if (!_isEdit || cookies.trim().isNotEmpty) {
+      final String? error = validateManualCookies(cookies);
+      if (error != null) {
+        setState(() => _error = error);
+        return;
+      }
+    }
+    Navigator.of(context).pop(
+      _CredentialEditResult(
+        name: _nameController.text.trim(),
+        cookies: cookies.trim(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(_isEdit ? '编辑凭证' : '添加凭证'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        TextField(
+          controller: _nameController,
+          decoration: const InputDecoration(
+            labelText: '凭证名称（可选）',
+            hintText: '例如：主号 / 备用',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _cookiesController,
+          obscureText: true,
+          maxLines: 1,
+          decoration: InputDecoration(
+            labelText: 'Cookie 内容',
+            hintText: _isEdit ? '留空表示只改名' : '形如 ttwid=xxx; ...',
+            errorText: _error,
+            border: const OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+      ],
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('取消'),
+      ),
+      FilledButton(onPressed: _submit, child: const Text('保存')),
+    ],
+  );
 }
 
 /// 导入备份弹窗：多行输入 JSON，可从文件或剪贴板一键填入。

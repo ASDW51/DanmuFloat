@@ -1,9 +1,10 @@
-// 凭证模块：匿名自动获取 ttwid（仅内存，不落盘）。
+// 凭证模块：匿名自动获取 ttwid（仅内存，不落盘）+ 按主播指定用户配置的凭证。
 //
 // 依据 design.md 2.2：
 // - 请求 https://live.douyin.com/（桌面版 UA），从响应 set-cookie 提取并拼接为 Cookie 串；
 // - 内存缓存 6 小时；若新响应不含 ttwid 且已有缓存，复用上次缓存。
 import '../net/http_transport.dart';
+import 'credential_store.dart';
 
 /// 桌面版 Chrome UA，与参考实现一致。
 const String defaultDesktopUserAgent =
@@ -29,31 +30,65 @@ String joinCookieValues(Iterable<String> setCookieValues) {
   return pairs.join('; ');
 }
 
-/// 手动粘贴的凭证（prd F27 的兜底路径）：一旦设置就优先于匿名自动获取。
-///
-/// 明文只在内存中持有，密文由 CredentialStore 负责加密落盘；
-/// 悬浮窗跑在独立引擎里，主 App 通过消息通道把它同步过去（见 overlay_launcher）。
-String? _manualCookies;
-
-/// 当前生效的手动凭证；null 表示走匿名自动获取。
-///
-/// 主 App 建窗、重排窗口时用它把凭证一并下发给悬浮窗引擎。
-String? get manualCookies => _manualCookies;
-
-/// 设置或清除手动凭证（传 null / 空串即回到匿名自动获取）。
-void setManualCookies(String? cookies) {
+/// 手动凭证的规范形式：去空白，空串按「未指定」处理。
+String? normalizeCredentialCookies(String? cookies) {
   final String value = cookies?.trim() ?? '';
-  _manualCookies = value.isEmpty ? null : value;
+  return value.isEmpty ? null : value;
 }
 
-/// 提供匿名 Cookie 串（含 ttwid）。
+/// 当前生效的「主播 → 凭证」绑定快照（webRid → Cookie 串）。
+///
+/// 主 App 与悬浮窗跑在各自引擎里，各维护一份：
+/// - 主 App 由首页在主播列表 / 凭证变化时重建（见 home_page）；
+/// - 悬浮窗经消息通道收到主 App 下发的映射后写入（见 overlay_page）。
+/// 未出现在映射里的主播一律走匿名自动获取。
+Map<String, String> _roomCookieBindings = const <String, String>{};
+
+/// 当前生效的主播凭证绑定（主 App 建窗 / 重排时下发给悬浮窗引擎）。
+Map<String, String> get roomCookieBindings => _roomCookieBindings;
+
+/// 取某个主播指定的凭证；未指定返回 null（走匿名自动获取）。
+String? roomCookiesFor(String webRid) => _roomCookieBindings[webRid];
+
+/// 覆盖当前主播凭证绑定；空 key / 空值一律丢弃。
+void setRoomCookieBindings(Map<String, String> bindings) {
+  _roomCookieBindings = Map<String, String>.unmodifiable(
+    <String, String>{
+      for (final MapEntry<String, String> entry in bindings.entries)
+        if (entry.key.isNotEmpty && normalizeCredentialCookies(entry.value) != null)
+          entry.key: entry.value.trim(),
+    },
+  );
+}
+
+/// 把「主播 → 凭证 id」的绑定解析成「webRid → Cookie 串」。
+///
+/// 未绑定或绑定的凭证已被删除的主播不会出现在结果里，按匿名自动获取连接。
+Map<String, String> buildRoomCookieBindings({
+  required Iterable<({String webRid, String? credentialId})> rooms,
+  required Iterable<CredentialProfile> profiles,
+}) {
+  final Map<String, String> byId = <String, String>{
+    for (final CredentialProfile profile in profiles)
+      profile.id: profile.cookies,
+  };
+  return <String, String>{
+    for (final ({String webRid, String? credentialId}) room in rooms)
+      if (room.credentialId != null && byId[room.credentialId] != null)
+        room.webRid: byId[room.credentialId]!,
+  };
+}
+
+/// 提供 Cookie 串：默认匿名自动获取（含 ttwid），也可固定使用指定凭证。
 class CookieProvider {
   CookieProvider({
     HttpTransport? transport,
     this.cacheTtl = const Duration(hours: 6),
     this.userAgent = defaultDesktopUserAgent,
+    String? credentialCookies,
     DateTime Function()? now,
   })  : _transport = transport ?? IoHttpTransport(),
+        _credentialCookies = normalizeCredentialCookies(credentialCookies),
         _now = now ?? DateTime.now;
 
   static final Uri _entryUri = Uri.parse('https://live.douyin.com/');
@@ -63,14 +98,17 @@ class CookieProvider {
   final String userAgent;
   final DateTime Function() _now;
 
+  /// 固定的用户配置凭证；非空时优先于匿名自动获取，不再联网。
+  final String? _credentialCookies;
+
   DateTime? _cachedAt;
   String? _cachedCookies;
 
   /// 取得 Cookie 串。失败时抛 [CookieFetchException]。
   Future<String> getCookies() async {
-    // 手动粘贴的凭证优先（prd F27）：用户已经明确指定，不再走匿名自动获取。
-    final String? manual = _manualCookies;
-    if (manual != null) return manual;
+    // 主播指定了凭证：直接使用，不再走匿名自动获取（prd F27）。
+    final String? credential = _credentialCookies;
+    if (credential != null) return credential;
 
     final DateTime now = _now();
     final String? cached = _cachedCookies;

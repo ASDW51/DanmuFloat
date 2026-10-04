@@ -10,6 +10,7 @@ class ManagedRoom {
     this.title = '',
     this.group = '',
     this.living,
+    this.credentialId,
     required this.addedAt,
   });
 
@@ -40,6 +41,9 @@ class ManagedRoom {
   /// 添加时间（epoch 秒）。
   final int addedAt;
 
+  /// 连接本主播时指定使用的凭证 id（见 CredentialStore）；null 表示匿名自动获取。
+  final String? credentialId;
+
   /// 行内主标题：备注优先，其次主播名，最后退回直播间号。
   String get displayName =>
       name.isNotEmpty ? name : (owner.isNotEmpty ? owner : webRid);
@@ -50,6 +54,8 @@ class ManagedRoom {
     String? title,
     String? group,
     bool? living,
+    String? credentialId,
+    bool clearCredentialId = false,
   }) =>
       ManagedRoom(
         webRid: webRid,
@@ -58,6 +64,8 @@ class ManagedRoom {
         title: title ?? this.title,
         group: group ?? this.group,
         living: living ?? this.living,
+        credentialId:
+            clearCredentialId ? null : (credentialId ?? this.credentialId),
         addedAt: addedAt,
       );
 
@@ -68,6 +76,7 @@ class ManagedRoom {
         'title': title,
         'group': group,
         if (living != null) 'living': living,
+        if (credentialId != null) 'credential_id': credentialId,
         'added_at': addedAt,
       };
 
@@ -77,6 +86,7 @@ class ManagedRoom {
     final Object? webRid = raw['room_id'];
     if (webRid is! String || webRid.trim().isEmpty) return null;
     final Object? living = raw['living'];
+    final Object? credentialId = raw['credential_id'];
     return ManagedRoom(
       webRid: webRid.trim(),
       name: _asString(raw['room_name']),
@@ -84,6 +94,9 @@ class ManagedRoom {
       title: _asString(raw['title']),
       group: _asString(raw['group']).trim(),
       living: living is bool ? living : null,
+      credentialId: credentialId is String && credentialId.trim().isNotEmpty
+          ? credentialId.trim()
+          : null,
       addedAt: _asInt(raw['added_at']),
     );
   }

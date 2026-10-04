@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
+import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/danmu/auto_scroll.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
@@ -185,7 +186,11 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   }
 
   Future<void> _connect() async {
-    final LiveDanmuSession session = LiveDanmuSession(webRid: widget.webRid);
+    final LiveDanmuSession session = LiveDanmuSession(
+      webRid: widget.webRid,
+      // 首页已建立「主播 → 凭证」绑定；本主播指定了凭证就用它，否则匿名自动获取。
+      credentialCookies: roomCookiesFor(widget.webRid),
+    );
     _session = session;
     _stageSubscription = session.stages.listen((LiveSessionStage stage) {
       if (!mounted) return;

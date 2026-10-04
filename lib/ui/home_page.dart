@@ -9,6 +9,7 @@ import 'dart:async';
 
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
+import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/room/managed_room.dart';
@@ -38,8 +39,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final RoomStore _store = RoomStore();
   final OverlayPrefsStore _prefsStore = OverlayPrefsStore();
 
-  /// 凭证存储：手动粘贴的凭证加密落盘，启动时读回并接管取值（prd F27）。
+  /// 凭证存储：用户配置的多份凭证加密落盘，启动时读回；主播可分别指定使用哪份。
   late final CredentialStore _credentialStore = CredentialStore();
+
+  /// 已配置的凭证列表，用于长按菜单里的「使用凭证」选择与行内展示。
+  List<CredentialProfile> _credentials = const <CredentialProfile>[];
 
   /// 「清除所有本地数据」用；与页面共用同一个凭证实例，清完状态才一致。
   late final LocalDataReset _dataReset = LocalDataReset(
@@ -108,7 +112,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     unawaited(_loadPrefs());
     unawaited(_loadFilter());
     // 凭证要先于任何连接读回：刷新房间信息与弹幕连接都按同一份取值。
-    unawaited(_credentialStore.load());
+    unawaited(_loadCredentials());
     unawaited(_refreshOverlayPermission());
   }
 
@@ -200,6 +204,46 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _rooms = rooms;
       _loading = false;
     });
+    _syncCredentialBindings();
+  }
+
+  /// 读回已配置的凭证列表，并重建「主播 → 凭证」绑定。
+  Future<void> _loadCredentials() async {
+    await _credentialStore.load();
+    if (!mounted) return;
+    setState(() => _credentials = _credentialStore.profiles);
+    _syncCredentialBindings();
+  }
+
+  /// 设置页里凭证被增删改后回调：刷新本地列表并把新绑定推给已开着的悬浮窗。
+  void _onCredentialsChanged() {
+    setState(() => _credentials = _credentialStore.profiles);
+    _syncCredentialBindings();
+  }
+
+  /// 依据当前主播列表与凭证列表重建绑定：
+  /// - 主 App 侧存进全局映射，刷新 / 连接时按主播取值；
+  /// - 同步推给已开着的悬浮窗引擎（没开时静默忽略，下次建窗随配置补发）。
+  void _syncCredentialBindings() {
+    final Map<String, String> bindings = buildRoomCookieBindings(
+      rooms: _rooms.map(
+        (ManagedRoom room) =>
+            (webRid: room.webRid, credentialId: room.credentialId),
+      ),
+      profiles: _credentials,
+    );
+    setRoomCookieBindings(bindings);
+    unawaited(shareOverlayCredential(bindings));
+  }
+
+  /// 取主播绑定的凭证名；未绑定或绑定的凭证已删除时返回 null。
+  String? _credentialNameOf(ManagedRoom room) {
+    final String? id = room.credentialId;
+    if (id == null) return null;
+    for (final CredentialProfile profile in _credentials) {
+      if (profile.id == id) return profile.name;
+    }
+    return null;
   }
 
   Future<void> _loadPrefs() async {
@@ -296,6 +340,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           onChanged: _onPrefsChanged,
           onResetAll: _clearAllData,
           credentialStore: _credentialStore,
+          onCredentialsChanged: _onCredentialsChanged,
           filter: _filter,
           filterStore: _filterStore,
           onFilterChanged: _onFilterChanged,
@@ -323,6 +368,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _pushOverlayStyle(prefs);
     unawaited(shareOverlayFilter(filter));
     _syncOverlayRooms();
+    _syncCredentialBindings();
     if (_overlayVisible) {
       final Size screen = MediaQuery.sizeOf(context);
       updateOverlaySize(
@@ -353,9 +399,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _rooms = const <ManagedRoom>[];
       _prefs = const OverlayPrefs();
       _filter = const FilterPrefs();
+      _credentials = const <CredentialProfile>[];
       _refreshing.clear();
       _overlayVisible = false;
     });
+    // 凭证密文已被删除，全局绑定同步清空（悬浮窗已关闭，无需再下发）。
+    setRoomCookieBindings(const <String, String>{});
     widget.onResetAll?.call();
   }
 
@@ -381,6 +430,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() => _rooms = next);
     await _store.save(next);
     _syncOverlayRooms();
+    // 主播被移除后它绑定的凭证不再有任何作用，重建一次绑定以免留下悬挂项。
+    _syncCredentialBindings();
     if (mounted) _snack('已移除 ${room.displayName}');
   }
 
@@ -407,6 +458,38 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (mounted) _snack(group.isEmpty ? '已移出分组' : '已归入「$group」');
   }
 
+  /// 指定 / 取消某主播连接时使用的凭证（prd F27）。
+  ///
+  /// 弹窗返回空串表示改回匿名自动获取，null 表示取消；凭证在设置页统一管理。
+  Future<void> _editCredential(ManagedRoom room) async {
+    final String? selected = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => _CredentialPickerDialog(
+        title: room.displayName,
+        current: room.credentialId,
+        profiles: _credentials,
+      ),
+    );
+    if (selected == null || !mounted) return;
+
+    final bool anonymous = selected.isEmpty;
+    final List<ManagedRoom> next = _rooms
+        .map(
+          (ManagedRoom item) => item.webRid == room.webRid
+              ? item.copyWith(
+                  credentialId: anonymous ? null : selected,
+                  clearCredentialId: anonymous,
+                )
+              : item,
+        )
+        .toList(growable: false);
+    setState(() => _rooms = next);
+    await _store.save(next);
+    _syncCredentialBindings();
+    if (!mounted) return;
+    _snack(anonymous ? '已改为匿名自动获取' : '已指定凭证，下次连接生效');
+  }
+
   // ---------- 单个主播 ----------
 
   /// 拉取一次房间信息，更新主播名 / 标题 / 开播状态并落盘。
@@ -418,7 +501,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     ManagedRoom? updated;
     String? error;
     try {
-      final RoomInfo info = await _roomInfoClient.fetchByWebRid(webRid);
+      final RoomInfo info = await _roomInfoClient.fetchByWebRid(
+        webRid,
+        // 指定了凭证的主播用它的凭证刷新，未指定的走匿名自动获取。
+        credentialCookies: roomCookiesFor(webRid),
+      );
       updated = current.copyWith(
         // 未开播时接口不返回昵称/标题，保留上一次的缓存值。
         owner: info.owner.isNotEmpty ? info.owner : null,
@@ -726,6 +813,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget _buildRoomTile(ManagedRoom room) {
     final bool refreshing = _refreshing.contains(room.webRid);
     final bool? living = room.living;
+    final String? credentialName = _credentialNameOf(room);
     return ListTile(
       onTap: () => _connectSingle(room),
       onLongPress: () => _showRoomActions(room),
@@ -754,6 +842,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 12),
+            ),
+          if (credentialName != null)
+            Text(
+              '凭证：$credentialName',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: Colors.orange),
             ),
         ],
       ),
@@ -806,8 +901,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (confirmed ?? false) await _remove(room);
   }
 
-  /// 长按主播行的操作菜单（prd F14）：设置分组 / 移除主播。
+  /// 长按主播行的操作菜单（prd F14 / F27）：设置分组 / 使用凭证 / 移除主播。
   Future<void> _showRoomActions(ManagedRoom room) async {
+    final String? credentialName = _credentialNameOf(room);
     final String? action = await showModalBottomSheet<String>(
       context: context,
       builder: (BuildContext context) => SafeArea(
@@ -833,6 +929,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               onTap: () => Navigator.of(context).pop('group'),
             ),
             ListTile(
+              leading: const Icon(Icons.key_outlined),
+              title: const Text('使用凭证'),
+              subtitle: Text(
+                credentialName == null ? '当前：匿名自动获取' : '当前：$credentialName',
+              ),
+              onTap: () => Navigator.of(context).pop('credential'),
+            ),
+            ListTile(
               leading: const Icon(Icons.delete_outline),
               title: const Text('移除主播'),
               onTap: () => Navigator.of(context).pop('remove'),
@@ -843,6 +947,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
     if (!mounted) return;
     if (action == 'group') await _editGroup(room);
+    if (action == 'credential') await _editCredential(room);
     if (action == 'remove') await _confirmRemove(room);
   }
 }
@@ -937,6 +1042,70 @@ class _GroupDialogState extends State<_GroupDialog> {
           onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
           child: const Text('保存'),
         ),
+      ],
+    );
+  }
+}
+
+/// 主播凭证选择弹窗（prd F27）：选一份已配置凭证，或改回匿名自动获取。
+///
+/// 返回空串表示匿名自动获取，返回凭证 id 表示指定该份，null 表示取消。
+class _CredentialPickerDialog extends StatelessWidget {
+  const _CredentialPickerDialog({
+    required this.title,
+    required this.current,
+    required this.profiles,
+  });
+
+  /// 主播展示名，用于提示当前操作对象。
+  final String title;
+
+  /// 当前绑定的凭证 id；null 表示匿名自动获取。
+  final String? current;
+
+  /// 已配置的凭证列表。
+  final List<CredentialProfile> profiles;
+
+  @override
+  Widget build(BuildContext context) {
+    return SimpleDialog(
+      title: Text('使用凭证 · $title'),
+      children: <Widget>[
+        SimpleDialogOption(
+          onPressed: () => Navigator.of(context).pop(''),
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(
+              current == null
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked,
+            ),
+            title: const Text('匿名自动获取'),
+            subtitle: const Text('不指定，自动获取 ttwid（仅内存）'),
+          ),
+        ),
+        for (final CredentialProfile profile in profiles)
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(context).pop(profile.id),
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                current == profile.id
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+              ),
+              title: Text(profile.name),
+              subtitle: const Text('已加密保存'),
+            ),
+          ),
+        if (profiles.isEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: Text(
+              '还没有配置凭证，可在「设置 · 连接与凭证」里添加',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
       ],
     );
   }

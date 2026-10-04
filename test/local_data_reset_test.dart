@@ -33,7 +33,7 @@ void main() {
   });
 
   tearDown(() async {
-    setManualCookies(null);
+    setRoomCookieBindings(const <String, String>{});
     if (await directory.exists()) await directory.delete(recursive: true);
   });
 
@@ -44,13 +44,15 @@ void main() {
     final ComplianceStore compliance = ComplianceStore(directoryResolver: resolver);
     final FakeBackend backend = FakeBackend('ttwid=manual');
     final CredentialStore credential = CredentialStore(backend: backend);
+    // 旧版单份明文读回后视为已配置一份凭证。
+    expect(await credential.load(), isTrue);
+    expect(credential.hasProfiles, isTrue);
 
     await rooms.save(const <ManagedRoom>[
       ManagedRoom(webRid: '123', owner: '主播A', addedAt: 1),
     ]);
     await prefs.save(const OverlayPrefs(webRids: <String>['123']));
     await compliance.save(const ComplianceState(disclaimerAccepted: true));
-    setManualCookies('ttwid=manual');
 
     await LocalDataReset(
       roomStore: rooms,
@@ -63,7 +65,7 @@ void main() {
     expect((await prefs.load()).webRids, isEmpty);
     expect((await compliance.load()).disclaimerAccepted, isFalse);
     expect(backend.stored, isNull);
-    expect(manualCookies, isNull);
+    expect(credential.hasProfiles, isFalse);
   });
 
   test('单项清除失败不阻断其余项', () async {
@@ -73,7 +75,6 @@ void main() {
     final FakeBackend backend = FakeBackend('ttwid=manual');
 
     await prefs.save(const OverlayPrefs(opacity: 0.5));
-    setManualCookies('ttwid=manual');
 
     // 合规存储目录解析失败（模拟单文件删不掉）。
     final ComplianceStore brokenCompliance = ComplianceStore(
@@ -90,6 +91,5 @@ void main() {
     expect(await rooms.load(), isEmpty);
     expect((await prefs.load()).webRids, isEmpty);
     expect(backend.stored, isNull);
-    expect(manualCookies, isNull);
   });
 }

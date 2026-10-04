@@ -40,8 +40,8 @@ class LocalDataReset {
     await _ignoreErrors(_complianceStore.clear);
     await _ignoreErrors(_filterStore.clear);
     await _ignoreErrors(_themeStore.clear);
-    // 凭证清除同时会把内存里的手动凭证置空，回到匿名自动获取。
-    await _ignoreErrors(_credentialStore.clearManual);
+    // 凭证清除同时会把内存里的凭证列表清空，回到匿名自动获取。
+    await _ignoreErrors(_credentialStore.clearAll);
   }
 
   Future<void> _ignoreErrors(Future<void> Function() action) async {

@@ -320,11 +320,11 @@ class _OverlayPageState extends State<OverlayPage> {
       _reportState();
       return;
     }
-    // 手动凭证同步（prd F27）：只改本引擎的取值来源，不动已建立的连接，
-    // 各栏下次连接（新建 / 重连）时按新凭证取。
+    // 主播凭证绑定同步（prd F27）：只改本引擎的取值来源，不动已建立的连接，
+    // 各栏下次连接（新建 / 重连）时按各自指定的凭证取；未指定的走匿名自动获取。
     final OverlayCredential? credential = OverlayCredential.tryParse(message);
     if (credential != null) {
-      setManualCookies(credential.cookies);
+      setRoomCookieBindings(credential.roomCookies);
       return;
     }
     // 纯样式调整：只改外观，各栏绑定与缓存都不动。
@@ -1555,7 +1555,11 @@ class _OverlayPaneState extends State<_OverlayPane> {
   }
 
   Future<void> _start() async {
-    final LiveDanmuSession session = LiveDanmuSession(webRid: widget.webRid);
+    final LiveDanmuSession session = LiveDanmuSession(
+      webRid: widget.webRid,
+      // 主 App 已下发「主播 → 凭证」绑定；本栏指定了凭证就用它，否则匿名自动获取。
+      credentialCookies: roomCookiesFor(widget.webRid),
+    );
     _session = session;
     _stageSubscription = session.stages.listen((LiveSessionStage stage) {
       if (!mounted) return;

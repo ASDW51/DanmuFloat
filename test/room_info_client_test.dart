@@ -100,6 +100,26 @@ void main() {
         throwsA(isA<RoomInfoException>()),
       );
     });
+
+    test('空响应抛可读的 RoomInfoException，而非裸 FormatException', () {
+      expect(
+        () => parseWebEnterResponse('', webRid: '1'),
+        throwsA(
+          isA<RoomInfoException>().having(
+            (RoomInfoException e) => e.toString(),
+            'message',
+            contains('空响应'),
+          ),
+        ),
+      );
+    });
+
+    test('非 JSON 响应包装成 RoomInfoException', () {
+      expect(
+        () => parseWebEnterResponse('<html>验证</html>', webRid: '1'),
+        throwsA(isA<RoomInfoException>()),
+      );
+    });
   });
 
   group('RoomInfoClient.fetchByWebRid', () {
@@ -145,5 +165,36 @@ void main() {
       expect(transport.requestHeaders.last['User-Agent'], userAgent);
       expect(info.liveId, '7350000000000000001');
     });
+
+    test('指定凭证时直接使用，不再取匿名', () async {
+      final FakeTransport transport = FakeTransport(
+        (Uri uri, _) async =>
+            const HttpResponseData(statusCode: 200, body: _liveJson),
+      );
+      final RoomInfoClient client = RoomInfoClient(
+        transport: transport,
+        cookieProvider: CookieProvider(transport: transport),
+        abogusFactory: () => _testAbogus('UA-TEST'),
+      );
+
+      await client.fetchByWebRid(
+        '123456789',
+        credentialCookies: 'ttwid=user; msToken=abc',
+      );
+
+      expect(transport.requests, hasLength(1));
+      expect(
+        transport.requestHeaders.last['cookie'],
+        'ttwid=user; msToken=abc',
+      );
+    });
   });
 }
+
+/// 确定性 ABogus（时间与随机数固定），便于断言请求 URL。
+Abogus _testAbogus(String userAgent) => Abogus(
+      fingerprint: '1500|900|1530|980|0|0|0|0|1800|1000|1600|900|1500|900|24|24|Win32',
+      userAgent: userAgent,
+      now: () => 1758900005000,
+      randomDouble: () => 0.5,
+    );

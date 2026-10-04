@@ -684,27 +684,38 @@ class OverlayStyle {
 bool isOverlayCloseMessage(Object? raw) =>
     raw is Map && raw['type'] == overlayCloseType;
 
-/// 主 App 同步给悬浮窗引擎的手动凭证（prd F27）。
+/// 主 App 同步给悬浮窗引擎的主播凭证绑定（prd F27）。
 ///
-/// 连接层整体跑在悬浮窗引擎里，两个引擎不共享内存对象，所以手动粘贴的凭证
-/// 必须经消息通道下发。这是进程内的本地通道，不涉及上传或第三方转发（prd 3.2）。
+/// 连接层整体跑在悬浮窗引擎里，两个引擎不共享内存对象，所以「哪个主播用哪份
+/// 凭证」必须以 webRid → Cookie 串的映射经消息通道下发。这是进程内的本地通道，
+/// 不涉及上传或第三方转发（prd 3.2）。未出现在映射里的主播走匿名自动获取。
 class OverlayCredential {
-  const OverlayCredential(this.cookies);
+  const OverlayCredential(this.roomCookies);
 
-  /// 手动凭证的 Cookie 串；null 表示回到匿名自动获取。
-  final String? cookies;
+  /// 主播 webRid → Cookie 串；空映射表示全部走匿名自动获取。
+  final Map<String, String> roomCookies;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'type': overlayCredentialType,
-    'cookies': cookies,
+    'roomCookies': roomCookies,
   };
 
   /// 解析凭证消息；非 credential 消息时返回 null。
   static OverlayCredential? tryParse(Object? raw) {
     if (raw is! Map || raw['type'] != overlayCredentialType) return null;
-    final Object? cookies = raw['cookies'];
-    final String value = cookies is String ? cookies.trim() : '';
-    return OverlayCredential(value.isEmpty ? null : value);
+    final Object? roomCookies = raw['roomCookies'];
+    final Map<String, String> bindings = <String, String>{};
+    if (roomCookies is Map) {
+      for (final MapEntry<Object?, Object?> entry in roomCookies.entries) {
+        final Object? key = entry.key;
+        final Object? value = entry.value;
+        if (key is! String || key.isEmpty || value is! String) continue;
+        final String cookies = value.trim();
+        if (cookies.isEmpty) continue;
+        bindings[key] = cookies;
+      }
+    }
+    return OverlayCredential(bindings);
   }
 }
 

@@ -104,7 +104,7 @@ Future<void> resizeOverlay(
   _dragLocked = config.dragLocked;
   await resizeOverlayWindow(size);
   // 凭证先于配置下发：新栏位在收到 config 后立刻开始连接，先到才能生效。
-  await shareOverlayCredential(manualCookies);
+  await shareOverlayCredential(roomCookieBindings);
   await shareOverlayConfig(config);
 }
 
@@ -138,7 +138,7 @@ Future<void> openOverlay(
   _overlayShown = true;
   _dragLocked = config.dragLocked;
   // 窗口建立后下发配置：此时悬浮窗引擎已随主 App 启动预热完毕。
-  await shareOverlayCredential(manualCookies);
+  await shareOverlayCredential(roomCookieBindings);
   await shareOverlayConfig(config);
 }
 
@@ -162,12 +162,12 @@ OverlayPosition? _resolveStartPosition(
   return OverlayPosition(offset.x, offset.y);
 }
 
-/// 把手动粘贴的凭证同步给悬浮窗引擎（prd F27）；null 表示回到匿名自动获取。
+/// 把「主播 → 凭证」绑定同步给悬浮窗引擎（prd F27）；空映射表示全部匿名自动获取。
 ///
 /// 窗口没开时静默忽略：消息通道另一端没有监听者，下次建窗会随配置补发。
-Future<void> shareOverlayCredential(String? cookies) async {
+Future<void> shareOverlayCredential(Map<String, String> roomCookies) async {
   if (!_overlayShown) return;
-  await FlutterScreenOverlay.shareData(OverlayCredential(cookies).toJson());
+  await FlutterScreenOverlay.shareData(OverlayCredential(roomCookies).toJson());
 }
 
 Future<void> shareOverlayConfig(OverlayConfig config) =>

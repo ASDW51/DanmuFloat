@@ -780,6 +780,52 @@ void main() {
     });
   });
 
+  group('主播凭证下发（prd F27）', () {
+    test('roomCookies 映射经 JSON 往返后保留', () {
+      final OverlayCredential? credential = OverlayCredential.tryParse(
+        roundTrip(
+          const OverlayCredential(<String, String>{
+            '111': 'ttwid=a',
+            '222': 'ttwid=b',
+          }).toJson(),
+        ),
+      );
+
+      expect(credential, isNotNull);
+      expect(credential!.roomCookies, <String, String>{
+        '111': 'ttwid=a',
+        '222': 'ttwid=b',
+      });
+    });
+
+    test('空 key / 空值与非法值被剔除，空映射表示全部匿名', () {
+      final OverlayCredential? credential = OverlayCredential.tryParse(
+        roundTrip(<String, Object?>{
+          'type': overlayCredentialType,
+          'roomCookies': <String, Object?>{'111': 'ttwid=a', '': 'ttwid=b', '222': '   ', '333': 9},
+        }),
+      );
+
+      expect(credential!.roomCookies, <String, String>{'111': 'ttwid=a'});
+      expect(
+        OverlayCredential.tryParse(
+          roundTrip(const OverlayCredential(<String, String>{}).toJson()),
+        )!.roomCookies,
+        isEmpty,
+      );
+    });
+
+    test('非 credential 消息返回 null', () {
+      expect(
+        OverlayCredential.tryParse(
+          roundTrip(<String, Object?>{'type': 'config'}),
+        ),
+        isNull,
+      );
+      expect(OverlayCredential.tryParse(null), isNull);
+    });
+  });
+
   group('窗口位置持久化（悬浮窗贴边吸附）', () {
     test('fitOverlayOffset 把窗口位置收敛到屏幕可见范围内', () {
       // 窗口比屏幕还宽：水平可用范围被压到 0（x 是从屏幕右边缘起算的偏移）。
