@@ -12,7 +12,7 @@
          申请加入白名单需要声明该权限，否则系统会拒绝该 Intent。 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <application
-        android:label="danmu_float"
+        android:label="DanmuFloat"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <!-- 悬浮窗前台服务：flutter_screen_overlay 的 OverlayService。
