@@ -1,6 +1,8 @@
 name: danmu_float
 description: "dy多直播间弹幕悬浮窗（DanmuFloat）。纯弹幕查看器，仅 Android。"
 publish_to: 'none'
+repository: https://github.com/ASDW51/DanmuFloat
+issue_tracker: https://github.com/ASDW51/DanmuFloat/issues
 version: 0.1.0
 
 environment:
