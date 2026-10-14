@@ -77,4 +77,12 @@ void main() {
       expect(await themeStore.load(), ThemeMode.light);
     });
   });
+
+  group('debugThemeName', () {
+    test('各主题模式都能输出对应名字', () {
+      expect(debugThemeName(ThemeMode.dark), 'dark');
+      expect(debugThemeName(ThemeMode.light), 'light');
+      expect(debugThemeName(ThemeMode.system), 'system');
+    });
+  });
 }
