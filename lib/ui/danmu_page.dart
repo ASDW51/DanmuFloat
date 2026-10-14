@@ -35,6 +35,8 @@ class DanmuPage extends StatefulWidget {
     required this.webRid,
     this.title,
     this.createSession,
+    this.prefsStore,
+    this.filterStore,
   });
 
   /// 要连接的直播间号。
@@ -47,6 +49,12 @@ class DanmuPage extends StatefulWidget {
   /// 生产路径为 null，走默认的真实会话构造。
   final LiveDanmuSession Function(String webRid, String? credentialCookies)?
   createSession;
+
+  /// 悬浮窗样式偏好存储；单测注入临时目录后端，避免依赖 path_provider 通道。
+  final OverlayPrefsStore? prefsStore;
+
+  /// 过滤偏好存储；单测注入临时目录后端。
+  final FilterStore? filterStore;
 
   @override
   State<DanmuPage> createState() => _DanmuPageState();
@@ -62,11 +70,12 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   );
 
   /// 悬浮窗样式偏好：本页用到字号与滚动速度。
-  final OverlayPrefsStore _prefsStore = OverlayPrefsStore();
+  late final OverlayPrefsStore _prefsStore =
+      widget.prefsStore ?? OverlayPrefsStore();
   OverlayPrefs _prefs = const OverlayPrefs();
 
   /// 全局过滤偏好（prd F10 / F11 / F13）。
-  final FilterStore _filterStore = FilterStore();
+  late final FilterStore _filterStore = widget.filterStore ?? FilterStore();
   FilterPrefs _filter = const FilterPrefs();
 
   LiveDanmuSession? _session;

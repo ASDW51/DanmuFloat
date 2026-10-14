@@ -1,6 +1,10 @@
 // App 内弹幕页失败态的手动重连（需求 P0-1）：失败时出现入口，点击后重建会话。
+import 'dart:io';
+
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
+import 'package:danmu_float/storage/filter_store.dart';
+import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/ui/danmu_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -62,6 +66,23 @@ class NormalSession extends LiveDanmuSession {
 }
 
 void main() {
+  // 偏好落盘走临时目录，避免依赖 path_provider 插件通道。
+  late Directory directory;
+  late OverlayPrefsStore prefsStore;
+  late FilterStore filterStore;
+
+  setUp(() {
+    directory = Directory.systemTemp.createTempSync('danmu_page_test');
+    prefsStore = OverlayPrefsStore(
+      directoryResolver: () async => directory,
+    );
+    filterStore = FilterStore(directoryResolver: () async => directory);
+  });
+
+  tearDown(() {
+    if (directory.existsSync()) directory.deleteSync(recursive: true);
+  });
+
   testWidgets('失败态出现「重新连接」入口，点击后调用会话重启', (WidgetTester tester) async {
     final FailingSession session = FailingSession('12345');
     await tester.pumpWidget(
@@ -69,6 +90,8 @@ void main() {
         home: DanmuPage(
           webRid: '12345',
           createSession: (String webRid, String? credentialCookies) => session,
+          prefsStore: prefsStore,
+          filterStore: filterStore,
         ),
       ),
     );
@@ -89,6 +112,8 @@ void main() {
         home: DanmuPage(
           webRid: '12345',
           createSession: (String webRid, String? credentialCookies) => session,
+          prefsStore: prefsStore,
+          filterStore: filterStore,
         ),
       ),
     );
