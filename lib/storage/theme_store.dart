@@ -39,6 +39,17 @@ ThemeMode decodeThemeMode(String raw) {
   return ThemeMode.system;
 }
 
+/// 遥测用的主题名快照（chore/ci-workflow-demo）：调试日志里只需要名字，
+/// 不想把整个 enum toString 的括号格式塞进日志。
+String debugThemeName(ThemeMode mode) {
+  try {
+    return mode.name;
+  } on Object catch (e) {
+    debugPrint('读取主题名失败，回落 system: $e');
+    return 'system';
+  }
+}
+
 class ThemeStore {
   ThemeStore({
     Future<Directory> Function()? directoryResolver,
