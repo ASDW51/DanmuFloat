@@ -1582,6 +1582,38 @@ class _OverlayPaneState extends State<_OverlayPane> {
     _report();
   }
 
+  /// 手动重连本栏（需求 P0-1）：失败态重建会话，保留已收弹幕缓存。
+  Future<void> _reconnect() async {
+    final LiveDanmuSession? session = _session;
+    if (session == null) return;
+    await _stageSubscription?.cancel();
+    await _danmuSubscription?.cancel();
+    setState(() {
+      _stage = LiveSessionStage.resolvingRoom;
+      _error = null;
+    });
+    _report();
+    await session.restart();
+    if (!mounted) return;
+    // 重新挂上阶段流与弹幕流监听（旧订阅已撤）。
+    _stageSubscription = session.stages.listen((LiveSessionStage stage) {
+      if (!mounted) return;
+      setState(() {
+        _stage = stage;
+        _error = session.errorMessage;
+      });
+      _report();
+    });
+    _danmuSubscription = session.danmu
+        .where(
+          (DanmakuEvent event) =>
+              event.isDisplayable && isStreamRelevant(event.kind),
+        )
+        .listen(_onEvent);
+    setState(() => _error = session.errorMessage ?? session.signatureWarning);
+    _report();
+  }
+
   void _onEvent(DanmakuEvent event) {
     if (!mounted) return;
     setState(() {
@@ -1765,6 +1797,15 @@ class _OverlayPaneState extends State<_OverlayPane> {
               ),
             ),
           ),
+          // 失败态提供就地重连（需求 P0-1）：断流达上限后用户不必删栏重加。
+          if (_stage == LiveSessionStage.error)
+            InkWell(
+              onTap: _reconnect,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Icon(Icons.refresh, size: 14, color: palette.secondary),
+              ),
+            ),
         ],
       ),
     );

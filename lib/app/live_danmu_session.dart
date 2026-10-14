@@ -205,6 +205,23 @@ class LiveDanmuSession {
     socket.start();
   }
 
+  /// 失败或自动重连耗尽后手动重连（需求 P0-1）。
+  ///
+  /// 复用本会话而不是新建实例：界面层订阅的是同一组 broadcast 流，
+  /// 重建会话意味着要重新订阅并丢失阶段监听；这里只释放旧 socket 与订阅、
+  /// 重置停止标记后重跑启动链路，旧弹幕缓冲保留供回看。
+  Future<void> restart() async {
+    await _socket?.stop();
+    _socket = null;
+    await _eventSubscription?.cancel();
+    _eventSubscription = null;
+    await _stateSubscription?.cancel();
+    _stateSubscription = null;
+    _stopped = false;
+    _errorMessage = null;
+    await start();
+  }
+
   /// 主动关闭：停止重连并释放网络资源。
   Future<void> stop() async {
     if (_stopped) return;

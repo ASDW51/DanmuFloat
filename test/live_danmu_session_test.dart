@@ -308,5 +308,51 @@ void main() {
       );
       await session.stop();
     });
+
+    test('失败后 restart 可重新走完建连链路（需求 P0-1）', () async {
+      final LiveDanmuSession session = build();
+      await session.start();
+      await _tick();
+
+      // 模拟自动重连耗尽进入失败死态。
+      socket.emitState(DanmuConnectionState.failed);
+      await _tick();
+      expect(session.stage, LiveSessionStage.error);
+      expect(session.errorMessage, contains('重连次数达上限'));
+      final FakeSocket oldSocket = socket;
+
+      await session.restart();
+      await _tick();
+
+      // 旧 socket 已释放，新 socket 重建并启动，阶段回到连接中。
+      expect(oldSocket.stopped, isTrue);
+      expect(identical(oldSocket, socket), isFalse, reason: 'restart 应新建连接');
+      expect(socket.started, isTrue);
+      expect(session.stage, LiveSessionStage.connecting);
+      expect(session.errorMessage, isNull);
+      expect(roomClient.calls.length, 2, reason: 'restart 重走房间解析');
+      expect(socketArgs.length, 2);
+
+      // 重连成功后计数随新连接重置，后续断流仍正常上报。
+      socket.emitState(DanmuConnectionState.connected);
+      await _tick();
+      expect(session.stage, LiveSessionStage.live);
+
+      await session.stop();
+      expect(socket.stopped, isTrue);
+    });
+
+    test('stop 后 restart 不再启动（保持关闭语义）', () async {
+      final LiveDanmuSession session = build();
+      await session.start();
+      await _tick();
+      await session.stop();
+
+      await session.restart();
+      await _tick();
+
+      expect(session.stage, LiveSessionStage.idle);
+      expect(socketArgs.length, 1, reason: 'stop 后不得再发起新连接');
+    });
   });
 }

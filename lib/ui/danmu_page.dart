@@ -30,13 +30,23 @@ const TextStyle _highlightStyle = TextStyle(
 );
 
 class DanmuPage extends StatefulWidget {
-  const DanmuPage({super.key, required this.webRid, this.title});
+  const DanmuPage({
+    super.key,
+    required this.webRid,
+    this.title,
+    this.createSession,
+  });
 
   /// 要连接的直播间号。
   final String webRid;
 
   /// 列表里的展示名（备注 / 主播名），仅作标题占位，连接成功后改用主播昵称。
   final String? title;
+
+  /// 会话工厂；仅供测试注入假会话（@visibleForTesting 语义），
+  /// 生产路径为 null，走默认的真实会话构造。
+  final LiveDanmuSession Function(String webRid, String? credentialCookies)?
+  createSession;
 
   @override
   State<DanmuPage> createState() => _DanmuPageState();
@@ -186,12 +196,25 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   }
 
   Future<void> _connect() async {
-    final LiveDanmuSession session = LiveDanmuSession(
-      webRid: widget.webRid,
-      // 首页已建立「主播 → 凭证」绑定；本主播指定了凭证就用它，否则匿名自动获取。
-      credentialCookies: roomCookiesFor(widget.webRid),
-    );
+    final LiveDanmuSession session =
+        widget.createSession?.call(widget.webRid, roomCookiesFor(widget.webRid)) ??
+        LiveDanmuSession(
+          webRid: widget.webRid,
+          // 首页已建立「主播 → 凭证」绑定；本主播指定了凭证就用它，否则匿名自动获取。
+          credentialCookies: roomCookiesFor(widget.webRid),
+        );
     _session = session;
+    await _listenSession(session);
+    setState(() => _stage = LiveSessionStage.resolvingRoom);
+    await session.start();
+    if (!mounted) return;
+    setState(
+      () => _errorMessage = session.errorMessage ?? session.signatureWarning,
+    );
+  }
+
+  /// 挂上会话的阶段流与弹幕流；手动重连后要对同一会话重新调用（需求 P0-1）。
+  Future<void> _listenSession(LiveDanmuSession session) async {
     _stageSubscription = session.stages.listen((LiveSessionStage stage) {
       if (!mounted) return;
       setState(() {
@@ -206,12 +229,20 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
               event.isDisplayable && isStreamRelevant(event.kind),
         )
         .listen(_onEvent);
+  }
+
+  /// 手动重连（需求 P0-1）：失败态下重建本页会话，保留已收弹幕缓存。
+  Future<void> _reconnect() async {
+    final LiveDanmuSession? session = _session;
+    if (session == null) return;
+    // 旧订阅先撤掉，restart 内部会释放旧 socket；订阅重新挂到同一会话。
+    await _stageSubscription?.cancel();
+    await _danmuSubscription?.cancel();
     setState(() => _stage = LiveSessionStage.resolvingRoom);
-    await session.start();
+    await session.restart();
     if (!mounted) return;
-    setState(
-      () => _errorMessage = session.errorMessage ?? session.signatureWarning,
-    );
+    await _listenSession(session);
+    setState(() => _errorMessage = session.errorMessage);
   }
 
   void _onEvent(DanmakuEvent event) {
@@ -509,6 +540,18 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
           if (_errorMessage != null) ...<Widget>[
             const SizedBox(height: 6),
             Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+          ],
+          // 失败 / 未开播时提供就地恢复入口（需求 P0-1）：失败后不再是无解死态。
+          if (_stage == LiveSessionStage.error) ...<Widget>[
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: _reconnect,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('重新连接'),
+              ),
+            ),
           ],
           if (_overlayState != null) ...<Widget>[
             const SizedBox(height: 6),
