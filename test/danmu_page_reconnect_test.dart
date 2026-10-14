@@ -37,7 +37,8 @@ class FakeSocket extends DanmuSocketClient {
 
 /// 首次 start 后立即进入失败态的假会话：模拟自动重连耗尽的死局。
 class FailingSession extends LiveDanmuSession {
-  FailingSession(super.webRid) : super();
+  FailingSession(String webRid)
+    : super(webRid: webRid);
 
   final FakeSocket socket = FakeSocket(
     liveId: '1',
