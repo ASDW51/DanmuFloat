@@ -211,6 +211,8 @@ class LiveDanmuSession {
   /// 重建会话意味着要重新订阅并丢失阶段监听；这里只释放旧 socket 与订阅、
   /// 重置停止标记后重跑启动链路，旧弹幕缓冲保留供回看。
   Future<void> restart() async {
+    // stop() 之后的会话已 close 流控制器，重连会破坏关闭语义，直接拒绝。
+    if (_stopped) return;
     await _socket?.stop();
     _socket = null;
     await _eventSubscription?.cancel();

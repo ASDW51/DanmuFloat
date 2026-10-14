@@ -1,61 +1,22 @@
 // App 内弹幕页失败态的手动重连（需求 P0-1）：失败时出现入口，点击后重建会话。
-import 'dart:async';
-
 import 'package:danmu_float/app/live_danmu_session.dart';
-import 'package:danmu_float/connection/connection_state.dart';
-import 'package:danmu_float/connection/danmu_socket.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/ui/danmu_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-class FakeSocket extends DanmuSocketClient {
-  FakeSocket({
-    required super.liveId,
-    required super.userUniqueId,
-    required super.signature,
-    required super.cookies,
-  });
-
-  final StreamController<DanmuConnectionState> _states =
-      StreamController<DanmuConnectionState>.broadcast();
-
-  @override
-  Stream<DanmuConnectionState> get states => _states.stream;
-
-  @override
-  DanmuConnectionState get state => DanmuConnectionState.idle;
-
-  @override
-  void start() {}
-
-  @override
-  Future<void> stop() async {}
-
-  void emitState(DanmuConnectionState state) => _states.add(state);
-}
 
 /// 首次 start 后立即进入失败态的假会话：模拟自动重连耗尽的死局。
 class FailingSession extends LiveDanmuSession {
   FailingSession(String webRid)
     : super(webRid: webRid);
 
-  final FakeSocket socket = FakeSocket(
-    liveId: '1',
-    userUniqueId: '1',
-    signature: 's',
-    cookies: 'c',
-  );
-
   int restarts = 0;
 
   @override
-  LiveSessionStage get stage =>
-      restarts == 0 ? LiveSessionStage.error : LiveSessionStage.connecting;
+  LiveSessionStage get stage => LiveSessionStage.error;
 
   @override
-  String? get errorMessage =>
-      restarts == 0 ? '重连次数达上限，已停止连接' : null;
+  String? get errorMessage => '重连次数达上限，已停止连接';
 
   @override
   Stream<LiveSessionStage> get stages =>
@@ -70,9 +31,31 @@ class FailingSession extends LiveDanmuSession {
   @override
   Future<void> restart() async {
     restarts++;
-    // 重连后模拟重新进入连接中。
-    socket.emitState(DanmuConnectionState.connecting);
   }
+
+  @override
+  Future<void> stop() async {}
+}
+
+/// 正常连接中的假会话：用于验证非失败态不出现重连入口。
+class NormalSession extends LiveDanmuSession {
+  NormalSession(String webRid) : super(webRid: webRid);
+
+  @override
+  LiveSessionStage get stage => LiveSessionStage.live;
+
+  @override
+  String? get errorMessage => null;
+
+  @override
+  Stream<LiveSessionStage> get stages =>
+      Stream<LiveSessionStage>.value(stage);
+
+  @override
+  Stream<DanmakuEvent> get danmu => const Stream<DanmakuEvent>.empty();
+
+  @override
+  Future<void> start() async {}
 
   @override
   Future<void> stop() async {}
@@ -100,7 +83,7 @@ void main() {
   });
 
   testWidgets('非失败态不显示重连入口', (WidgetTester tester) async {
-    final FailingSession session = FailingSession('12345')..restarts = 1;
+    final NormalSession session = NormalSession('12345');
     await tester.pumpWidget(
       MaterialApp(
         home: DanmuPage(
