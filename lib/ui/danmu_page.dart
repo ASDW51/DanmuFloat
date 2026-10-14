@@ -217,9 +217,11 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     setState(() => _stage = LiveSessionStage.resolvingRoom);
     await session.start();
     if (!mounted) return;
-    setState(
-      () => _errorMessage = session.errorMessage ?? session.signatureWarning,
-    );
+    // 阶段流可能在 resolvingRoom 覆盖前就发完（如快速失败），用会话当前值兜底同步。
+    setState(() {
+      _stage = session.stage;
+      _errorMessage = session.errorMessage ?? session.signatureWarning;
+    });
   }
 
   /// 挂上会话的阶段流与弹幕流；手动重连后要对同一会话重新调用（需求 P0-1）。
@@ -251,7 +253,10 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     await session.restart();
     if (!mounted) return;
     await _listenSession(session);
-    setState(() => _errorMessage = session.errorMessage);
+    setState(() {
+      _stage = session.stage;
+      _errorMessage = session.errorMessage;
+    });
   }
 
   void _onEvent(DanmakuEvent event) {
