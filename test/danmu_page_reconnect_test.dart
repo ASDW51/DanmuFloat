@@ -101,6 +101,7 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.refresh));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
     expect(session.restarts, 1, reason: '点击重连应触发会话重启');
   });
