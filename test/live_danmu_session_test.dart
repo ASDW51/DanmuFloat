@@ -15,6 +15,9 @@ class FakeRoomInfoClient extends RoomInfoClient {
 
   final RoomInfo result;
   Object? error;
+
+  /// 非空时请求挂起，直到测试放行：用于观察「请求已发出、还没回来」的中间态。
+  Completer<RoomInfo>? gate;
   final List<String> calls = <String>[];
   final List<String?> credentialCalls = <String?>[];
 
@@ -25,6 +28,7 @@ class FakeRoomInfoClient extends RoomInfoClient {
   }) async {
     calls.add(webRid);
     credentialCalls.add(credentialCookies);
+    if (gate != null) return gate!.future;
     if (error != null) throw error!;
     return result;
   }
@@ -449,6 +453,133 @@ void main() {
         ],
       );
       await session.stop();
+    });
+
+    test('重试：失败后重新走一遍流程，会话流保持打开（UX-02）', () async {
+      roomClient.error = RoomInfoException('接口返回异常 status_code=1');
+      final LiveDanmuSession session = build();
+      final List<LiveSessionStage> stages = <LiveSessionStage>[];
+      session.stages.listen(stages.add);
+      await session.start();
+      expect(session.stage, LiveSessionStage.error);
+
+      // 网络恢复后点「重试」：同一个会话重新拉房间信息并建连。
+      roomClient.error = null;
+      await session.restart();
+
+      expect(roomClient.calls, hasLength(2), reason: '重试要重新拉一次房间信息');
+      expect(socketArgs, hasLength(1), reason: '重试后应重新建立弹幕连接');
+      expect(session.stage, LiveSessionStage.connecting);
+      expect(
+        stages.last,
+        LiveSessionStage.connecting,
+        reason: '阶段流保持打开，界面不必重建栏位',
+      );
+      await session.stop();
+    });
+
+    test('重试：先停掉旧连接，且不重复订阅弹幕（UX-02）', () async {
+      final LiveDanmuSession session = build();
+      await session.start();
+      final FakeSocket first = socket;
+      expect(first.started, isTrue);
+
+      await session.restart();
+
+      expect(first.stopped, isTrue, reason: '旧连接必须先停掉，否则泄漏一个 socket');
+      expect(identical(socket, first), isFalse, reason: '重试要新建连接');
+      expect(socketArgs, hasLength(2));
+
+      // 旧订阅必须取消：否则同一条弹幕会被新旧两个 socket 各推一次。
+      socket.emitEvents(<DanmakuEvent>[_event('你好')]);
+      await _tick();
+      expect(session.buffer, hasLength(1));
+      await session.stop();
+    });
+
+    test('重试：会话已停止时不再发起连接（UX-02）', () async {
+      final LiveDanmuSession session = build();
+      await session.start();
+      await session.stop();
+      final int callsBefore = roomClient.calls.length;
+
+      await session.restart();
+
+      expect(
+        roomClient.calls,
+        hasLength(callsBefore),
+        reason: '已释放的会话不该被重试唤醒',
+      );
+      expect(session.stage, LiveSessionStage.idle);
+    });
+
+    test('复检请求飞行中仍算自动复检中，避免过早给出重试入口（UX-02）', () async {
+      roomClient = FakeRoomInfoClient(
+        const RoomInfo.offline(webRid: '12345', api: RoomInfoApi.web),
+      );
+      final LiveDanmuSession session = build(
+        offlineRecheckInterval: const Duration(milliseconds: 5),
+      );
+      await session.start();
+      expect(session.stage, LiveSessionStage.offline);
+      expect(session.autoRechecking, isTrue, reason: '已排定下一次复检');
+
+      // 复检请求已发出但还没回来：此时定时器已置空，仍要算「自动复检中」。
+      roomClient.gate = Completer<RoomInfo>();
+      await _waitFor(() => roomClient.calls.length >= 2);
+      expect(
+        session.autoRechecking,
+        isTrue,
+        reason: '请求飞行中不能算「已停止复检」，否则界面会骗用户去点重试',
+      );
+
+      roomClient.gate!.complete(
+        const RoomInfo.offline(webRid: '12345', api: RoomInfoApi.web),
+      );
+      await _tick();
+      await session.stop();
+    });
+  });
+
+  group('shouldOfferRetry', () {
+    test('异常态一律给重试入口', () {
+      expect(
+        shouldOfferRetry(LiveSessionStage.error, autoRechecking: false),
+        isTrue,
+      );
+      expect(
+        shouldOfferRetry(LiveSessionStage.error, autoRechecking: true),
+        isTrue,
+        reason: '连接失败后复检也救不回来，入口不能因为「还在复检」而消失',
+      );
+    });
+
+    test('未开播只在停止自动复检后才给重试入口', () {
+      expect(
+        shouldOfferRetry(LiveSessionStage.offline, autoRechecking: true),
+        isFalse,
+        reason: '还在自动复检时给「重试」，会让用户以为这一栏已经死掉',
+      );
+      expect(
+        shouldOfferRetry(LiveSessionStage.offline, autoRechecking: false),
+        isTrue,
+      );
+    });
+
+    test('正常流程中的阶段不给重试入口', () {
+      for (final LiveSessionStage stage in <LiveSessionStage>[
+        LiveSessionStage.idle,
+        LiveSessionStage.resolvingRoom,
+        LiveSessionStage.signing,
+        LiveSessionStage.connecting,
+        LiveSessionStage.live,
+      ]) {
+        expect(
+          shouldOfferRetry(stage, autoRechecking: false),
+          isFalse,
+          reason: '$stage 阶段不该出现重试入口',
+        );
+      }
     });
   });
 }

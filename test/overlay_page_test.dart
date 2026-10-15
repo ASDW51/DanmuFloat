@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/ui/overlay_page.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -56,5 +57,48 @@ void main() {
       isFalse,
       reason: '主 App 下发的锁定状态要带上，否则插件会把拖动重新打开',
     );
+  });
+
+  testWidgets('连接失败后标题栏给出可点的重试入口（UX-02）', (WidgetTester tester) async {
+    final TestDefaultBinaryMessenger messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+
+    await tester.pumpWidget(const OverlayApp());
+    // 下发带一个主播的配置：该栏建立会话。
+    unawaited(
+      messenger.handlePlatformMessage(
+        _messengerChannel.name,
+        const JSONMessageCodec().encodeMessage(<String, Object?>{
+          'type': 'config',
+          'webRids': <String>['123456'],
+        }),
+        (ByteData? _) {},
+      ),
+    );
+    await tester.pump();
+
+    // 测试环境里 HTTP 一律失败：房间信息拉取报错 → 该栏进入异常态。
+    final Finder retry = find.text('连接失败 · 点此重试');
+    for (int i = 0; i < 40 && retry.evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(retry, findsOneWidget, reason: '失败后必须给出可点的重试入口');
+
+    // 失败原因要能查到：标题栏空间有限，明细放在 Tooltip 里。
+    final Tooltip tooltip = tester.widget<Tooltip>(
+      find.ancestor(of: retry, matching: find.byType(Tooltip)),
+    );
+    expect(tooltip.message, contains('房间信息获取失败'));
+
+    // 点重试后即使再次失败，入口也必须还在：不能一次失败就锁死。
+    await tester.tap(retry);
+    await tester.pump();
+    for (int i = 0; i < 40 && retry.evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(retry, findsOneWidget);
+
+    // 排掉状态上报的节流定时器，避免测试结束时残留 pending timer。
+    await tester.pump(const Duration(seconds: 2));
   });
 }

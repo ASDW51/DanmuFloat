@@ -285,6 +285,13 @@ class _OverlayPageState extends State<OverlayPage> {
 
   /// 各栏最新上报，用于向主 App 汇报整体状态（主 App 不展示逐栏明细）。
   final Map<int, _PaneReport> _reports = <int, _PaneReport>{};
+
+  /// 各栏「重选同一主播」触发的强制重建计数，参与栏位 key。
+  ///
+  /// 栏位 key 含 webRid，重选同一个主播时 key 不变、栏位不会重建，用户会以为
+  /// 重选一次就能重连（UX-02）；计数一变 key 就变，本栏连同会话一起重建。
+  final Map<int, int> _paneRebuildTokens = <int, int>{};
+
   Timer? _reportTimer;
 
   /// 权限被撤销后各栏已卸载，之后的上报统一按「权限已撤销」发送，
@@ -424,9 +431,25 @@ class _OverlayPageState extends State<OverlayPage> {
   ///
   /// 只改本栏绑定：栏位 key 含 webRid，改绑后该栏重建并新建会话，其余栏不受影响。
   /// 最新绑定经 [OverlayStatus.webRids] 回报给主 App 落盘持久化。
+  ///
+  /// 重选同一个主播时 key 不变、栏位不会重建：本栏若正处于失败 / 停止复检状态，
+  /// 用户会以为「重选一次就会重连」而实际什么都没发生（UX-02）。此时用重建计数
+  /// 强制重建本栏，等价于点该栏的「重试」。
   void _rebindPane(int index, String webRid) {
     if (index < 0 || index >= _webRids.length) return;
-    if (_webRids[index] == webRid) return;
+    if (_webRids[index] == webRid) {
+      final _PaneReport? report = _reports[index];
+      final bool stuck = report != null &&
+          (report.stage == LiveSessionStage.error ||
+              report.stage == LiveSessionStage.offline);
+      if (!stuck) return;
+      setState(() {
+        _paneRebuildTokens[index] = (_paneRebuildTokens[index] ?? 0) + 1;
+        _reports.remove(index);
+      });
+      _reportState();
+      return;
+    }
     final List<String> next = List<String>.of(_webRids);
     next[index] = webRid;
     setState(() {
@@ -1292,7 +1315,10 @@ class _OverlayPageState extends State<OverlayPage> {
   }) {
     final PaneStyle? style = _paneStyles[webRid];
     return _OverlayPane(
-      key: ValueKey<String>('$index:$webRid'),
+      // 重建计数参与 key：重选同一主播（失败态）时强制重建本栏及其会话。
+      key: ValueKey<String>(
+        '$index:$webRid:${_paneRebuildTokens[index] ?? 0}',
+      ),
       index: index,
       webRid: webRid,
       fontSize: paneFontSize(style?.fontSize ?? _fontSize, _webRids.length),
@@ -1432,6 +1458,25 @@ class _OverlayPaneState extends State<_OverlayPane> {
 
   /// 当前皮肤配色（prd F20）。
   OverlayPalette get _palette => widget.palette;
+
+  /// 是否可手动重试：连接失败，或未开播且已停止自动复检（复检次数用尽）。
+  ///
+  /// 这两种状态下栏位不会自己恢复，必须给出可点的出口，否则用户唯一出路是关窗
+  /// 重开——那会重建全部栏位、把其它正常栏位的连接一并断掉（UX-02）。
+  bool get _retryable =>
+      _bound &&
+      shouldOfferRetry(
+        _stage,
+        autoRechecking: _session?.autoRechecking ?? false,
+      );
+
+  /// 重建本栏会话（重新走「解析房间 → 签名 → 建连」），不关窗、不动其它栏。
+  Future<void> _retry() async {
+    final LiveDanmuSession? session = _session;
+    if (session == null) return;
+    setState(() => _error = null);
+    await session.restart();
+  }
 
   /// 普通弹幕正文颜色：单栏覆盖优先（prd F5），否则用当前皮肤默认色。
   Color get _bodyColor =>
@@ -1767,13 +1812,39 @@ class _OverlayPaneState extends State<_OverlayPane> {
               padding: const EdgeInsets.only(right: 2),
               child: Icon(Icons.swap_horiz, size: 13, color: palette.secondary),
             ),
-          Text(
-            // 已连上且有在线数据时右上是人数；否则退回连接状态，保证能看出当前所处阶段。
-            _online > 0
-                ? '在线 ${formatOnlineCount(_online)}'
-                : _stageText(_stage),
-            style: labelStyle,
-          ),
+          // 失败 / 停止复检后给可点入口（UX-02）：窗内没有别的地方能重连，用户只能
+          // 关窗重开——那会重建全部栏位、把其它正常栏位的连接一并断掉。
+          if (_retryable)
+            Tooltip(
+              message: _stage == LiveSessionStage.error
+                  ? (_error ?? '连接失败，点此重试')
+                  : '已停止自动复检，点此重新检查',
+              child: InkWell(
+                onTap: _retry,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(Icons.refresh, size: 13, color: palette.activeColor),
+                      const SizedBox(width: 2),
+                      Text(_stageText(_stage), style: labelStyle),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else
+            Text(
+              // 已连上且有在线数据时右上是人数；否则退回连接状态，保证能看出当前所处阶段。
+              _online > 0
+                  ? '在线 ${formatOnlineCount(_online)}'
+                  : _stageText(_stage),
+              style: labelStyle,
+            ),
           // 焦点模式（prd F7）：放大本栏 / 还原；单栏布局下没有其它栏可让位，不显示。
           if (widget.onToggleFocus != null)
             InkWell(
@@ -1827,6 +1898,9 @@ class _OverlayPaneState extends State<_OverlayPane> {
   ///
   /// 未开播但仍在自动复检时补一句「自动复检中」：挂机看多栏时用户需要知道这一栏是
   /// 在等开播，而不是已经死掉；复检次数用尽后不再显示该后缀，避免给出假承诺。
+  ///
+  /// 异常态直接写成「点此重试」：该文案只出现在可点的重试入口上（见标题栏），
+  /// 光写「异常」用户不知道该栏还能不能救。
   String _stageText(LiveSessionStage stage) => switch (stage) {
     LiveSessionStage.idle => _bound ? '未连接' : '未绑定',
     LiveSessionStage.resolvingRoom => '解析房间…',
@@ -1834,8 +1908,8 @@ class _OverlayPaneState extends State<_OverlayPane> {
     LiveSessionStage.connecting => '连接中…',
     LiveSessionStage.live => '已连接',
     LiveSessionStage.offline =>
-      (_session?.autoRechecking ?? false) ? '未开播 · 自动复检中' : '未开播',
-    LiveSessionStage.error => '异常',
+      (_session?.autoRechecking ?? false) ? '未开播 · 自动复检中' : '未开播 · 点此重试',
+    LiveSessionStage.error => '连接失败 · 点此重试',
   };
 
   Widget _buildEventList() {
