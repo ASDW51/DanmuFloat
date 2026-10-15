@@ -13,6 +13,19 @@ import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/danmu/sign/danmu_signature.dart';
 import 'package:danmu_float/room/room_info.dart';
 import 'package:danmu_float/room/room_info_client.dart';
+import 'package:flutter/foundation.dart';
+
+/// 未开播时的复检间隔。
+///
+/// design.md 11.2 要求未开播不建立弹幕连接，但挂机看多栏是核心场景：主播开播后
+/// 栏位必须自己接上，不能等用户发现并手动关窗重开（重开会重建全部栏位）。
+const Duration defaultOfflineRecheckInterval = Duration(seconds: 30);
+
+/// 未开播复检次数上限（默认间隔下约 10 分钟）。
+///
+/// 到顶后停止轮询，避免对着一个长期不开播的房间无限发请求；此时栏位保留
+/// [LiveDanmuSession.autoRechecking] 为 false 的「未开播」，由界面上的手动重试兜底。
+const int defaultMaxOfflineRechecks = 20;
 
 /// 会话阶段，供界面提示当前进度。
 enum LiveSessionStage {
@@ -57,6 +70,8 @@ class LiveDanmuSession {
     DanmuSocketFactory? socketFactory,
     String Function()? userUniqueIdFactory,
     this.bufferCapacity = 500,
+    this.offlineRecheckInterval = defaultOfflineRecheckInterval,
+    this.maxOfflineRechecks = defaultMaxOfflineRechecks,
   })  : _roomInfoClient = roomInfoClient ?? RoomInfoClient(),
         _cookieProvider =
             cookieProvider ?? CookieProvider(credentialCookies: credentialCookies),
@@ -82,6 +97,12 @@ class LiveDanmuSession {
   final String webRid;
   final int bufferCapacity;
 
+  /// 未开播复检间隔（测试注入更短的值，避免真等 30 秒）。
+  final Duration offlineRecheckInterval;
+
+  /// 未开播复检次数上限。
+  final int maxOfflineRechecks;
+
   final RoomInfoClient _roomInfoClient;
   final CookieProvider _cookieProvider;
   final String? _credentialCookies;
@@ -98,7 +119,15 @@ class LiveDanmuSession {
   DanmuSocketClient? _socket;
   StreamSubscription<List<DanmakuEvent>>? _eventSubscription;
   StreamSubscription<DanmuConnectionState>? _stateSubscription;
+  Timer? _offlineRecheckTimer;
+  int _offlineRecheckCount = 0;
   bool _stopped = false;
+
+  /// 正在走「解析房间 → 建连」或复检流程。
+  ///
+  /// 没有它时，复检定时器与手动重试可能并发进入，覆盖 `_socket` /
+  /// `_eventSubscription` 造成连接泄漏（旧连接没人停）。
+  bool _starting = false;
 
   LiveSessionStage _stage = LiveSessionStage.idle;
   RoomInfo? _room;
@@ -113,6 +142,12 @@ class LiveDanmuSession {
   Stream<DanmakuEvent> get danmu => _danmu.stream;
 
   LiveSessionStage get stage => _stage;
+
+  /// 是否已排定下一次未开播复检（界面据此显示「自动复检中」）。
+  ///
+  /// 复检次数到顶或会话已停止时为 false：此时栏位真的不会再自己恢复，
+  /// 界面不该继续显示「自动复检中」骗用户。
+  bool get autoRechecking => _offlineRecheckTimer != null;
 
   /// 解析到的房间信息，寻址成功后可用。
   RoomInfo? get room => _room;
@@ -136,30 +171,47 @@ class LiveDanmuSession {
 
   /// 解析房间信息 → 签名 → 建立弹幕连接。失败只上报错误，不抛出。
   Future<void> start() async {
-    if (_stopped) return;
-    _setStage(LiveSessionStage.resolvingRoom);
-    _errorMessage = null;
-    _signatureDegraded = false;
-    _signatureWarning = null;
-
-    final RoomInfo roomInfo;
+    if (_stopped || _starting) return;
+    _starting = true;
+    // 主动发起的启动是一次全新尝试：清掉上一轮的复检定时器与计数。
+    _cancelOfflineRecheck();
+    _offlineRecheckCount = 0;
     try {
-      roomInfo = await _roomInfoClient.fetchByWebRid(
-        webRid,
-        credentialCookies: _credentialCookies,
-      );
-    } on Object catch (error) {
-      _fail('房间信息获取失败：$error');
-      return;
-    }
-    if (_stopped) return;
-    _room = roomInfo;
+      _setStage(LiveSessionStage.resolvingRoom);
+      _errorMessage = null;
+      _signatureDegraded = false;
+      _signatureWarning = null;
 
-    if (!roomInfo.living) {
-      _setStage(LiveSessionStage.offline);
-      return;
-    }
+      final RoomInfo roomInfo;
+      try {
+        roomInfo = await _roomInfoClient.fetchByWebRid(
+          webRid,
+          credentialCookies: _credentialCookies,
+        );
+      } on Object catch (error) {
+        _fail('房间信息获取失败：$error');
+        return;
+      }
+      if (_stopped) return;
+      _room = roomInfo;
 
+      if (!roomInfo.living) {
+        // 未开播不建连，但按固定间隔复检：挂机看多栏时主播开播后必须能自动接上，
+        // 不能等用户自己发现再关窗重开（重开会把其它正常栏位的连接一并断掉）。
+        _setStage(LiveSessionStage.offline);
+        _scheduleOfflineRecheck();
+        return;
+      }
+      await _connectLivingRoom(roomInfo);
+    } finally {
+      _starting = false;
+    }
+  }
+
+  /// 已确认开播后的建连流程：签名 → 凭证 → 建立弹幕连接。
+  Future<void> _connectLivingRoom(RoomInfo roomInfo) async {
+    // 已离开「未开播」：复检预算重置，下次未开播重新拥有完整的复检次数。
+    _offlineRecheckCount = 0;
     final String userUniqueId = _userUniqueIdFactory();
     _setStage(LiveSessionStage.signing);
     String signature;
@@ -205,10 +257,11 @@ class LiveDanmuSession {
     socket.start();
   }
 
-  /// 主动关闭：停止重连并释放网络资源。
+  /// 主动关闭：停止重连、取消复检并释放网络资源。
   Future<void> stop() async {
     if (_stopped) return;
     _stopped = true;
+    _cancelOfflineRecheck();
     await _socket?.stop();
     _socket = null;
     await _eventSubscription?.cancel();
@@ -243,5 +296,58 @@ class LiveDanmuSession {
   void _setStage(LiveSessionStage stage) {
     _stage = stage;
     if (!_stages.isClosed) _stages.add(stage);
+  }
+
+  /// 安排下一次未开播复检。
+  ///
+  /// 次数到顶就不再安排：界面上的手动重试是此时的唯一出口（UX-02）。
+  void _scheduleOfflineRecheck() {
+    if (_stopped) return;
+    if (_offlineRecheckCount >= maxOfflineRechecks) return;
+    _offlineRecheckTimer?.cancel();
+    _offlineRecheckTimer = Timer(offlineRecheckInterval, () {
+      _offlineRecheckTimer = null;
+      unawaited(_recheckOffline());
+    });
+  }
+
+  void _cancelOfflineRecheck() {
+    _offlineRecheckTimer?.cancel();
+    _offlineRecheckTimer = null;
+  }
+
+  /// 未开播复检：只重新拉一次房间信息，开播了就接着走建连流程。
+  ///
+  /// 刻意不走 [start]：那会把阶段打回「解析房间」，栏位文案会在「未开播 · 自动复检中」
+  /// 与「解析房间…」之间每 30 秒闪一次。复检失败也按「还没开播」处理，不把栏位打成
+  /// 错误态——网络抖动不该让一个正常挂机的栏位变红。
+  Future<void> _recheckOffline() async {
+    if (_stopped || _starting) return;
+    _starting = true;
+    _offlineRecheckCount++;
+    try {
+      final RoomInfo roomInfo;
+      try {
+        roomInfo = await _roomInfoClient.fetchByWebRid(
+          webRid,
+          credentialCookies: _credentialCookies,
+        );
+      } on Object catch (error) {
+        // 复检失败不打断会话：网络抖动不该把一个正常挂机的栏位打成错误态，
+        // 下一轮继续复检即可，但日志要留下痕迹便于排查。
+        debugPrint('未开播复检失败（$webRid）：$error');
+        _scheduleOfflineRecheck();
+        return;
+      }
+      if (_stopped) return;
+      _room = roomInfo;
+      if (!roomInfo.living) {
+        _scheduleOfflineRecheck();
+        return;
+      }
+      await _connectLivingRoom(roomInfo);
+    } finally {
+      _starting = false;
+    }
   }
 }

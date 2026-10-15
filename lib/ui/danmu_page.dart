@@ -576,13 +576,15 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     );
   }
 
+  /// 未开播且仍在自动复检时补一句「自动复检中」：让用户知道会话没死，不用退出重连。
   String _stageLabel(LiveSessionStage stage) => switch (stage) {
     LiveSessionStage.idle => '未连接',
     LiveSessionStage.resolvingRoom => '解析房间信息…',
     LiveSessionStage.signing => '生成签名…',
     LiveSessionStage.connecting => '连接中…',
     LiveSessionStage.live => '已连接',
-    LiveSessionStage.offline => '主播未开播',
+    LiveSessionStage.offline =>
+      (_session?.autoRechecking ?? false) ? '主播未开播 · 自动复检中' : '主播未开播',
     LiveSessionStage.error => '异常',
   };
 
