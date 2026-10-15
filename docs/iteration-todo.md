@@ -792,3 +792,14 @@ git checkout main && git pull --ff-only
 - **幂等守卫不能按「整个文件」判断**：我用「文件里是否已出现 `typeScreenChat'`」来跳过已插入的站点，结果 `toPalette()` 的块级插入被整段跳过，analyze 报缺 7 个必填参数。守卫必须**按块切片**判断。
 - **警告同样拦门禁**：AGENTS 要求 `flutter analyze` 输出 `No issues found`，`unused_local_variable` 一样让 CI 失败。这次它恰好暴露了真 bug——我生成的测试把 7 类都拿去和 `Colors.orangeAccent` 比，参照色表因此闲置，断言等于只覆盖 1 个色。
 - **CI 反馈要一次读全**：我只 grep `error •`，漏掉了 `warning •`，白白多推了一轮。
+
+### 第 8 轮 UX-23b 交付记录
+
+弹幕页「清空」改为二次确认（PR #74）。清空会丢掉当前会话已收到的全部弹幕且不可撤销，误触代价高。
+
+- `shouldClearDanmakuOnConfirm(bool? confirmed) => confirmed ?? false`：点遮罩、按返回键、点「取消」都拿到 null，**一律不清空**；只有明确 true 才清空——默认答案必须是「不动」而不是「照做」；
+- `showClearDanmakuConfirmDialog(BuildContext)`：与页面状态解耦，便于纯函数单测；
+- 接线用 `.then(...)` 而非 `await showDialog` 之后再碰 context，避开 `use_build_context_synchronously`（警告级，本仓库门禁要求零告警）；
+- 未改 `_raw` 私有性与连接状态逻辑（按 PM 收窄口径）；「清空后列表真正为空」列为后续项，需先有一个不越界的会话注入口。
+
+**PM 口径裁决（第 8 轮末轮）**：`contrast` 类型色维持等于 dark（口径 A）——纯黑底上另造 7 个高对比变体无可见收益；相应的测试应改为**实质断言**：把某预设的 `typeScreenChat` 改成异值后 `typeColor()` 输出必须随之改变（「等于/不等于 dark」两者都证明不了它没退回 `isLight` 猜测），列为后续项。`UX-22b`（仅术语替换）收益低、跨多文件、易撞旧断言，末轮不做，仍留在候选里。
