@@ -205,6 +205,22 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     _snack('悬浮窗已失效（权限被撤销或被系统移除），已关闭');
   }
 
+  /// 是否可手动重试：连接失败，或未开播且已停止自动复检（复检次数用尽）。
+  ///
+  /// 这两种状态下会话不会自己恢复，必须给出可点出口（UX-02）。
+  bool get _retryable => shouldOfferRetry(
+        _stage,
+        autoRechecking: _session?.autoRechecking ?? false,
+      );
+
+  /// 重连当前直播间：复用同一个会话，已收到的弹幕与滚动位置都还在。
+  Future<void> _retry() async {
+    final LiveDanmuSession? session = _session;
+    if (session == null) return;
+    setState(() => _errorMessage = null);
+    await session.restart();
+  }
+
   Future<void> _connect() async {
     final LiveDanmuSession session = LiveDanmuSession(
       webRid: widget.webRid,
@@ -542,6 +558,21 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
               ),
               const SizedBox(width: 6),
               Text(_stageLabel(_stage), style: TextStyle(color: color)),
+              // 失败 / 停止复检后给可点出口（UX-02）：详情页只能退出去重进，
+              // 那会丢掉已收到的弹幕与当前滚动位置。
+              if (_retryable) ...<Widget>[
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: _retry,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('重试'),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
               const SizedBox(width: 12),
               Text('已收 $_received 条'),
               if (_online > 0) ...<Widget>[
