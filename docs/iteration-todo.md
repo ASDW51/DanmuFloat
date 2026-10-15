@@ -728,3 +728,27 @@ git checkout main && git pull --ff-only
 **无需迁移**：覆盖按角色名索引，老配置缺键即跟随主题。`schemaVersion` 可升 3，仅诊断用，**不得据此分支**。
 
 **验收**：两个新角色的 dark/light **逐位相等**断言；4 个站点不再出现底色字面量；`contrast` 两角色为不透明；老 JSON 解析后两角色跟随主题；两角色**不进**对比度守卫角色集。
+
+### 第 7 轮交付记录（⑤ → ① → ② 全部合入）
+
+| 项 | 内容 | PR |
+| --- | --- | --- |
+| ⑤a | 对比度策略真正接线：窗内 `_palette` 调 `enforceTextContrast(4.5)` | #65 |
+| ⑤b | 三态 UI（自动校正 / 仅提示 / 原样显示）+ 显示值等于渲染值 + 两处 `shareOverlayStyle` 补 `contrastPolicy` | #66 |
+| ① | 底色角色 `chromeBg` / `menuBg`：角色集 11 → 13，dark/light 与旧字面量逐位相等，4 个站点去字面量 | #68 |
+| ② | 最近使用色：单一 `recordRecentColor`、弹窗一行、确认采用时入库、跨主题共用、上限 8 | #69 |
+
+用户可见结果：悬浮窗 **13 个元素**可配色；4 套预设；最近使用可复用；不可读选色有三态可控，且设置页显示的十六进制 == 弹幕区渲染的颜色。
+
+### 踩坑清单（第 7 轮新增，均已实际栽过）
+
+- **已关闭 PR 上的 push 不触发 CI**：`gh pr checks <n>` 会返回上一次的陈旧结果，必须先 `gh pr reopen` 或新开 PR 再判断（#65 栽过）。
+- **测试前提必须回源码核对**：#65 的三条失败里有两条源于我假设「payload 带 opacity 就够」，而 `OverlayStyle.tryParse` 要求 `type == overlayStyleType` **且** `opacity` 是 num。
+- **多行锚点回填会重复插入锚点首行**：`children: <Widget>[` 这类锚点若在替换文本末尾被原样回填，文件里就会出现两份（第 6 轮 ①、Round 28、Round 32 各一次）。推之前必须回读该区域。
+- **`const` 上下文不能调方法**：`Colors.white.withValues(alpha: 0.94)` 放进 const 构造会直接 `const_eval_method_invocation`；换逐位等值字面量 `Color(0xF0FFFFFF)`（0.94×255=240=0xF0）与 `Color(0xE6000000)`（0.9×255=230=0xE6）。
+- **Dart 插值 `$0xFF...` 非法**：`'key_$0xFF00BCD4'` 里的 `$0` 被解析成标识符（`Expected an identifier`），要写 `${0xFF00BCD4}`，且插值表达式不能出现在 `const` 里。
+- **编辑前先切分支**：结尾 `git checkout main` 之后，再用脚本改只在分支上存在的文件会 `ENOENT`（Round 20、#65、Round 32 各一次）。编辑调用的第一步固定先 checkout 目标分支。
+
+### 下一批候选（待 PM 裁决）
+
+③ 浅色 `secondary`（当前 `Colors.black54`，≈4.61:1，监控：跌破 4.5 才换 `0xFF49454F`）；④ `typeColor()` 未由 `OverlayTheme` 数据驱动（`contrast`/`sepia` 仍继承 dark 的 7 个类型色）；UX-24（原生 Java 通知「关闭悬浮窗」）；UX-23b（清屏二次确认）；UX-22b 尾项（`filter_page.dart:304`）；UX-25/26/27（`overlay_notify` 提醒 / 保持屏幕常亮 / `connectivity_plus`，各自需先做冒烟验证）。
