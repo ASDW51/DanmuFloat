@@ -43,7 +43,9 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField).first, '重复词');
-    await tester.tap(find.widgetWithText(TextButton, '添加'));
+    // 按钮是 TextButton.icon（运行时类型是私有子类 _TextButtonWithIcon），
+    // find.widgetWithText(TextButton, ...) 这类精确类型匹配抓不到它，直接点文案。
+    await tester.tap(find.text('添加'));
     await tester.pumpAndSettle();
 
     // 旧版这里先 clear() 再静默 return：输入框被清空、列表没变化、一句提示都没有，
@@ -67,7 +69,9 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.widgetWithText(TextButton, '添加'));
+    // 按钮是 TextButton.icon（运行时类型是私有子类 _TextButtonWithIcon），
+    // find.widgetWithText(TextButton, ...) 这类精确类型匹配抓不到它，直接点文案。
+    await tester.tap(find.text('添加'));
     await tester.pumpAndSettle();
 
     expect(find.text('请输入内容'), findsOneWidget);
