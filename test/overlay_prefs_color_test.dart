@@ -83,7 +83,7 @@ void main() {
   group('非法输入兜底', () {
     test('colorOverrides 逐键丢弃非法值，合法项照常生效', () {
       final OverlayPrefs? prefs = OverlayPrefs.tryParse(<String, Object?>{
-        'colorOverrides': <String, Object?>{
+        'colorOverrides': <Object?, Object?>{
           'body': 0xFF123456,
           'userAccent': 0x80123456, // 半透明：判非法
           'chrome': -1, // 越界：判非法
