@@ -169,10 +169,15 @@ Future<Directory> Function() _tempResolver() {
 /// 记录主 App 调过的插件方法（PM-002 用：断言走了 resize / close 路径）。
 final List<MethodCall> _overlayCalls = <MethodCall>[];
 
-/// 向插件的窗口查询通道注入 mock：isActive 按 [active] 应答，权限恒为已授予，
-/// 建窗 / 关窗 / 改尺寸一律记进 [_overlayCalls] 后返回，保证测试不会真的去动窗口，
+/// 向插件的窗口查询通道注入 mock：isActive 按 [active] 应答，权限按
+/// [permissionGranted] 应答（UX-16 用它模拟「拒绝且不再询问」），建窗 / 关窗 /
+/// 改尺寸一律记进 [_overlayCalls] 后返回，保证测试不会真的去动窗口，
 /// 也不会因方法名不完全匹配而抛错导致异步挂起。
-void _mockOverlayChannels(WidgetTester tester, {required bool active}) {
+void _mockOverlayChannels(
+  WidgetTester tester, {
+  required bool active,
+  bool permissionGranted = true,
+}) {
   _overlayCalls.clear();
   _sizeCalls.clear();
   final TestDefaultBinaryMessenger messenger =
@@ -184,7 +189,10 @@ void _mockOverlayChannels(WidgetTester tester, {required bool active}) {
       case 'isOverlayActive':
         return active;
       case 'checkPermission':
-        return true;
+        return permissionGranted;
+      case 'requestPermission':
+        // 权限查询走插件通道（不经 systemPermissions），所以「不再弹框」要在这里模拟。
+        return permissionGranted;
       default:
         return false;
     }
@@ -333,6 +341,8 @@ void main() {
   testWidgets('「重试授权」仍被拒后 banner 补「去系统设置」出口（UX-16）',
       (WidgetTester tester) async {
     // 系统在「拒绝且不再询问」后不再弹框：只留「重试授权」就是一条走不通的路。
+    // 权限查询走插件通道（FlutterScreenOverlay），所以要在通道这一层把权限置为拒绝。
+    _mockOverlayChannels(tester, active: false, permissionGranted: false);
     final _DeniedOverlayPermissionBackend backend =
         _DeniedOverlayPermissionBackend();
     setSystemPermissionBackend(backend);
