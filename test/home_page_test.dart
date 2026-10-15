@@ -174,6 +174,13 @@ Future<void> _pumpHomeWithDir(WidgetTester tester, Directory dir) async {
   // 首页 initState 里 unawaited(_load()) 的真实文件读也在 FakeAsync 里等待，
   // pump 推不动它：轮询排空真实事件循环直到预置的主播渲染出来。
   await _pumpUntil(tester, () => find.text('主播甲').evaluate().isNotEmpty);
+  // 再等「关闭悬浮窗」入口出现：它由 _reconcileOverlayVisible 的通道探测驱动，
+  // 同时意味着 _loadPrefs 的真实读盘也已完成——_unbindRoomFromOverlay 依赖
+  // _prefs.webRids，prefs 未就绪时移除会静默跳过重排。
+  await _pumpUntil(
+    tester,
+    () => find.byTooltip('关闭悬浮窗').evaluate().isNotEmpty,
+  );
 }
 
 /// 模拟「已建窗」的全局状态：真实取值来自建窗动作，测试里直接置位。
