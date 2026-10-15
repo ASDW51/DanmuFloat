@@ -618,3 +618,18 @@ git checkout main && git pull --ff-only
 **浅色预设 `secondary` 的裁决**：PM 复算 `Colors.black54`（`0x8A000000`，alpha 0.5412）展平到白底约 **4.61:1**，**高于** 4.5——我在 PR #49 注释里写的 4.47:1 是错的，已改成直接断言且 CI 实测通过。本轮不改浅色外观（改了会破坏 A 的「零突变」钉子）；若该断言将来失败，第 7 轮把它换成 `danmu_text_colors.dart` 的 `0xFF49454F` 并统一两处口径。
 
 **由「缺口」改判为下一轮**：`chromeBg`（球 `white70`/`black54`、菜单 `white@0.94`/`black@0.9`、胶囊 `white70`/`black54` 三处 alpha 各不相同，**一个角色装不下**，须先定 1 个还是 2 个角色及各自在 4 套预设下的取值）；收益仅「允许用户改菜单底色」，优先级低于 H/I。
+
+#### 第 6 轮交付进度（截至本轮 loop）
+
+| # | 条目 | 状态 | PR |
+| --- | --- | --- | --- |
+| A | UX-28 抽出 `OverlayTheme`（4 套预设 + 角色级覆盖解析） | ✅ | #49 |
+| B | UX-29 偏好扩展与迁移（`themeId`/`colorOverrides`/`recentColors`/`contrastPolicy`，`lightTheme` 降为派生 getter） | ✅ | #51 |
+| E | UX-31 对比度守卫（唯一口径 `contrastRatio` + 只调明度的 `ensureContrast`） | ✅ | #52 |
+| C | UX-30 下发通道（`style` 消息可选字段 + `parseColorOverrides` 唯一实现 + 三处 `OverlayPalette.of` 改走 `_palette`） | ✅ | #53 |
+| H | 弹窗跟随皮肤（`overlayThemeData` + 根 widget 订阅发布；修掉深色下弹窗白底这一既有缺陷） | ✅ | #54 |
+| I | 状态点两套口径统一（`_stageColor` 委托 `OverlayTheme`） | ⬜ 下一项 | — |
+| D | UX-32 主 App 配色 UI（预设 chips + 每元素跟随/自定义 + 十六进制 + 恢复默认；「最近使用色」推第 7 轮） | ⬜ | — |
+| F | UX-33 窗内配色入口（预设 chips + 跟随主题；`insetPadding: 8` + `scrollable: true`；行高 ≥28dp） | ⬜ | — |
+
+**本轮 CI 教到的坑**：① `toConfig()` 造的是 `OverlayConfig` 而不是 `OverlayPrefs`，两处构造点的参数有多处同名邻居（都紧跟 `showTitleBar`），文本锚点会撞——按行号对调才干净；② `lightTheme` 一旦降级为 getter，测试里 `OverlayPrefs(lightTheme: true)` 这类**构造**调用会编译失败（`copyWith(lightTheme:)` 不受影响）；③ 对比度断言必须先把前景 alpha 展平到背景；而**背景**自己不知道该压在什么上面，「把背景合成到自己身上」是无意义的——半透明底色要由调用方先 `flattenOver` 到真实背衬；④ 弹窗路由挂在 `MaterialApp` 的 Navigator 上，比页面高一层，只在页面里包 `Theme` 管不到弹窗，必须让根 widget 拿到主题。
