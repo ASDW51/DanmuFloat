@@ -32,6 +32,54 @@ void main() {
     expect(find.text('列表显示的类型'), findsOneWidget);
   });
 
+  testWidgets('重复词点「添加」给出提示，且保留输入而不清空（UX-23）',
+      (WidgetTester tester) async {
+    _useTallScreen(tester);
+    final List<FilterPrefs> saved = <FilterPrefs>[];
+    await tester.pumpWidget(_wrapFilter(
+      prefs: withBlockedKeyword(const FilterPrefs(), '重复词'),
+      onChanged: saved.add,
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).first, '重复词');
+    // 按钮是 TextButton.icon（运行时类型是私有子类 _TextButtonWithIcon），
+    // find.widgetWithText(TextButton, ...) 这类精确类型匹配抓不到它，直接点文案。
+    // 页面上三个规则编辑器各有一个「添加」，取第一个（屏蔽词那一栏）即可。
+    await tester.tap(find.text('添加').first);
+    await tester.pumpAndSettle();
+
+    // 旧版这里先 clear() 再静默 return：输入框被清空、列表没变化、一句提示都没有，
+    // 用户只会以为「添加」按钮坏了。
+    expect(find.text('该词已在列表中'), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byType(TextField).first).controller?.text,
+      '重复词',
+      reason: '失败时保留用户输入，别让人重打一遍',
+    );
+    expect(saved, isEmpty, reason: '没产生变化就不该落盘');
+  });
+
+  testWidgets('空输入点「添加」提示「请输入内容」（UX-23）',
+      (WidgetTester tester) async {
+    _useTallScreen(tester);
+    final List<FilterPrefs> saved = <FilterPrefs>[];
+    await tester.pumpWidget(_wrapFilter(
+      prefs: const FilterPrefs(),
+      onChanged: saved.add,
+    ));
+    await tester.pumpAndSettle();
+
+    // 按钮是 TextButton.icon（运行时类型是私有子类 _TextButtonWithIcon），
+    // find.widgetWithText(TextButton, ...) 这类精确类型匹配抓不到它，直接点文案。
+    // 页面上三个规则编辑器各有一个「添加」，取第一个（屏蔽词那一栏）即可。
+    await tester.tap(find.text('添加').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('请输入内容'), findsOneWidget);
+    expect(saved, isEmpty);
+  });
+
   testWidgets('开启正则后立即回调，规则编辑器切到正则口径', (WidgetTester tester) async {
     _useTallScreen(tester);
     final List<FilterPrefs> changes = <FilterPrefs>[];
