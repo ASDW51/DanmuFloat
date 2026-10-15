@@ -1,5 +1,4 @@
-// 首页悬浮窗状态收敛（PM-001）：窗口可能由弹幕页开启或进程重启后仍存活，
-// 首页的「关闭悬浮窗」入口必须以窗口真实存在为准，而不是只认本页的开窗动作。
+// 首页悬浮窗状态收敛（PM-001）与「移除主播即卸载其栏位」（PM-002）。
 //
 // 不依赖任何原生通道：本地存储用临时目录解析器注入、凭证用内存后端，插件窗口
 // 查询通道用 mock 应答。悬浮窗上报经 overlay_launcher 的测试辅助直接驱动首页监听分支。
@@ -9,6 +8,9 @@ import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
 import 'package:danmu_float/credential/credential_store.dart';
+import 'package:danmu_float/room/managed_room.dart';
+import 'package:danmu_float/storage/overlay_prefs_store.dart';
+import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/ui/home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -41,14 +43,19 @@ Future<Directory> Function() _tempResolver() {
   return () async => dir;
 }
 
+/// 记录主 App 调过的插件方法（PM-002 用：断言走了 resize / close 路径）。
+final List<MethodCall> _overlayCalls = <MethodCall>[];
+
 /// 向插件的窗口查询通道注入 mock：isActive 按 [active] 应答，权限恒为已授予，
-/// 其余方法一律返回 false，保证测试不会真的去建窗 / 关窗，也不会因方法名
-/// 不完全匹配而抛错导致异步挂起。
+/// 建窗 / 关窗 / 改尺寸一律记进 [_overlayCalls] 后返回，保证测试不会真的去动窗口，
+/// 也不会因方法名不完全匹配而抛错导致异步挂起。
 void _mockOverlayChannels(WidgetTester tester, {required bool active}) {
+  _overlayCalls.clear();
   final TestDefaultBinaryMessenger messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   messenger.setMockMethodCallHandler(_overlayControlChannel,
       (MethodCall call) async {
+    _overlayCalls.add(call);
     switch (call.method) {
       case 'isOverlayActive':
         return active;
@@ -75,6 +82,37 @@ Future<void> _pumpHome(WidgetTester tester) async {
   // 改为推进一段固定虚拟时间：覆盖各 store 的异步加载与 1s 的状态探测延时常量。
   await tester.pump(const Duration(seconds: 1));
   await tester.pump(const Duration(seconds: 2));
+}
+
+/// 在临时目录里预置主播列表与栏位偏好，供移除场景使用。
+Future<Directory> _seedRooms({
+  required List<ManagedRoom> rooms,
+  required List<String> boundWebRids,
+}) async {
+  final Directory dir =
+      Directory.systemTemp.createTempSync('danmu_float_home_test');
+  await RoomStore(directoryResolver: () async => dir).save(rooms);
+  await OverlayPrefsStore(directoryResolver: () async => dir)
+      .save(OverlayPrefs(webRids: boundWebRids));
+  return dir;
+}
+
+/// 把首页挂到指定目录上：与 _pumpHome 同样的注入口径，只是目录换成预置好的。
+Future<void> _pumpHomeWithDir(WidgetTester tester, Directory dir) async {
+  await tester.pumpWidget(MaterialApp(
+    home: HomePage(
+      directoryResolver: () async => dir,
+      credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
+    ),
+  ));
+  await tester.pump(const Duration(seconds: 1));
+  await tester.pump(const Duration(seconds: 2));
+}
+
+/// 模拟「已建窗」的全局状态：真实取值来自建窗动作，测试里直接置位。
+void _markOverlayShown() {
+  setOverlayShownForTest(true);
+  addTearDown(() => setOverlayShownForTest(false));
 }
 
 void main() {
@@ -144,6 +182,98 @@ void main() {
       find.text('悬浮窗权限未授予，当前仅能在 App 内查看'),
       findsOneWidget,
       reason: '权限被撤销后应出现降级常驻提示',
+    );
+  });
+
+  testWidgets('移除正在悬浮窗显示的主播时，重排栏位并不再绑定它（PM-002）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '111',
+          name: '主播甲',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+        ManagedRoom(
+          webRid: '222',
+          name: '主播乙',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+      boundWebRids: <String>['111', '222'],
+    );
+    _mockOverlayChannels(tester, active: true);
+    _markOverlayShown();
+
+    await _pumpHomeWithDir(tester, dir);
+    expect(find.text('主播甲'), findsOneWidget);
+    expect(find.text('主播乙'), findsOneWidget);
+    _overlayCalls.clear();
+
+    // 长按主播甲 → 弹底部菜单 → 移除主播 → 二次确认。
+    await tester.longPress(find.text('主播甲'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('移除主播'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('移除'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('主播甲'), findsNothing, reason: '主播甲应从列表移除');
+
+    // 走了重排（resize）而不是关窗：还剩一栏可显示。
+    expect(
+      _overlayCalls.any((MethodCall call) => call.method == 'resizeOverlay'),
+      isTrue,
+      reason: '移除后应按剩余栏位重排，卸载被删主播那一栏',
+    );
+    expect(
+      _overlayCalls.any((MethodCall call) => call.method == 'closeOverlay'),
+      isFalse,
+      reason: '还有剩余栏位，不应关窗',
+    );
+
+    // 落盘的栏位绑定里也不再含被移除的主播。
+    final OverlayPrefs persisted =
+        await OverlayPrefsStore(directoryResolver: () async => dir).load();
+    expect(persisted.webRids, isNot(contains('111')));
+    expect(persisted.webRids, contains('222'));
+  });
+
+  testWidgets('移除最后一栏时直接关掉悬浮窗（PM-002）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '111',
+          name: '主播甲',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+      boundWebRids: <String>['111'],
+    );
+    _mockOverlayChannels(tester, active: true);
+    _markOverlayShown();
+
+    await _pumpHomeWithDir(tester, dir);
+    _overlayCalls.clear();
+
+    await tester.longPress(find.text('主播甲'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('移除主播'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('移除'));
+    await tester.pumpAndSettle();
+
+    // 没有剩余栏位可下发：走关窗，而不是下发空绑定的 config。
+    expect(
+      _overlayCalls.any((MethodCall call) => call.method == 'closeOverlay'),
+      isTrue,
+      reason: '最后一栏被移除后应关窗，避免留下空窗',
+    );
+    expect(
+      find.byTooltip('关闭悬浮窗'),
+      findsNothing,
+      reason: '窗口已关闭，不该再显示关闭入口',
     );
   });
 }

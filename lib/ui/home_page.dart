@@ -485,10 +485,52 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         .toList(growable: false);
     setState(() => _rooms = next);
     await _store.save(next);
-    _syncOverlayRooms();
     // 主播被移除后它绑定的凭证不再有任何作用，重建一次绑定以免留下悬挂项。
     _syncCredentialBindings();
+    // 正在悬浮窗里显示的主播要先把它的栏位卸掉（PM-002），再推候选列表。
+    await _unbindRoomFromOverlay(room.webRid);
+    _syncOverlayRooms();
     if (mounted) _snack('已移除 ${room.displayName}');
+  }
+
+  /// 把被移除的主播从悬浮窗的栏位绑定里摘掉（PM-002）。
+  ///
+  /// 只推候选房间列表（[shareOverlayRooms]）不会卸载已绑定的栏位：那一栏会继续
+  /// 连着被移除的直播间、继续占用一条连接，用户以为删掉了其实没删。这里按新绑定
+  /// 重排一次，悬浮窗会重建栏位、自动 dispose 对应栏并停掉它的会话。
+  ///
+  /// 窗口没开、或该主播当前没绑在任何栏位上时不动；若它是最后一栏则直接关窗——
+  /// 空绑定下发不出去（OverlayConfig 至少要一个房间），留着只会是个空窗。
+  Future<void> _unbindRoomFromOverlay(String webRid) async {
+    if (!overlayShown) return;
+    final List<String> current = _prefs.webRids;
+    if (!current.contains(webRid)) return;
+
+    final List<String> remaining =
+        current.where((String item) => item != webRid).toList(growable: false);
+    final OverlayPrefs nextPrefs = _prefs.copyWith(webRids: remaining);
+    setState(() => _prefs = nextPrefs);
+    unawaited(_prefsStore.save(nextPrefs));
+
+    if (remaining.isEmpty) {
+      await _closeOverlay();
+      return;
+    }
+
+    final Size screen = MediaQuery.sizeOf(context);
+    await resizeOverlay(
+      nextPrefs.toConfig(
+        remaining,
+        filter: _filter,
+        roomOptions: _roomOptions,
+      ),
+      // 窗口不能大于屏幕，否则会溢出（与 _openMulti 同一口径）。
+      size: fitOverlaySize(
+        nextPrefs.windowSize,
+        screenWidth: screen.width,
+        screenHeight: screen.height,
+      ),
+    );
   }
 
   /// 设置 / 修改某主播的分组（prd F14）；留空表示移出分组。
