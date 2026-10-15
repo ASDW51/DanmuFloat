@@ -3,6 +3,7 @@
 //
 // 整页可滚动，底部固定勾选框与按钮，避免长文案把按钮顶出屏幕。
 // 正文精简为核心要点，只保留合规与风险的必要结论。
+import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
 
 /// 免责声明要点（精简）。
@@ -60,9 +61,12 @@ class _DisclaimerPageState extends State<DisclaimerPage> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   '请在使用前完整阅读以下条款。',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: secondaryTextColor(Theme.of(context).brightness),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 const _SectionHeader('免责声明'),

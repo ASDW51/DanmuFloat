@@ -9,6 +9,7 @@
 import 'dart:async';
 
 import 'package:danmu_float/system/system_permissions.dart';
+import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
 
 class OnboardingPage extends StatefulWidget {
@@ -128,9 +129,12 @@ class _OnboardingPageState extends State<OnboardingPage>
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   '全部步骤都可跳过：未授权只影响悬浮窗，App 内仍可查看弹幕。',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: secondaryTextColor(Theme.of(context).brightness),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 _StepTile(
