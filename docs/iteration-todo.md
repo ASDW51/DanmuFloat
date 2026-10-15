@@ -634,7 +634,7 @@ git checkout main && git pull --ff-only
 
 **本轮 CI 教到的坑**：① `toConfig()` 造的是 `OverlayConfig` 而不是 `OverlayPrefs`，两处构造点的参数有多处同名邻居（都紧跟 `showTitleBar`），文本锚点会撞——按行号对调才干净；② `lightTheme` 一旦降级为 getter，测试里 `OverlayPrefs(lightTheme: true)` 这类**构造**调用会编译失败（`copyWith(lightTheme:)` 不受影响）；③ 对比度断言必须先把前景 alpha 展平到背景；而**背景**自己不知道该压在什么上面，「把背景合成到自己身上」是无意义的——半透明底色要由调用方先 `flattenOver` 到真实背衬；④ 弹窗路由挂在 `MaterialApp` 的 Navigator 上，比页面高一层，只在页面里包 `Theme` 管不到弹窗，必须让根 widget 拿到主题。
 
-#### 第 6 轮收口（配色体系，截至 `456cb00`）
+#### 第 6 轮收口（配色体系，A~F 全部交付）
 
 | # | 条目 | 状态 | PR |
 | --- | --- | --- | --- |
@@ -646,7 +646,7 @@ git checkout main && git pull --ff-only
 | I | 状态点口径统一（`_stageColor` 委托 `stageTextColor`） | ✅ | #56 |
 | D | UX-32 主 App 配色 UI（预设 chips + 11 角色逐元素取色 + 十六进制输入 + 恢复默认） | ✅ | #57 |
 | F1 | UX-33 第一步：patch 携带 `themeId`/`colorOverrides`（`null`=不改，空表=清空） | ✅ | #58 |
-| F2 | UX-33 第二步：悬浮球菜单内的配色入口（预设 chips + 全部跟随主题） | ⬜ 下一项 | — |
+| F2 | UX-33 第二步：悬浮球菜单内的配色入口（预设 chips + 全部跟随主题，含清空覆盖） | ✅ | #60 #61 |
 
 **第 7 轮候选（已由 PM 裁决推后）**：`chromeBg` 角色（球/菜单/胶囊三处 alpha 各不相同，须先定 1 个还是 2 个角色及四套预设取值）；「最近使用色」UI 与去重交互（字段已在 B 落盘）；浅色预设 `secondary` 若跌破 4.5:1 则换 `0xFF49454F` 并统一口径；`DanmakuKind.privilegeScreenChat` 等按弹幕类型写死的颜色与 `typeColor()` 派生口径并存的问题。
 
