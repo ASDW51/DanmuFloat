@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
+import 'package:danmu_float/ui/overlay_color_section.dart';
 import 'package:danmu_float/ui/overlay_theme.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/danmu/auto_scroll.dart';
@@ -986,10 +987,18 @@ class _OverlayPageState extends State<OverlayPage> {
               ((heightLimit - minOverlayHeight) / 20).round(),
               (double value) => _setWindowSize(currentWidth, value),
             ),
-            Row(
+            // 用 Wrap 而不是 Row：窗口最窄 200dp，三个按钮排一行会溢出。
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
               children: <Widget>[
                 _menuButton(palette, label, '适配尺寸', _fitWindowToPaneCount),
-                const SizedBox(width: 4),
+                _menuButton(
+                  palette,
+                  label,
+                  '配色',
+                  () => unawaited(_pickOverlayColor()),
+                ),
                 _menuButton(palette, label, '关闭悬浮窗', _closeOverlayFromMenu),
               ],
             ),
@@ -1070,6 +1079,29 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 行高下限 28dp（UX-21）：旧版 `padding.vertical: 2` 配 `minimumSize: Size.zero`
   /// 让单栏字号只有 11dp 时行高 ≈17dp，菜单里每一条都点不准。宽度仍按内容自适应，
   /// 命中区不做 48dp——悬浮窗最小只有 200×150，48dp 一行会把菜单撑爆。
+  /// 悬浮球菜单里的「配色」：窗内只给整套预设与「全部跟随主题」，细调在主 App。
+  Future<void> _pickOverlayColor() async {
+    final OverlayColorChoice? choice = await showOverlayColorDialog(
+      context,
+      themeId: _themeId,
+      overrideCount: _colorOverrides.length,
+    );
+    if (choice == null || !mounted) return;
+    setState(() {
+      _themeId = choice.themeId;
+      if (choice.resetOverrides) {
+        _colorOverrides = const <String, int>{};
+      }
+    });
+    // 窗内立刻生效（点完就该看到），同时把增量交给主 App 落盘，
+    // 否则下次开窗又回到旧主题。
+    _publishPalette();
+    _mergePatch(
+      themeId: choice.themeId,
+      colorOverrides: choice.resetOverrides ? const <String, int>{} : null,
+    );
+  }
+
   Widget _menuButton(
     OverlayPalette palette,
     double fontSize,
@@ -1228,6 +1260,8 @@ class _OverlayPageState extends State<OverlayPage> {
 
   /// 合并一次待落盘的偏好增量（同字段以最新值为准）。
   void _mergePatch({
+    String? themeId,
+    Map<String, int>? colorOverrides,
     double? opacity,
     double? fontSize,
     double? windowWidth,
@@ -1240,6 +1274,10 @@ class _OverlayPageState extends State<OverlayPage> {
   }) {
     final OverlayPrefsPatch base = _pendingPatch ?? const OverlayPrefsPatch();
     _pendingPatch = OverlayPrefsPatch(
+      // null 表示「这次不改」：只有窗内配色弹窗会传值，其余菜单动作不能顺手
+      // 把主 App 里设好的主题与自定义色冲掉（空表才是「清空」）。
+      themeId: themeId ?? base.themeId,
+      colorOverrides: colorOverrides ?? base.colorOverrides,
       opacity: opacity ?? base.opacity,
       fontSize: fontSize ?? base.fontSize,
       windowWidth: windowWidth ?? base.windowWidth,
