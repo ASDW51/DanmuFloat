@@ -59,6 +59,18 @@ typedef DanmuSocketFactory = DanmuSocketClient Function({
   required String cookies,
 });
 
+/// 是否应给出「重试」入口：连接失败，或未开播且已停止自动复检（复检次数用尽）。
+///
+/// 悬浮窗栏位与 App 内弹幕页共用同一口径（UX-02）：这两种状态下会话不会自己恢复，
+/// 必须给出可点出口，否则用户只能关窗 / 退出重进——那会重建全部栏位、把其它正常
+/// 栏位的连接一并断掉，也会丢掉已收到的弹幕。
+bool shouldOfferRetry(
+  LiveSessionStage stage, {
+  required bool autoRechecking,
+}) =>
+    stage == LiveSessionStage.error ||
+    (stage == LiveSessionStage.offline && !autoRechecking);
+
 /// 一个 webRid 对应一路弹幕会话。
 class LiveDanmuSession {
   LiveDanmuSession({
@@ -129,6 +141,12 @@ class LiveDanmuSession {
   /// `_eventSubscription` 造成连接泄漏（旧连接没人停）。
   bool _starting = false;
 
+  /// 复检请求已发出、还没回来。
+  ///
+  /// 此时定时器已置空，光看定时器会把「正在复检」误判成「已停止复检」，
+  /// 界面会过早给出重试入口。
+  bool _rechecking = false;
+
   LiveSessionStage _stage = LiveSessionStage.idle;
   RoomInfo? _room;
   String? _errorMessage;
@@ -143,11 +161,11 @@ class LiveDanmuSession {
 
   LiveSessionStage get stage => _stage;
 
-  /// 是否已排定下一次未开播复检（界面据此显示「自动复检中」）。
+  /// 是否已排定下一次未开播复检，或复检请求正在飞行中（界面据此显示「自动复检中」）。
   ///
   /// 复检次数到顶或会话已停止时为 false：此时栏位真的不会再自己恢复，
-  /// 界面不该继续显示「自动复检中」骗用户。
-  bool get autoRechecking => _offlineRecheckTimer != null;
+  /// 界面不该继续显示「自动复检中」骗用户，而应给出可点的重试入口。
+  bool get autoRechecking => _offlineRecheckTimer != null || _rechecking;
 
   /// 解析到的房间信息，寻址成功后可用。
   RoomInfo? get room => _room;
@@ -257,20 +275,37 @@ class LiveDanmuSession {
     socket.start();
   }
 
+  /// 手动重试：丢掉当前连接与订阅，重新走一遍「解析房间 → 签名 → 建连」。
+  ///
+  /// 与 [stop] 的区别是会话流保持打开：界面不必重建栏位，已收到的弹幕与滚动位置
+  /// 都还在。复检正在飞行中时直接返回——两路并发建连会互相覆盖 `_socket`，
+  /// 旧连接没人停；此时复检自己会把结果收敛掉。
+  Future<void> restart() async {
+    if (_stopped || _starting) return;
+    _cancelOfflineRecheck();
+    await _teardownConnection();
+    await start();
+  }
+
   /// 主动关闭：停止重连、取消复检并释放网络资源。
   Future<void> stop() async {
     if (_stopped) return;
     _stopped = true;
     _cancelOfflineRecheck();
+    await _teardownConnection();
+    _setStage(LiveSessionStage.idle);
+    await _stages.close();
+    await _danmu.close();
+  }
+
+  /// 断开当前连接并取消订阅，保留会话流（供 [restart] 复用）。
+  Future<void> _teardownConnection() async {
     await _socket?.stop();
     _socket = null;
     await _eventSubscription?.cancel();
     _eventSubscription = null;
     await _stateSubscription?.cancel();
     _stateSubscription = null;
-    _setStage(LiveSessionStage.idle);
-    await _stages.close();
-    await _danmu.close();
   }
 
   void _onConnectionState(DanmuConnectionState state) {
@@ -324,6 +359,7 @@ class LiveDanmuSession {
   Future<void> _recheckOffline() async {
     if (_stopped || _starting) return;
     _starting = true;
+    _rechecking = true;
     _offlineRecheckCount++;
     try {
       final RoomInfo roomInfo;
@@ -347,6 +383,7 @@ class LiveDanmuSession {
       }
       await _connectLivingRoom(roomInfo);
     } finally {
+      _rechecking = false;
       _starting = false;
     }
   }
