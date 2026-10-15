@@ -19,6 +19,7 @@ import 'package:danmu_float/room/managed_room.dart';
 import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
+import 'package:danmu_float/ui/danmu_status_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -578,78 +579,38 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     );
   }
 
+  /// 状态栏交给 [DanmuStatusBar] 渲染（UX-17）：本页只把会话状态翻译成它的入参，
+  /// 布局与溢出防护归组件所有——这样那一行才能被单独挂载测试，而不是埋在 800 行页面里。
   Widget _buildStatusBar(RoomInfo? room) {
-    final Color color = switch (_stage) {
-      LiveSessionStage.live => Colors.green,
-      LiveSessionStage.offline => Colors.orange,
-      LiveSessionStage.error => Colors.red,
-      LiveSessionStage.idle => Colors.grey,
-      _ => Colors.blue,
-    };
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 6),
-              Text(_stageLabel(_stage), style: TextStyle(color: color)),
-              // 失败 / 停止复检后给可点出口（UX-02）：详情页只能退出去重进，
-              // 那会丢掉已收到的弹幕与当前滚动位置。
-              if (_retryable) ...<Widget>[
-                const SizedBox(width: 4),
-                TextButton.icon(
-                  onPressed: _retry,
-                  icon: const Icon(Icons.refresh, size: 16),
-                  label: const Text('重试'),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
-              ],
-              const SizedBox(width: 12),
-              Text('已收 $_received 条'),
-              if (_online > 0) ...<Widget>[
-                const SizedBox(width: 12),
-                Text('在线 ${formatOnlineCount(_online)}'),
-              ],
-              if (_session != null) ...<Widget>[
-                const SizedBox(width: 12),
-                Text(
-                  '连接: ${connectionStateLabel(_session!.connectionState)}',
-                ),
-              ],
-            ],
-          ),
-          if (room != null && room.title.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(room.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-          ],
-          if (_errorMessage != null) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
-          ],
-          if (_overlayState != null) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(
-              '悬浮窗: ${_stageLabel(_overlayState!.stage)} · '
+    return DanmuStatusBar(
+      stageLabel: _stageLabel(_stage),
+      stageColor: _stageColor(_stage),
+      received: _received,
+      online: _online,
+      connectionLabel: _session == null
+          ? null
+          : connectionStateLabel(_session!.connectionState),
+      retryable: _retryable,
+      onRetry: _retry,
+      roomTitle: (room != null && room.title.isNotEmpty) ? room.title : null,
+      errorMessage: _errorMessage,
+      overlaySummary: _overlayState == null
+          ? null
+          : '悬浮窗: ${_stageLabel(_overlayState!.stage)} · '
               '已收 ${_overlayState!.received} 条'
               '${_overlayState!.error == null ? '' : ' · ${_overlayState!.error}'}',
-              style: const TextStyle(color: Colors.blueGrey, fontSize: 12),
-            ),
-          ],
-        ],
-      ),
     );
   }
+
+  /// 状态色：浅色主题下这几个原色对比度偏低，UX-19 会统一收敛到文字取色表；
+  /// 本轮只搬布局不动视觉，所以先按原样保留映射。
+  Color _stageColor(LiveSessionStage stage) => switch (stage) {
+    LiveSessionStage.live => Colors.green,
+    LiveSessionStage.offline => Colors.orange,
+    LiveSessionStage.error => Colors.red,
+    LiveSessionStage.idle => Colors.grey,
+    _ => Colors.blue,
+  };
 
   /// 未开播且仍在自动复检时补一句「自动复检中」：让用户知道会话没死，不用退出重连。
   String _stageLabel(LiveSessionStage stage) => switch (stage) {
