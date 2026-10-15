@@ -606,9 +606,43 @@ class OverlayRooms {
 ///
 /// 设置页调透明度/字号时用它而不是重发 [OverlayConfig]——同一时刻窗口里绑的是
 /// 哪些房间由当前持有悬浮窗的页面决定，设置页并不知道，重发 config 会把绑定冲掉。
+/// 主题标识：这里写死字面量而不从存储层引入，避免 app 层反向依赖 storage 层。
+const String overlayStyleDarkThemeId = 'dark';
+const String overlayStyleLightThemeId = 'light';
+
+/// 解析角色级颜色覆盖：非 int、越界、半透明（alpha ≠ 255）一律**逐键丢弃**。
+///
+/// 这是唯一实现：下发的 style 消息与落盘的偏好共用它，避免两处对「什么算合法颜色」
+/// 给出不同答案。角色名是否认得由渲染侧（OverlayTheme.resolve）把关。
+Map<String, int> parseColorOverrides(Object? raw) {
+  if (raw is! Map) return const <String, int>{};
+  final Map<String, int> result = <String, int>{};
+  for (final MapEntry<Object?, Object?> entry in raw.entries) {
+    final Object? key = entry.key;
+    final Object? value = entry.value;
+    if (key is! String || key.isEmpty) continue;
+    if (value is! int) continue;
+    if (value < 0 || value > 0xFFFFFFFF) continue;
+    if (((value >> 24) & 0xFF) != 0xFF) continue;
+    result[key] = value;
+  }
+  return result;
+}
+
+/// 解析主题标识：没有 themeId 的老 payload 由 lightTheme 推导，语义与旧版一致。
+String _parseStyleThemeId(Map<dynamic, dynamic> raw) {
+  final Object? id = raw['themeId'];
+  if (id is String && id.isNotEmpty) return id;
+  return raw['lightTheme'] == true
+      ? overlayStyleLightThemeId
+      : overlayStyleDarkThemeId;
+}
+
 class OverlayStyle {
   const OverlayStyle({
     required this.opacity,
+    this.themeId,
+    this.colorOverrides = const <String, int>{},
     this.fontSize = defaultDanmuFontSize,
     this.scrollSpeed = defaultDanmuScrollSpeed,
     this.paneStyles = const <String, PaneStyle>{},
@@ -648,6 +682,12 @@ class OverlayStyle {
   final double screenWidth;
   final double screenHeight;
 
+  /// 主题标识。老 payload 没有这个字段，由 [lightTheme] 推导。
+  final String? themeId;
+
+  /// 角色级颜色覆盖：角色名 → 不透明 ARGB。
+  final Map<String, int> colorOverrides;
+
   Map<String, Object?> toJson() => <String, Object?>{
     'type': overlayStyleType,
     'opacity': clampOverlayOpacity(opacity),
@@ -655,6 +695,9 @@ class OverlayStyle {
     'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed),
     'paneStyles': encodePaneStyles(paneStyles),
     'lightTheme': lightTheme,
+    // 新字段照旧写出来：旧版悬浮窗进程读到不认识的键会忽略，不会因此解析失败。
+    'themeId': themeId ?? (lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId),
+    'colorOverrides': colorOverrides,
     'showTitleBar': showTitleBar,
     'focusBehavior': clampFocusBehavior(focusBehavior),
     'dragLocked': dragLocked,
@@ -682,6 +725,8 @@ class OverlayStyle {
           : defaultDanmuScrollSpeed,
       paneStyles: parsePaneStyles(raw['paneStyles']),
       lightTheme: raw['lightTheme'] == true,
+      themeId: _parseStyleThemeId(raw),
+      colorOverrides: parseColorOverrides(raw['colorOverrides']),
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
       dragLocked: raw['dragLocked'] == true,

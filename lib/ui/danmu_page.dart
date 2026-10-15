@@ -409,6 +409,8 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
         scrollSpeed: _prefs.scrollSpeed,
         paneStyles: _prefs.paneStyles,
         lightTheme: _prefs.lightTheme,
+        themeId: _prefs.themeId,
+        colorOverrides: _prefs.colorOverrides,
         showTitleBar: _prefs.showTitleBar,
         focusBehavior: _prefs.focusBehavior,
         dragLocked: _prefs.dragLocked,

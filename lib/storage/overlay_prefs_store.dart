@@ -45,25 +45,6 @@ String _parseThemeId(Map<dynamic, dynamic> raw) {
       : defaultOverlayThemeId;
 }
 
-/// 解析角色级颜色覆盖：非 int、越界、半透明（alpha ≠ 255）一律**逐键丢弃**，不是
-/// 整表丢弃——这样后续版本增删角色时，旧配置里多出来的键不会让整份配色失效。
-///
-/// 角色名是否认得由渲染侧（OverlayTheme.resolve）把关，存储层不依赖 UI 层。
-Map<String, int> _parseColorOverrides(Object? raw) {
-  if (raw is! Map) return const <String, int>{};
-  final Map<String, int> result = <String, int>{};
-  for (final MapEntry<Object?, Object?> entry in raw.entries) {
-    final Object? key = entry.key;
-    final Object? value = entry.value;
-    if (key is! String || key.isEmpty) continue;
-    if (value is! int) continue;
-    if (value < 0 || value > 0xFFFFFFFF) continue;
-    if (((value >> 24) & 0xFF) != 0xFF) continue;
-    result[key] = value;
-  }
-  return result;
-}
-
 /// 解析最近使用色：只留合法的不透明色，去重、按首次出现顺序、最多 8 个。
 List<int> _parseRecentColors(Object? raw) {
   if (raw is! List) return const <int>[];
@@ -333,7 +314,7 @@ class OverlayPrefs {
           ? clampOverlayHeight(height.toDouble())
           : defaultOverlayHeight,
       themeId: _parseThemeId(raw),
-      colorOverrides: _parseColorOverrides(raw['colorOverrides']),
+      colorOverrides: parseColorOverrides(raw['colorOverrides']),
       recentColors: _parseRecentColors(raw['recentColors']),
       contrastPolicy: clampOverlayContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,
