@@ -107,15 +107,23 @@ Future<void> _pumpHome(WidgetTester tester) async {
 }
 
 /// 在临时目录里预置主播列表与栏位偏好，供移除场景使用。
-Future<Directory> _seedRooms({
+///
+/// save/load 是真实文件 I/O：testWidgets 的用例体跑在 FakeAsync zone 里，
+/// 直接 await 永远等不到完成回调（10 分钟超时的根因），必须经
+/// [WidgetTester.runAsync] 逃出 FakeAsync 真实执行。
+Future<Directory> _seedRooms(
+  WidgetTester tester, {
   required List<ManagedRoom> rooms,
   required List<String> boundWebRids,
 }) async {
   final Directory dir =
       Directory.systemTemp.createTempSync('danmu_float_home_test');
-  await RoomStore(directoryResolver: () async => dir).save(rooms);
-  await OverlayPrefsStore(directoryResolver: () async => dir)
-      .save(OverlayPrefs(webRids: boundWebRids));
+  addTearDown(() => dir.deleteSync(recursive: true));
+  await tester.runAsync(() async {
+    await RoomStore(directoryResolver: () async => dir).save(rooms);
+    await OverlayPrefsStore(directoryResolver: () async => dir)
+        .save(OverlayPrefs(webRids: boundWebRids));
+  });
   return dir;
 }
 
@@ -210,6 +218,7 @@ void main() {
   testWidgets('移除正在悬浮窗显示的主播时，重排栏位并不再绑定它（PM-002）',
       (WidgetTester tester) async {
     final Directory dir = await _seedRooms(
+      tester,
       rooms: <ManagedRoom>[
         ManagedRoom(
           webRid: '111',
@@ -258,9 +267,12 @@ void main() {
       reason: '还有剩余栏位，不应关窗',
     );
 
-    // 落盘的栏位绑定里也不再含被移除的主播。
-    final OverlayPrefs persisted =
-        await OverlayPrefsStore(directoryResolver: () async => dir).load();
+    // 落盘的栏位绑定里也不再含被移除的主播（真实读盘须逃出 FakeAsync）。
+    late final OverlayPrefs persisted;
+    await tester.runAsync(() async {
+      persisted =
+          await OverlayPrefsStore(directoryResolver: () async => dir).load();
+    });
     expect(persisted.webRids, isNot(contains('111')));
     expect(persisted.webRids, contains('222'));
   });
@@ -268,6 +280,7 @@ void main() {
   testWidgets('移除最后一栏时直接关掉悬浮窗（PM-002）',
       (WidgetTester tester) async {
     final Directory dir = await _seedRooms(
+      tester,
       rooms: <ManagedRoom>[
         ManagedRoom(
           webRid: '111',
