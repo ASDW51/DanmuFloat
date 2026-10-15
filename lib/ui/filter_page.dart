@@ -103,8 +103,8 @@ class _FilterSettingsPageState extends State<FilterSettingsPage> {
           ),
           const Divider(height: 1),
           const _SectionTitle('列表显示的类型'),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
             child: Text(
               '默认只显示聊天类弹幕；勾选后可把礼物 / 进场 / 点赞 / 关注 / 榜单一并列入',
               style: TextStyle(
