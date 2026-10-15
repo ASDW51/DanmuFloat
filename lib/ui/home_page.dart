@@ -47,6 +47,25 @@ String formatRefreshedAgo(int? refreshedAt, {required DateTime now}) {
   return '${seconds ~/ 86400} 天前';
 }
 
+/// 回前台时房间数据超过这个时长就算过期，需要静默补刷（UX-10）。
+///
+/// 定 30 分钟：切出去几分钟再回来不该看到整列表重刷（费流量、列表乱跳），而隔夜回来时
+/// 旧数据会一直显示「未开播」，用户又不知道那只是过期结论。
+const Duration staleRoomRefreshAfter = Duration(minutes: 30);
+
+/// 房间数据是否过期（UX-10）：从没刷过、或距上次成功刷新超过 [after]。
+///
+/// [now] 与 [lastRefreshedAt] 都是 epoch 毫秒（AGENTS 第 5 节）；时钟回拨导致差值为负
+/// 时按「刚刷过」处理，不触发补刷。
+bool isRoomStale(
+  int? lastRefreshedAt, {
+  required int now,
+  Duration after = staleRoomRefreshAfter,
+}) {
+  if (lastRefreshedAt == null || lastRefreshedAt <= 0) return true;
+  return now - lastRefreshedAt > after.inMilliseconds;
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({
     super.key,
@@ -209,7 +228,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       // 悬浮窗可能在后台期间被用户从通知栏 / 悬浮球关掉，或由弹幕页新开：
       // 每次回前台都重新收敛一次开关状态（PM-001）。
       unawaited(_reconcileOverlayVisible());
+      // 后台期间主播可能已开播 / 下播，列表里的旧结论要静默补一次（UX-10）。
+      unawaited(_refreshStaleRooms());
     }
+  }
+
+  /// 回前台静默补刷过期房间（UX-10）。
+  ///
+  /// 只刷「从没刷过」或「超过 [staleRoomRefreshAfter]」的房间，且不弹提示、不推送
+  /// 悬浮窗候选：这是用户没主动要求的刷新，弹 8 个 SnackBar 会把页面刷屏。
+  Future<void> _refreshStaleRooms() async {
+    // 全量刷新进行中就不插队：它已经在逐条刷了，再插一遍等于把接口请求翻倍。
+    if (_refreshAllRunning || !mounted) return;
+    final int now = _nowMillis();
+    final List<String> stale = <String>[
+      for (final ManagedRoom room in _rooms)
+        if (!_refreshing.contains(room.webRid) &&
+            isRoomStale(room.lastRefreshedAt, now: now))
+          room.webRid,
+    ];
+    if (stale.isEmpty) return;
+    for (final String webRid in stale) {
+      final String? error = await _refreshRoomQuiet(webRid, persist: false);
+      // 静默刷新失败不打扰用户（不是他主动点的），但日志要留痕：用户反馈「回来还是
+      // 旧数据」时，得能看出到底是没刷还是刷失败了。
+      if (error != null) debugPrint('回前台补刷主播失败（$webRid）：$error');
+      if (!mounted) return;
+    }
+    await _store.save(_rooms);
+    if (!mounted) return;
+    _syncOverlayRooms();
   }
 
   /// 悬浮窗真实存在但本页不知道时，补上「已开启」状态（PM-001）。
@@ -648,7 +696,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   ///
   /// 与 [_refreshRoom] 的区别是不弹提示、不推送悬浮窗候选：批量刷新时由调用方
   /// 统一收尾，否则刷 8 个主播会弹 8 个 SnackBar、发 8 次配置（UX-04）。
-  Future<String?> _refreshRoomQuiet(String webRid) async {
+  ///
+  /// [persist] 为 false 时不落盘：批量刷新逐条写 rooms.json 会把同一个文件写 N 次
+  /// （8 个主播就是 8 次），由调用方在整批结束后统一保存一次（UX-11）。
+  Future<String?> _refreshRoomQuiet(
+    String webRid, {
+    bool persist = true,
+  }) async {
     final ManagedRoom? current = _roomOf(webRid);
     if (current == null) return '主播已不在列表中';
 
@@ -677,7 +731,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         .map((ManagedRoom item) => item.webRid == webRid ? target : item)
         .toList(growable: false);
     setState(() => _rooms = next);
-    await _store.save(next);
+    if (persist) await _store.save(next);
     return null;
   }
 
@@ -706,7 +760,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     int ok = 0;
     int failed = 0;
     for (final String webRid in targets) {
-      final String? error = await _refreshRoomQuiet(webRid);
+      final String? error = await _refreshRoomQuiet(webRid, persist: false);
       if (!mounted) return;
       if (error == null) {
         ok++;
@@ -715,6 +769,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
       setState(() => _refreshAllDone++);
     }
+    if (!mounted) return;
+    // 整批刷完只落盘一次：逐条写会把 rooms.json 写 N 次，慢且更容易留下半批数据（UX-11）。
+    await _store.save(_rooms);
     if (!mounted) return;
     setState(() => _refreshAllRunning = false);
     _syncOverlayRooms();
