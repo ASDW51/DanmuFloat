@@ -211,12 +211,15 @@ void main() {
     _overlayCalls.clear();
 
     // 长按主播甲 → 弹底部菜单 → 移除主播 → 二次确认。
+    // 每一步都用有限 pump 推进（同 _pumpHome 的理由：持续 post-frame 回调
+    // 会让 pumpAndSettle 永远等不到空闲）。
     await tester.longPress(find.text('主播甲'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('移除主播'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('移除'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 2));
 
     expect(find.text('主播甲'), findsNothing, reason: '主播甲应从列表移除');
 
@@ -258,11 +261,12 @@ void main() {
     _overlayCalls.clear();
 
     await tester.longPress(find.text('主播甲'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('移除主播'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('移除'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 2));
 
     // 没有剩余栏位可下发：走关窗，而不是下发空绑定的 config。
     expect(
