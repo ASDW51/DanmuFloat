@@ -13,14 +13,20 @@ void main() {
   group('对比度策略经 style 通道下发', () {
     test('三态都能往返，未知值回落到 adjust', () {
       for (final String policy in <String>['adjust', 'warn', 'allow']) {
+        // 带上一个早已识别的字段：tryParse 在没有任何已知字段时返回 null（真实 payload
+        // 由 shareOverlayStyle 发全量、永远带 opacity 等字段，所以这不是缺陷）。
         final OverlayStyle? style = OverlayStyle.tryParse(<String, Object?>{
+          'opacity': 0.8,
           'contrastPolicy': policy,
         });
         expect(style?.contrastPolicy, policy);
         expect(style?.toJson()['contrastPolicy'], policy);
       }
       expect(
-        OverlayStyle.tryParse(<String, Object?>{'contrastPolicy': 'bogus'})
+        OverlayStyle.tryParse(<String, Object?>{
+          'opacity': 0.8,
+          'contrastPolicy': 'bogus',
+        })
             ?.contrastPolicy,
         overlayStyleAdjustPolicy,
       );
@@ -28,6 +34,7 @@ void main() {
 
     test('老 payload 没有该字段时默认 adjust', () {
       final OverlayStyle? style = OverlayStyle.tryParse(<String, Object?>{
+        'opacity': 0.8,
         'lightTheme': false,
       });
       expect(style?.contrastPolicy, overlayStyleAdjustPolicy);
