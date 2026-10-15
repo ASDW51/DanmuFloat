@@ -304,7 +304,13 @@ void main() {
         maxOfflineRechecks: 2,
       );
       final List<LiveSessionStage> stages = <LiveSessionStage>[];
-      session.stages.listen(stages.add);
+      // 事件到达监听端那一刻的 autoRechecking：界面就是靠它决定要不要放出重试入口，
+      // 而它成立的前提是 stages 走「非 sync 的 broadcast」、回调晚于状态写入的同步段。
+      final List<bool> recheckingAtEvent = <bool>[];
+      session.stages.listen((LiveSessionStage stage) {
+        stages.add(stage);
+        recheckingAtEvent.add(session.autoRechecking);
+      });
 
       await session.start();
       await _waitFor(() => !session.autoRechecking);
@@ -313,12 +319,20 @@ void main() {
 
       expect(session.stage, LiveSessionStage.offline);
       expect(
-        stages
-            .where((LiveSessionStage stage) => stage == LiveSessionStage.offline)
-            .length,
-        greaterThanOrEqualTo(2),
-        reason: '预算用尽要再发一次 offline：阶段没变但 autoRechecking 变了，'
-            '不补发界面就永远停在「复检中…」且没有重试入口',
+        stages.where((LiveSessionStage s) => s == LiveSessionStage.offline).length,
+        2,
+        reason: '到顶后只补发「恰好一条」：每轮空转都发会让界面反复重建',
+      );
+      expect(stages.last, LiveSessionStage.offline);
+      expect(
+        recheckingAtEvent.last,
+        isFalse,
+        reason: '补发时复检已停：界面据此把「复检中…」换成可重试的「未开播」',
+      );
+      expect(
+        shouldOfferRetry(session.stage, autoRechecking: session.autoRechecking),
+        isTrue,
+        reason: '补发这条事件的唯一目的就是让重试入口出现（UX-08）',
       );
       await session.stop();
     });

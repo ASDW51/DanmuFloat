@@ -66,6 +66,20 @@ bool isRoomStale(
   return now - lastRefreshedAt > after.inMilliseconds;
 }
 
+/// 距离上次自动补刷尝试是否已过 [after]（UX-13）。
+///
+/// 只按 `lastRefreshedAt`（成功才写）判断会漏掉失败路径：弱网或被风控时每次回前台都
+/// 会把整列表重打一遍，而 30 分钟节流对「失败」完全不生效——恰好放过了它该防的场景。
+/// 因此再记一个「上次尝试时间」（纯内存，不落盘）。
+bool shouldAttemptStaleRefresh(
+  int? lastAttemptAt, {
+  required int now,
+  Duration after = staleRoomRefreshAfter,
+}) {
+  if (lastAttemptAt == null) return true;
+  return now - lastAttemptAt > after.inMilliseconds;
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({
     super.key,
@@ -73,6 +87,7 @@ class HomePage extends StatefulWidget {
     this.directoryResolver,
     this.credentialStore,
     this.roomInfoClient,
+    this.store,
   });
 
   /// 「清除所有本地数据」完成后回调外层，把入口切回免责声明页（prd F26）。
@@ -88,6 +103,11 @@ class HomePage extends StatefulWidget {
 
   /// 房间信息客户端可注入（默认走真实接口）；单测传假实现以隔离网络。
   final RoomInfoClient? roomInfoClient;
+
+  /// 主播列表存储可注入（默认落应用私有目录）；单测传计数实现来断言
+  /// 「整批只落盘一次」（UX-11）。
+  @visibleForTesting
+  final RoomStore? store;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -119,6 +139,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 正在刷新房间信息的直播间号（行内按钮转圈用）。
   final Set<String> _refreshing = <String>{};
+
+  /// 回前台自动补刷正在飞的直播间号（UX-13）。
+  ///
+  /// 与 [_refreshing] 分开：补刷不是用户点的，行内不该转圈、也不该让它挡住行内刷新
+  /// 按钮的可用性；但两条路径必须互斥——房间接口对同 IP 并发不友好（UX-04 为此刻意
+  /// 串行），同一 webRid 两路在飞会把风控风险成倍放大。
+  final Set<String> _autoRefreshing = <String>{};
+
+  /// 上次自动补刷的尝试时间（epoch 毫秒，纯内存）：成功与失败都算一次尝试，
+  /// 否则失败路径等于没有节流（UX-13）。
+  int? _lastStaleRefreshAttemptAt;
 
   /// 是否正在「刷新全部」；以及它的进度（已完成 / 总数），用于列表上方的进度条。
   ///
@@ -161,7 +192,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // 单测可注入临时目录解析器，把本地存储隔离到临时目录、不依赖 path_provider
     // 插件通道（见 HomePage.directoryResolver）。默认仍走应用私有目录。
     final Future<Directory> Function()? resolver = widget.directoryResolver;
-    _store = RoomStore(directoryResolver: resolver);
+    _store = widget.store ?? RoomStore(directoryResolver: resolver);
     _prefsStore = OverlayPrefsStore(directoryResolver: resolver);
     _credentialStore = widget.credentialStore ?? CredentialStore();
     WidgetsBinding.instance.addObserver(this);
@@ -235,25 +266,39 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 回前台静默补刷过期房间（UX-10）。
   ///
-  /// 只刷「从没刷过」或「超过 [staleRoomRefreshAfter]」的房间，且不弹提示、不推送
-  /// 悬浮窗候选：这是用户没主动要求的刷新，弹 8 个 SnackBar 会把页面刷屏。
+  /// 只刷「从没刷过」或「超过 [staleRoomRefreshAfter]」的房间，且不弹提示；整批只推送
+  /// 一次悬浮窗候选（≤1 条，不是逐条），否则一批补刷会像刷屏一样连发配置。
+  ///
+  /// 两层节流（UX-13）：一是「距上次尝试」的窗口——失败路径没有写 `lastRefreshedAt`，
+  /// 弱网下每次回前台都会把整列表重打；二是同一 webRid 的在飞互斥（[_autoRefreshing]）。
   Future<void> _refreshStaleRooms() async {
     // 全量刷新进行中就不插队：它已经在逐条刷了，再插一遍等于把接口请求翻倍。
     if (_refreshAllRunning || !mounted) return;
     final int now = _nowMillis();
+    if (!shouldAttemptStaleRefresh(_lastStaleRefreshAttemptAt, now: now)) {
+      return;
+    }
     final List<String> stale = <String>[
       for (final ManagedRoom room in _rooms)
         if (!_refreshing.contains(room.webRid) &&
+            !_autoRefreshing.contains(room.webRid) &&
             isRoomStale(room.lastRefreshedAt, now: now))
           room.webRid,
     ];
     if (stale.isEmpty) return;
-    for (final String webRid in stale) {
-      final String? error = await _refreshRoomQuiet(webRid, persist: false);
-      // 静默刷新失败不打扰用户（不是他主动点的），但日志要留痕：用户反馈「回来还是
-      // 旧数据」时，得能看出到底是没刷还是刷失败了。
-      if (error != null) debugPrint('回前台补刷主播失败（$webRid）：$error');
-      if (!mounted) return;
+    // 先记尝试时间再发请求：中途失败也要算这一次，否则失败就会变成「每次都试」。
+    _lastStaleRefreshAttemptAt = now;
+    _autoRefreshing.addAll(stale);
+    try {
+      for (final String webRid in stale) {
+        final String? error = await _refreshRoomQuiet(webRid, persist: false);
+        // 静默刷新失败不打扰用户（不是他主动点的），但日志要留痕：用户反馈「回来还是
+        // 旧数据」时，得能看出到底是没刷还是刷失败了。
+        if (error != null) debugPrint('回前台补刷主播失败（$webRid）：$error');
+        if (!mounted) return;
+      }
+    } finally {
+      _autoRefreshing.removeAll(stale);
     }
     await _store.save(_rooms);
     if (!mounted) return;
@@ -676,7 +721,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 拉取一次房间信息，更新主播名 / 标题 / 开播状态并落盘，并给出行内提示。
   Future<void> _refreshRoom(String webRid) async {
-    if (_roomOf(webRid) == null || _refreshing.contains(webRid)) return;
+    // 回前台补刷正在飞的先让开：同一主播两路在飞会把风控风险翻倍（UX-13）。
+    if (_roomOf(webRid) == null ||
+        _refreshing.contains(webRid) ||
+        _autoRefreshing.contains(webRid)) {
+      return;
+    }
     setState(() => _refreshing.add(webRid));
 
     final String? error = await _refreshRoomQuiet(webRid);
@@ -743,7 +793,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_refreshAllRunning) return;
     final List<String> targets = <String>[
       for (final ManagedRoom room in _rooms)
-        if (!_refreshing.contains(room.webRid)) room.webRid,
+        if (!_refreshing.contains(room.webRid) &&
+            !_autoRefreshing.contains(room.webRid))
+          room.webRid,
     ];
     if (targets.isEmpty) {
       _snack(_rooms.isEmpty ? '列表为空，没有可刷新的主播' : '所有主播都在刷新中');
@@ -1151,7 +1203,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           TextButton(
-            onPressed: refreshing ? null : () => _refreshRoom(room.webRid),
+            // 补刷期间也禁用：同一主播不能两路在飞（UX-13）；补刷不是用户点的，
+            // 因此不转圈，避免「整列表突然都在刷」的视觉噪音。
+            onPressed:
+                refreshing || _autoRefreshing.contains(room.webRid)
+                ? null
+                : () => _refreshRoom(room.webRid),
             child: refreshing
                 ? const SizedBox(
                     width: 14,
