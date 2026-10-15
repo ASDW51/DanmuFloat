@@ -291,12 +291,13 @@ void main() {
     _overlayCalls.clear();
 
     // 长按主播甲 → 弹底部菜单 → 移除主播 → 二次确认。
-    // 每一步都用有限 pump 推进（同 _pumpHome 的理由：持续 post-frame 回调
-    // 会让 pumpAndSettle 永远等不到空闲）。
+    // 底部菜单 / 对话框各有约 200ms 的入场动画，pump 100ms 时 sheet 还在
+    // 视口下方滑入途中，tap 会打不中（首轮 CI 的 hit-test warning）；这里把
+    // 每个动画都推满（500ms），不用 pumpAndSettle（同 _pumpHome 的理由）。
     await tester.longPress(find.text('主播甲'));
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('移除主播'));
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('移除'));
     // 移除流程里 await 的真实落盘（_store.save）与随后的重排调用都需要真实
     // 事件循环排空：轮询等到「主播甲从列表消失」再断言插件调用。
@@ -349,9 +350,9 @@ void main() {
     _overlayCalls.clear();
 
     await tester.longPress(find.text('主播甲'));
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('移除主播'));
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('移除'));
     // 最后一栏的移除走关窗：等真实落盘完成、关窗调用发出（关闭入口消失）。
     await _pumpUntil(
