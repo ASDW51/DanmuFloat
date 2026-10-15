@@ -21,12 +21,18 @@ const MethodChannel _overlayControlChannel = MethodChannel(
   'x-slayer/overlay_channel',
 );
 
-/// 插件的窗口尺寸通道名：resizeOverlay / closeOverlay 走的是它而不是上面的
-/// 控制通道（third_party/flutter_screen_overlay 里是两个独立 MethodChannel）。
+/// 插件的窗口尺寸通道名（`resizeOverlay` 走它）。
+///
+/// 该通道的 handler 只注册在**悬浮窗引擎**（OverlayService）：主引擎直调必然抛
+/// MissingPluginException，所以主 App 改尺寸只能经消息通道转给悬浮窗引擎执行。
+/// 这里仍然挂上 mock，用来断言主 App 没有去直调它。
 const MethodChannel _overlaySizeChannel = MethodChannel('x-slayer/overlay');
 
-/// 记录尺寸 / 关窗通道上调过的插件方法（PM-002 用：断言走了 resize / close 路径）。
+/// 记录尺寸通道上调过的插件方法（主 App 不该调它，PM-002 回归断言用）。
 final List<MethodCall> _sizeCalls = <MethodCall>[];
+
+/// 记录主 App 经消息通道发出去的载荷（改尺寸 / 凭证 / 配置都走它）。
+final List<Object?> _sentMessages = <Object?>[];
 
 /// 插件的双向消息通道名：主 App 下发的 config / credential / close 都经它 send 出去。
 const BasicMessageChannel<dynamic> _messengerChannel =
@@ -39,11 +45,15 @@ const BasicMessageChannel<dynamic> _messengerChannel =
 /// 原生侧回包；测试里没有真实原生侧，不挂 handler 这个 await 永远不会返回，
 /// 整个移除流程就挂死在 10 分钟超时上。
 void _mockMessengerReplies(WidgetTester tester) {
+  _sentMessages.clear();
   final TestDefaultBinaryMessenger messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   messenger.setMockMessageHandler(
     _messengerChannel.name,
-    (ByteData? message) async => message,
+    (ByteData? message) async {
+      _sentMessages.add(const JSONMessageCodec().decodeMessage(message));
+      return message;
+    },
   );
   addTearDown(
     () => messenger.setMockMessageHandler(_messengerChannel.name, null),
@@ -117,8 +127,9 @@ void _mockOverlayChannels(WidgetTester tester, {required bool active}) {
   addTearDown(
     () => messenger.setMockMethodCallHandler(_overlayControlChannel, null),
   );
-  // resizeOverlay / closeOverlay 走独立尺寸通道：不 mock 会抛 MissingPluginException，
-  // resize 记录不下来（重排断言失败），close 则被 finally 复位掩盖成假绿。
+  // 尺寸通道仍然 mock 上：主 App 不该再直调它（handler 只注册在悬浮窗引擎），
+  // 挂上是为了把「误调」记录成断言失败，而不是让它抛 MissingPluginException
+  // 之后被上层 catch 掩盖成假绿。
   messenger.setMockMethodCallHandler(_overlaySizeChannel, (MethodCall call) async {
     _sizeCalls.add(call);
     return true;
@@ -285,6 +296,29 @@ void main() {
     );
   });
 
+  testWidgets('悬浮窗在窗内被关掉后，首页撤掉关闭入口（P2 回归）',
+      (WidgetTester tester) async {
+    _mockOverlayChannels(tester, active: true);
+
+    await _pumpHome(tester);
+    expect(find.byTooltip('关闭悬浮窗'), findsOneWidget);
+
+    // 悬浮球菜单关窗：悬浮窗引擎在关窗前补发一次带 closed 的聚合状态。
+    pushOverlayStatusForTest(const OverlayStatus(
+      stage: LiveSessionStage.idle,
+      received: 0,
+      closed: true,
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+
+    expect(
+      find.byTooltip('关闭悬浮窗'),
+      findsNothing,
+      reason: '窗口已被悬浮窗自己关掉，首页不该再显示关闭入口',
+    );
+  });
+
   testWidgets('移除正在悬浮窗显示的主播时，重排栏位并不再绑定它（PM-002）',
       (WidgetTester tester) async {
     final Directory dir = await _seedRooms(
@@ -328,19 +362,18 @@ void main() {
     // （等待上限同样来自 _pumpUntil 的轮询预算，超时即按断言失败报告。）
     await _pumpUntil(
       tester,
-      () => _sizeCalls.any(
-        (MethodCall call) =>
-            call.method == 'resizeOverlay' || call.method == 'closeOverlay',
+      () => _sentMessages.any(
+        (Object? message) => OverlayResize.tryParse(message) != null,
       ),
     );
 
     expect(find.text('主播甲'), findsNothing, reason: '主播甲应从列表移除');
 
     // 走了重排（resize）而不是关窗：还剩一栏可显示。
-    // resizeOverlay 在尺寸通道（_sizeCalls）；closeOverlay 在控制通道
-    // （_overlayCalls）——插件里这是两条独立的 MethodChannel。
     expect(
-      _sizeCalls.any((MethodCall call) => call.method == 'resizeOverlay'),
+      _sentMessages.any(
+        (Object? message) => OverlayResize.tryParse(message) != null,
+      ),
       isTrue,
       reason: '移除后应按剩余栏位重排，卸载被删主播那一栏',
     );
@@ -348,6 +381,14 @@ void main() {
       _overlayCalls.any((MethodCall call) => call.method == 'closeOverlay'),
       isFalse,
       reason: '还有剩余栏位，不应关窗',
+    );
+    // 尺寸只能经消息通道交给悬浮窗引擎执行：主引擎没有 `x-slayer/overlay` 的
+    // handler，直调会抛 MissingPluginException，而且异常发生在下发配置之前，
+    // 重排时房间绑定根本下不去。
+    expect(
+      _sizeCalls,
+      isEmpty,
+      reason: '主 App 不得直调只有悬浮窗引擎才注册的尺寸通道',
     );
 
     // 落盘的栏位绑定里也不再含被移除的主播。save 是 unawaited 的真实文件写，
@@ -399,13 +440,14 @@ void main() {
     // 同上：等真实落盘完成、关窗调用真正发出（不能只等 UI 状态变化）。
     await _pumpUntil(
       tester,
-      () => _sizeCalls.any((MethodCall call) => call.method == 'resizeOverlay') ||
-          _overlayCalls.any((MethodCall call) => call.method == 'closeOverlay'),
+      () => _overlayCalls.any(
+        (MethodCall call) => call.method == 'closeOverlay',
+      ),
     );
 
     // 没有剩余栏位可下发：走关窗，而不是下发空绑定的 config。
-    // 注意插件里 closeOverlay 走控制通道（_overlayCalls），只有 resizeOverlay
-    // 走独立尺寸通道（_sizeCalls），断言要各归各的通道。
+    // closeOverlay 走控制通道（_overlayCalls）；尺寸改由消息通道下发后，
+    // 尺寸通道（_sizeCalls）不该再被主 App 调用。
     expect(
       _overlayCalls.any((MethodCall call) => call.method == 'closeOverlay'),
       isTrue,

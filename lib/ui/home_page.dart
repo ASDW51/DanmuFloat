@@ -128,6 +128,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         });
         return;
       }
+      // 悬浮窗在窗内被关掉（悬浮球菜单 / 通知栏）：窗口已不存在，撤掉本页的开关
+      // 状态，否则用户再点「多栏连接」会走重排分支，窗口不会重新建出来。
+      if (status.closed) {
+        // 关窗前那一次上报可能还带着刚改的偏好（透明度 / 尺寸 / 锁定），
+        // 先落盘再撤状态，免得最后几秒的改动丢掉。
+        _applyReportedStatus(status);
+        setState(() => _overlayVisible = false);
+        return;
+      }
       // 悬浮窗有活跃栏位绑定 = 窗口真实存在（PM-001）：弹幕页开的单栏窗也会持续
       // 上报，这里据此把本页状态补成「已开启」，让首页出现关闭入口。
       // webRids 为空的上报（如权限自查中的空窗上报）不动本页状态。

@@ -74,14 +74,19 @@ Future<bool> ensureOverlayPermission() async {
 /// 只调整窗口尺寸，不下发配置：设置页改大小时走这里，
 /// 不动各栏已绑定的房间（窗口里绑了哪些房间由持有窗口的页面决定）。
 ///
-/// 注意插件两个 API 的单位不一致：`resizeOverlay` 内部会按 dp 换算成物理像素，
-/// 所以这里要传 dp；而 `showOverlay` 直接把宽高当物理像素用（见 [openOverlay]）。
+/// 尺寸经消息通道转给悬浮窗引擎执行，不在主引擎直调插件：插件改尺寸的
+/// `x-slayer/overlay` 通道只在悬浮窗引擎里注册（OverlayService），主引擎调用
+/// 只会抛 MissingPluginException。这与悬浮球菜单里的尺寸滑杆是同一条路径。
+///
+/// 传 dp：插件内部按 dp 换算物理像素（`showOverlay` 才是收物理像素，见 [openOverlay]）。
 Future<void> resizeOverlayWindow(({double width, double height}) size) async {
-  await FlutterScreenOverlay.resizeOverlay(
-    size.width.round(),
-    size.height.round(),
-    // 改尺寸时必须带上当前锁定状态，否则插件会把拖动重新打开。
-    !_dragLocked,
+  await FlutterScreenOverlay.shareData(
+    OverlayResize(
+      width: size.width,
+      height: size.height,
+      // 改尺寸时必须带上当前锁定状态，否则插件会把拖动重新打开。
+      dragLocked: _dragLocked,
+    ).toJson(),
   );
 }
 
@@ -299,6 +304,10 @@ StreamController<OverlayStatus> _relayOverlayStatus() {
     }
     final OverlayStatus? status = OverlayStatus.tryParse(message);
     if (status == null) return;
+    // 窗口已由悬浮窗自己关掉（悬浮球菜单），或权限被撤销后各栏已卸载：两种情况下
+    // 窗口都不在了，复位「已建窗」。不复位的话首页 / 弹幕页会以为窗口还在，下次开窗
+    // 走重排分支（只下发配置、不调用 showOverlay），窗口再也回不来。
+    if (status.closed || status.permissionRevoked) _overlayShown = false;
     if (status.filter != null) unawaited(_persistFilter(status.filter!));
     if (!controller.isClosed) controller.add(status);
   }, onError: (Object error) => debugPrint('悬浮窗状态流异常: $error'));

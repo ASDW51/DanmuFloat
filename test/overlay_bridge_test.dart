@@ -249,6 +249,75 @@ void main() {
     });
   });
 
+  group('OverlayResize', () {
+    test('经 JSON 往返后保留宽高与锁定状态，越界宽高收敛到可调范围', () {
+      final OverlayResize? parsed = OverlayResize.tryParse(
+        roundTrip(
+          const OverlayResize(
+            width: 320,
+            height: 480,
+            dragLocked: true,
+          ).toJson(),
+        ),
+      );
+      expect(parsed, isNotNull);
+      expect(parsed!.width, 320);
+      expect(parsed.height, 480);
+      expect(parsed.dragLocked, isTrue);
+
+      // 坏载荷不能把窗口写成 0：宽高一律收敛到可调范围。
+      expect(
+        OverlayResize.tryParse(
+          roundTrip(<String, Object?>{
+            'type': 'resize',
+            'width': 1,
+            'height': 1,
+          }),
+        )!.width,
+        minOverlayWidth,
+      );
+    });
+
+    test('缺省 dragLocked 按未锁定处理，宽高缺失或非 resize 消息返回 null', () {
+      final OverlayResize? parsed = OverlayResize.tryParse(
+        roundTrip(<String, Object?>{
+          'type': 'resize',
+          'width': 300,
+          'height': 400,
+        }),
+      );
+      expect(parsed!.dragLocked, isFalse);
+
+      expect(
+        OverlayResize.tryParse(
+          roundTrip(<String, Object?>{'type': 'resize', 'width': 300}),
+        ),
+        isNull,
+      );
+      expect(
+        OverlayResize.tryParse(
+          roundTrip(<String, Object?>{
+            'type': 'resize',
+            'width': 'wide',
+            'height': 400,
+          }),
+        ),
+        isNull,
+      );
+      // 尺寸消息不能被 config 解析器认领，否则会把各栏绑定冲掉。
+      expect(
+        OverlayConfig.tryParse(
+          roundTrip(<String, Object?>{
+            'type': 'resize',
+            'width': 300,
+            'height': 400,
+          }),
+        ),
+        isNull,
+      );
+    });
+  });
+
   group('PaneStyle', () {
     test('经 JSON 往返后保留字号、透明度与字色，越界值收敛', () {
       final PaneStyle? parsed = PaneStyle.tryParse(
@@ -372,6 +441,28 @@ void main() {
       );
       expect(parsed!.permissionRevoked, isTrue);
       expect(parsed.stage, LiveSessionStage.error);
+    });
+
+    test('窗内关窗标记经 JSON 往返后保留，缺字段按未关闭处理', () {
+      final OverlayStatus? parsed = OverlayStatus.tryParse(
+        roundTrip(
+          const OverlayStatus(
+            stage: LiveSessionStage.idle,
+            received: 0,
+            closed: true,
+          ).toJson(),
+        ),
+      );
+      expect(parsed!.closed, isTrue);
+
+      final OverlayStatus? legacy = OverlayStatus.tryParse(
+        roundTrip(<String, Object?>{
+          'type': 'state',
+          'stage': 'idle',
+          'received': 0,
+        }),
+      );
+      expect(legacy!.closed, isFalse);
     });
 
     test('各栏最新绑定经 state 回报，缺省回落空表（prd F8 / F15）', () {

@@ -17,6 +17,7 @@ const String overlayStyleType = 'style';
 const String overlayFilterType = 'filter';
 const String overlayRoomsType = 'rooms';
 const String overlayCredentialType = 'credential';
+const String overlayResizeType = 'resize';
 const String overlayCloseType = 'close';
 const String overlayStateType = 'state';
 
@@ -680,6 +681,56 @@ class OverlayStyle {
   }
 }
 
+/// 主 App 请求调整窗口尺寸（dp）。
+///
+/// 插件改尺寸的 `x-slayer/overlay` 通道只在**悬浮窗引擎**里注册（OverlayService），
+/// 主引擎的插件实例只注册了 `x-slayer/overlay_channel` 与 `x-slayer/overlay_messenger`，
+/// 直调必然抛 MissingPluginException；因此主 App 只能把尺寸经消息通道下发，
+/// 由悬浮窗引擎代为主调插件（与悬浮球菜单里的尺寸滑杆同一条路径）。
+class OverlayResize {
+  const OverlayResize({
+    required this.width,
+    required this.height,
+    required this.dragLocked,
+  });
+
+  /// 目标宽度（dp，整个悬浮窗的宽度，多栏时各栏在内部自动平分）。
+  final double width;
+
+  /// 目标高度（dp）。
+  final double height;
+
+  /// 主 App 侧的拖动锁定状态：插件改尺寸时顺带写这个开关，
+  /// 不带就会把已锁定的窗口重新打开拖动。
+  final bool dragLocked;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'type': overlayResizeType,
+    'width': clampOverlayWidth(width),
+    'height': clampOverlayHeight(height),
+    'dragLocked': dragLocked,
+  };
+
+  /// 解析尺寸请求；非 resize 消息、宽高缺失或 NaN 时返回 null。
+  ///
+  /// 宽高按 [clampOverlayWidth] / [clampOverlayHeight] 收敛：下发的值已经过屏幕
+  /// 收敛，这里再兜一次，避免坏载荷把窗口写成 0 或超出上限。
+  static OverlayResize? tryParse(Object? raw) {
+    if (raw is! Map || raw['type'] != overlayResizeType) return null;
+    final Object? width = raw['width'];
+    final Object? height = raw['height'];
+    if (width is! num || height is! num) return null;
+    final double valueWidth = width.toDouble();
+    final double valueHeight = height.toDouble();
+    if (valueWidth.isNaN || valueHeight.isNaN) return null;
+    return OverlayResize(
+      width: clampOverlayWidth(valueWidth),
+      height: clampOverlayHeight(valueHeight),
+      dragLocked: raw['dragLocked'] == true,
+    );
+  }
+}
+
 /// 消息是否为关闭悬浮窗指令。
 bool isOverlayCloseMessage(Object? raw) =>
     raw is Map && raw['type'] == overlayCloseType;
@@ -825,6 +876,7 @@ class OverlayStatus {
     this.webRid,
     this.error,
     this.permissionRevoked = false,
+    this.closed = false,
     this.webRids = const <String>[],
     this.prefsPatch,
     this.filter,
@@ -838,6 +890,13 @@ class OverlayStatus {
   /// 悬浮窗自查发现权限已被撤销：此时各栏已卸载、连接已断开，
   /// 主 App 收到后应把「悬浮窗已开启」的状态改回未开启。
   final bool permissionRevoked;
+
+  /// 窗口已由悬浮窗自己关掉（悬浮球菜单 / 通知栏「关闭」）。
+  ///
+  /// 关窗动作发生在悬浮窗引擎里，主 App 不知道；它若不复位「窗口已建立」这一
+  /// 全局状态，就会以为窗口还在、下次「多栏连接」走重排分支（只下发配置、不建窗），
+  /// 窗口再也回不来。因此关窗前补发一次带本标记的聚合状态。
+  final bool closed;
 
   /// 各栏当前绑定的直播间号（prd F8 / F15）：用户在悬浮窗内切换房间后，
   /// 悬浮窗把最新绑定回报给主 App，由主 App 写入本地偏好持久化。
@@ -859,6 +918,7 @@ class OverlayStatus {
     'webRid': webRid,
     'error': error,
     'permissionRevoked': permissionRevoked,
+    'closed': closed,
     if (webRids.isNotEmpty) 'webRids': webRids,
     if (prefsPatch != null && !prefsPatch!.isEmpty)
       'prefs': prefsPatch!.toJson(),
@@ -885,6 +945,7 @@ class OverlayStatus {
       webRid: webRid is String ? webRid : null,
       error: error is String ? error : null,
       permissionRevoked: raw['permissionRevoked'] == true,
+      closed: raw['closed'] == true,
       webRids: webRids is List
           ? <String>[
               for (final Object? item in webRids)
