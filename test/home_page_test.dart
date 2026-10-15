@@ -337,31 +337,36 @@ void main() {
     expect(find.text('主播甲'), findsNothing, reason: '主播甲应从列表移除');
 
     // 走了重排（resize）而不是关窗：还剩一栏可显示。
+    // resizeOverlay 在尺寸通道（_sizeCalls）；closeOverlay 在控制通道
+    // （_overlayCalls）——插件里这是两条独立的 MethodChannel。
     expect(
       _sizeCalls.any((MethodCall call) => call.method == 'resizeOverlay'),
       isTrue,
       reason: '移除后应按剩余栏位重排，卸载被删主播那一栏',
     );
     expect(
-      _sizeCalls.any((MethodCall call) => call.method == 'closeOverlay'),
+      _overlayCalls.any((MethodCall call) => call.method == 'closeOverlay'),
       isFalse,
       reason: '还有剩余栏位，不应关窗',
     );
 
     // 落盘的栏位绑定里也不再含被移除的主播。save 是 unawaited 的真实文件写，
-    // 插件调用出现时它可能还没写完：轮询读盘直到写入生效，不能读一次就断言。
+    // 且 writeAsString 先截断再写入：赶上截断窗口会读到空内容，所以等待条件
+    // 必须是「读到期望值」而不是「不含旧值」，空读一律继续等。
     OverlayPrefs persisted = const OverlayPrefs();
-    for (int i = 0; i < 20 && persisted.webRids.contains('111'); i++) {
+    bool hasExpected(List<String> webRids) =>
+        webRids.length == 1 && webRids.first == '222';
+    for (int i = 0; i < 20 && !hasExpected(persisted.webRids); i++) {
       await tester.runAsync(() async {
         persisted =
             await OverlayPrefsStore(directoryResolver: () async => dir).load();
-        if (persisted.webRids.contains('111')) {
+        if (!hasExpected(persisted.webRids)) {
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
       });
     }
-    expect(persisted.webRids, isNot(contains('111')));
-    expect(persisted.webRids, contains('222'));
+    expect(persisted.webRids, <String>['222'],
+        reason: '落盘的栏位绑定应只剩主播乙');
   });
 
   testWidgets('移除最后一栏时直接关掉悬浮窗（PM-002）',
@@ -394,12 +399,15 @@ void main() {
     // 同上：等真实落盘完成、关窗调用真正发出（不能只等 UI 状态变化）。
     await _pumpUntil(
       tester,
-      () => _sizeCalls.any((MethodCall call) => call.method == 'closeOverlay'),
+      () => _sizeCalls.any((MethodCall call) => call.method == 'resizeOverlay') ||
+          _overlayCalls.any((MethodCall call) => call.method == 'closeOverlay'),
     );
 
     // 没有剩余栏位可下发：走关窗，而不是下发空绑定的 config。
+    // 注意插件里 closeOverlay 走控制通道（_overlayCalls），只有 resizeOverlay
+    // 走独立尺寸通道（_sizeCalls），断言要各归各的通道。
     expect(
-      _sizeCalls.any((MethodCall call) => call.method == 'closeOverlay'),
+      _overlayCalls.any((MethodCall call) => call.method == 'closeOverlay'),
       isTrue,
       reason: '最后一栏被移除后应关窗，避免留下空窗',
     );
