@@ -52,7 +52,7 @@ class _FilterSettingsPageState extends State<FilterSettingsPage> {
           SwitchListTile(
             title: const Text('使用正则表达式'),
             subtitle: const Text(
-              '开启后「屏蔽关键词」与「高亮词」按正则解析，可匹配数字、开头结尾、多个候选等；'
+              '开启后「屏蔽词」与「高亮词」按正则解析，可匹配数字、开头结尾、多个候选等；'
               '关闭时按「内容包含该子串」匹配。「屏蔽用户」始终精确匹配，不受此开关影响。',
               style: TextStyle(fontSize: 12),
             ),
@@ -64,7 +64,7 @@ class _FilterSettingsPageState extends State<FilterSettingsPage> {
           const Divider(height: 1),
           _TutorialCard(regexEnabled: _prefs.regexEnabled),
           const Divider(height: 1),
-          const _SectionTitle('屏蔽关键词'),
+          const _SectionTitle('屏蔽词'),
           _RuleListEditor(
             hint: _prefs.regexEnabled
                 ? '每行一条正则，命中即不展示该条弹幕（不区分大小写）'
@@ -201,7 +201,7 @@ class _TutorialCard extends StatelessWidget {
       childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       expandedCrossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const Text('1. 屏蔽关键词', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('1. 屏蔽词', style: TextStyle(fontWeight: FontWeight.bold)),
         const Text(
           '弹幕正文命中任一规则就整条不展示。适合屏蔽广告、刷屏、加群引流等内容。',
           style: TextStyle(fontSize: 13),
@@ -222,7 +222,7 @@ class _TutorialCard extends StatelessWidget {
         const SizedBox(height: 12),
         const Text('4. 正则匹配怎么用', style: TextStyle(fontWeight: FontWeight.bold)),
         const Text(
-          '打开上面的「使用正则表达式」开关后，屏蔽关键词与高亮词的每一条都会被当作正则解析。'
+          '打开上面的「使用正则表达式」开关后，屏蔽词与高亮词的每一条都会被当作正则解析。'
           '不区分大小写。下面是最常用的写法：',
           style: TextStyle(fontSize: 13),
         ),
