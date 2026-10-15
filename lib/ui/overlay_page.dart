@@ -15,6 +15,7 @@ import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/room/room_info_client.dart';
 import 'package:danmu_float/ui/high_performance_dialog.dart';
+import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 
@@ -2395,7 +2396,7 @@ class _RoomPickerDialog extends StatelessWidget {
                 child: Text(
                   group,
                   style: TextStyle(
-                    color: Colors.grey.shade700,
+                    color: secondaryTextColor(Theme.of(context).brightness),
                     fontSize: smallerFontSize(fontSize, 3),
                   ),
                 ),
@@ -2540,9 +2541,12 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              '当前 ${_webRids.length} 栏（上限 $maxPaneCount 栏）；栏位过多时单格会变小，'
+              '当前 ${_webRids.length} 个栏位（上限 $maxPaneCount 个）；栏位过多时单格会变小，'
               '可配合「适配尺寸」调大窗口。',
-              style: TextStyle(fontSize: subSize, color: Colors.grey),
+              style: TextStyle(
+                fontSize: subSize,
+                color: secondaryTextColor(Theme.of(context).brightness),
+              ),
             ),
             const SizedBox(height: 4),
             ConstrainedBox(
