@@ -560,3 +560,46 @@ git checkout main && git pull --ff-only
 2. `gh pr create --body "..."` 里出现行内反引号会被 shell 当命令替换、把正文吃坏（两次）——**PR 正文一律 `--body-file`**。
 3. 把颜色改成 `secondaryTextColor(Theme.of(context).brightness)` 时，**外层不能是 `const` 子树**，否则 `flutter analyze` 报 `const_eval_method_invocation`（过滤页、首页各中一次）；去掉外层 `const` 的同时，要把原先靠常量传播隐式 const 的 `Text` / `SizedBox` / `EdgeInsets` 显式补上 `const`，否则 `prefer_const_constructors` 会让「No issues found」不成立。
 4. `OverlayPage` 在 `initState` 订阅静态单订阅流，**每个测试文件只能 mount 一次**；挂载用 `MaterialApp(home: OverlayPage(roomInfoClient: ...))` + 直接注入假客户端即可，无需 `OverlayApp`。
+
+### 第 6 轮：悬浮窗配色体系（UX-28 ~ UX-34）
+
+**问题**：悬浮窗只有「正文」一个元素能上色，且只有 6 个预设（`settings_page.dart` 的 `_paneColorChoices`：白/黄/橙/绿/蓝/粉），按栏存在 `PaneStyle.textColor`（`overlay_bridge.dart:239`）。而 `OverlayPalette`（`overlay_page.dart:64`）其实已有 **11 个纯色角色 + `highlightStyle` + `isLight`**，缺的不是元素，是「把它们暴露给用户」这一层。
+
+**角色 ↔ 可见元素**（`overlay_page.dart` 行号为本轮核对结果）
+
+| 角色 | 代表元素 | 建议 |
+| --- | --- | --- |
+| `body` | 弹幕正文、进场横幅正文（已有栏级 `textColor` 覆盖） | 开放 |
+| `secondary` | 空列表/错误占位、切换箭头、菜单说明、栏位状态、横幅「欢迎」 | 开放 |
+| `chrome` | 主播名、菜单分区标题与按钮、悬浮球图标、回溯胶囊、透明度 HUD | 开放 |
+| `userAccent` / `levelColor` / `fanLevelColor` | 昵称 / `Lv.N` / 灯牌 N | 开放（最想要） |
+| `divider` / `bannerBg` / `border` / `maskColor` | 分隔线 / 进场底色 / 窗口边框 / 窗口底色（再乘不透明度） | 开放，按预设收敛；`maskColor` 参与对比度校验 |
+| `activeColor` | 重试按钮、焦点/暂停态图标 | 只随预设，不单独开放（语义=「已生效」） |
+| `highlightStyle` | 高亮词前景+底色 | **不开放**：与「高亮词」功能耦合，独立改会让高亮失效 |
+| `typeColor(kind)` | 7 类弹幕类型前缀色 | **不开放**：派生自 `isLight` 的 switch，7×2 组合爆炸、收益低 |
+
+**三处已核实的缺口（比扩角色更该先补）**：① 状态点颜色 `_stageColor()` 与 `danmu_text_colors.dart:33` 的 `stageTextColor()` 是**两套并行口径**，应让主题提供 `stageColor` 并两处共用；② 球/菜单/胶囊底色直接写 `white70`/`black54`/`white@0.94`/`black@0.9`，无角色（建议新增 `chromeBg`）；③ `OverlayApp` 未挂 `theme`/`darkTheme`，深色皮肤下弹窗仍是白底——不修这条，「多元素配色」在弹窗层是假的。
+
+**分层模型（不新增第二条取色路径）**：`OverlayTheme`（纯数据，可 JSON 化）→ `resolve(overrides)` 合并元素级覆盖 → `toPalette()` 产出 `OverlayPalette`（widget 仍然只读它）。优先级：预设默认值 → 全局角色覆盖 → 栏级 `PaneStyle.textColor`（只覆盖 `body`）→ 对比度守卫修正。
+
+**4 套预设**：`dark` 深邃（默认）/ `light` 清爽 / `contrast` 高对比（≥7:1）/ `sepia` 护眼暖暗。**硬钉子**：`dark`/`light` 必须与现有 `darkPalette`/`lightPalette` 逐字段相等，默认外观零突变（单测断言）。
+
+**数据模型与迁移**：`OverlayPrefs` 增 `themeId`（默认 `dark`）、`colorOverrides`（角色名→ARGB，空表=全跟随主题）、`recentColors`（≤8）、`contrastPolicy`（`adjust` 默认 / `warn` / `allow`）；`lightTheme` 从存储字段降级为派生 getter（`themeId == 'light'`），`copyWith(lightTheme:)` 参数保留 → 现有调用点零改动。JSON 增写 `schemaVersion: 2`（**只写不分支**）；迁移按「缺字段→推导」处理：无 `themeId` + `lightTheme:false`→`dark`、`true`→`light`（外观与今天一致），`panes[].textColor` 原样保留继续作栏级 body 覆盖，未知 `themeId` 回落 `dark`，非法颜色**逐键丢弃**（不整表弃）。
+
+**可访问性**：默认 `adjust`——保留用户色相与饱和度，只调明度到达标（色相偏移 <15°，由单测钉住），并给一次轻提示；`warn` 在该行常驻显示实测比值；`allow` 只显示比值不干预。断言复用 `computeLuminance()` 现算 `(L1+0.05)/(L2+0.05)`。**已知例外**：浅色预设的 `secondary: Colors.black54` 实测约 4.47:1（低于 4.5），开放给用户前需先决定「修浅色预设」还是「按 warn 处理」。
+
+**刷新与节流**：复用现有 `style` 消息（新增 `themeId`/`colorOverrides` 两个可选字段，缺字段由 `lightTheme` 推导，旧 payload 语义不变），不动 `config`（避免冲掉栏位绑定）；拖动取色期间只下发不落盘（沿用 `persist:false` / `onChangeEnd` 口径），窗内取色只本地 `setState`，点保存才经 `OverlayPrefsPatch` 回报一次；`resolve()` 结果缓存，不在 `build` 里逐行算对比度。
+
+**PR 拆分（建议顺序 A → B → C → E → D → F，G 随 A）**
+
+| # | 条目 | 范围 | 验收断言 | 降级 |
+| --- | --- | --- | --- | --- |
+| A | UX-28 抽出 `OverlayTheme` | 新增 `lib/ui/overlay_theme.dart` + 单测 | `preset('dark'/'light').toPalette()` 与原 const 逐字段相等；未知 id 回落 `dark`；覆盖生效且非法键忽略；预设对比度达标 | 只落新文件，`OverlayPalette.of` 原样不动（零行为变更） |
+| B | UX-29 偏好扩展与迁移 | `lib/storage/overlay_prefs_store.dart` | 4 条旧 JSON 迁移用例；未知 themeId 回落；非法色逐键丢弃；`data_transfer` 往返一致 | `lightTheme` 保留为 getter + `copyWith` 参数 |
+| C | UX-30 下发通道 | `overlay_bridge.dart` / `overlay_launcher.dart` / `overlay_page.dart` | 老 payload 解析后由 `lightTheme` 推导；新字段往返；旧进程忽略未知键 | 字段全可选 + `tryParse` 兜底 |
+| E | UX-31 对比度守卫 | `lib/ui/overlay_theme.dart` | 全部 `_contrast` 断言（含色相偏移 <15°） | 纯函数，风险最低 |
+| D | UX-32 主 App 配色 UI | `lib/ui/settings_page.dart` | chip 选中态；「恢复默认」清空该角色覆盖；最近色 ≤8 且去重 | 保持不混入无关重构 |
+| F | UX-33 窗内配色入口 | `overlay_page.dart` / `overlay_bridge.dart`(patch) | 菜单行高 ≥28dp；200×150 弹窗不溢出；确认后 patch 含 `themeId` | 每个测试文件只能 mount 一次 |
+| G | UX-34 高对比/护眼预设内容 | `lib/ui/overlay_theme.dart` | 两套预设对比度断言 | 可并入 A 或 E |
+
+**明确不做**：渐变/图片/纹理背景（需自绘 painter，与「蒙版不透明度」语义冲突）；动画或随时间变化的配色（无法静态校验对比度）；栏级多角色覆盖（本轮多角色只做全局，栏级仅保留既有 `textColor`=`body` 覆盖）；引入配色类 pub 依赖（三滑杆自研约 60 行即可，且色环手势会与「位移 >5px 搬窗口」冲突）；系统/壁纸取色（需原生通道与权限）；开放 `typeColor()` 与 `highlightStyle`；改 `third_party` 原生侧（CI 无原生门禁，且本方案不需要）；悬浮窗自动跟随系统深浅色（需新增下发字段与生命周期联动）。
