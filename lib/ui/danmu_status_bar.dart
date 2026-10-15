@@ -72,6 +72,8 @@ class DanmuStatusBar extends StatelessWidget {
             runSpacing: 4,
             children: <Widget>[
               // 状态点与状态词必须成组，否则换行时会把点单独留在上一行。
+              // Flexible 不能省：2 倍系统字号下这一组本身就比可用的 ~336dp 宽
+              // （CI 实测溢出 47px），没有它 Text 会按固有宽度铺开、连 Wrap 也救不回来。
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
@@ -84,15 +86,20 @@ class DanmuStatusBar extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  Text(stageLabel, style: TextStyle(color: stageColor)),
+                  Flexible(
+                    child: Text(stageLabel, style: TextStyle(color: stageColor)),
+                  ),
                 ],
               ),
               // 失败 / 停止复检后给可点出口（UX-02）：详情页只能退出去重进，
               // 那会丢掉已收到的弹幕与当前滚动位置。
               // 这里不写 minimumSize / tapTargetSize 覆盖：旧版把按钮压到 ~17dp，
               // 是「能看见但点不准」，交给 Material 默认的 40/48 触控高度（UX-17）。
+              // key 供测试取尺寸：TextButton.icon 的运行时类型是私有子类，
+              // find.byType(TextButton) 这类精确类型匹配抓不到它。
               if (retryable)
                 TextButton.icon(
+                  key: const ValueKey<String>('danmuStatusRetry'),
                   onPressed: onRetry,
                   icon: const Icon(Icons.refresh, size: 16),
                   label: const Text('重试'),

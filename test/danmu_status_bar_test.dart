@@ -59,8 +59,11 @@ void main() {
       (WidgetTester tester) async {
     await _pumpStatusBar(tester);
 
-    final Size size =
-        tester.getSize(find.widgetWithText(TextButton, '重试'));
+    // 用 key 而不是 find.widgetWithText(TextButton, '重试')：TextButton.icon 的运行时
+    // 类型是私有子类 _TextButtonWithIcon，find.byType 是精确类型匹配，抓不到它
+    // （首轮 CI 因此报 `Bad state: No element`）。
+    final Size size = tester
+        .getSize(find.byKey(const ValueKey<String>('danmuStatusRetry')));
     expect(size.height, greaterThanOrEqualTo(40));
   });
 
