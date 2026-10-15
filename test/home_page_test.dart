@@ -92,9 +92,10 @@ Future<void> _pumpHome(WidgetTester tester) async {
       credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
     ),
   ));
-  // 首页 initState 有一串异步加载（列表 / 偏好 / 凭证 / 权限 / 状态收敛）。
-  // pumpAndSettle 会等到所有 microtask / timer 落下；再加等 1s 的状态探测延时常量。
-  await tester.pumpAndSettle();
+  // 首页 build 里会因窗口尺寸同步排 post-frame 回调（见 _syncWindowSizeWithScreen），
+  // 不能用 pumpAndSettle —— 它会因持续的 post-frame 回调永远不空闲而超时。
+  // 改为推进一段固定虚拟时间：覆盖各 store 的异步加载与 1s 的状态探测延时常量。
+  await tester.pump(const Duration(seconds: 1));
   await tester.pump(const Duration(seconds: 2));
 }
 
