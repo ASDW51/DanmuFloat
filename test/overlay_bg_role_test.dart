@@ -16,11 +16,11 @@ void main() {
       );
       expect(
         OverlayPalette.darkPalette.menuBg.toARGB32(),
-        Colors.white.withValues(alpha: 0.94).toARGB32(),
+        Color(0xF0FFFFFF).toARGB32(),
       );
       expect(
         OverlayTheme.dark.menuBg.toARGB32(),
-        Colors.white.withValues(alpha: 0.94).toARGB32(),
+        Color(0xF0FFFFFF).toARGB32(),
       );
     });
 
@@ -31,7 +31,7 @@ void main() {
       );
       expect(
         OverlayPalette.lightPalette.menuBg.toARGB32(),
-        Colors.black.withValues(alpha: 0.9).toARGB32(),
+        Color(0xE6000000).toARGB32(),
       );
       expect(
         OverlayTheme.light.chromeBg.toARGB32(),

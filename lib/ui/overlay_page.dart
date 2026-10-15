@@ -136,7 +136,7 @@ class OverlayPalette {
     bannerBg: Colors.white10,
     maskColor: Colors.black,
     chromeBg: Colors.white70,
-    menuBg: Colors.white.withValues(alpha: 0.94),
+    menuBg: Color(0xF0FFFFFF),
     border: Colors.white24,
     userAccent: Colors.lightBlueAccent,
     levelColor: Colors.amber,
@@ -158,7 +158,7 @@ class OverlayPalette {
     bannerBg: Colors.black12,
     maskColor: Colors.white,
     chromeBg: Colors.black54,
-    menuBg: Colors.black.withValues(alpha: 0.9),
+    menuBg: Color(0xE6000000),
     border: Colors.black26,
     userAccent: Color(0xFF1565C0),
     levelColor: Color(0xFF8D6E00),
@@ -874,8 +874,8 @@ class _OverlayPageState extends State<OverlayPage> {
     );
 
     return Material(
-      color: palette.isLight
-          color: palette.menuBg,
+      // 菜单面板底色走独立角色：它与球/胶囊的语义不同（唯一承载文字的面板）。
+      color: palette.menuBg,
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
         child: Column(
