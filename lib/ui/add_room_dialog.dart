@@ -49,6 +49,12 @@ class _AddRoomDialogState extends State<AddRoomDialog> {
   bool _resolving = false;
   String? _error;
 
+  /// 用户是否已取消（表单已 pop，但可能还在退场动画里）。
+  ///
+  /// 取消后解析才返回时必须直接丢弃结果：那时 `mounted` 仍为 true，再 pop 一次
+  /// 会把首页路由也弹掉。
+  bool _cancelled = false;
+
   @override
   void dispose() {
     _inputController.dispose();
@@ -71,8 +77,11 @@ class _AddRoomDialogState extends State<AddRoomDialog> {
     });
     // 解析得到 webRid 就用结果；链接短链解析不出来时按原文保存，不拦用户。
     final String? parsed = await _resolver.resolve(input);
-    if (!mounted) return;
+    if (!mounted || _cancelled) return;
     final String identifier = parsed ?? input;
+    // 粘的是链接却没能解析出来（含超时）：必须说清楚，否则用户会以为加进去的就是
+    // 链接对应的那个直播间（design.md 11.9 的降级路径）。
+    final bool resolveFailed = parsed == null && firstHttpUri(input) != null;
 
     if (widget.existingWebRids.contains(identifier)) {
       setState(() {
@@ -82,6 +91,12 @@ class _AddRoomDialogState extends State<AddRoomDialog> {
       return;
     }
 
+    if (resolveFailed) {
+      // 表单马上关闭，SnackBar 交给 App 级 messenger，落在首页上。
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('未能联网解析链接，已按原文添加')),
+      );
+    }
     Navigator.of(context).pop(
       ManagedRoom(
         webRid: identifier,
@@ -135,7 +150,12 @@ class _AddRoomDialogState extends State<AddRoomDialog> {
       ),
       actions: <Widget>[
         TextButton(
-          onPressed: _resolving ? null : () => Navigator.of(context).pop(),
+          // 解析期间也能取消（UX-03）：短链联网可能很慢甚至挂住，用户不该被锁在
+          // 一个只会转圈的表单里，只能杀进程。
+          onPressed: () {
+            _cancelled = true;
+            Navigator.of(context).pop();
+          },
           child: const Text('取消'),
         ),
         FilledButton(

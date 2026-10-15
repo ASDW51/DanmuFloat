@@ -1,4 +1,7 @@
 // 添加主播表单：不限制输入形态是本轮明确的交互要求，用例把它锁住。
+import 'dart:async';
+
+import 'package:danmu_float/net/http_transport.dart';
 import 'package:danmu_float/room/managed_room.dart';
 import 'package:danmu_float/room/room_link_parser.dart';
 import 'package:danmu_float/ui/add_room_dialog.dart';
@@ -112,5 +115,77 @@ void main() {
 
     expect(result, isNull);
     expect(find.text('该主播已在列表中（123456）'), findsOneWidget);
+  });
+
+  testWidgets('解析进行中「取消」仍可点，点了立即关闭表单（UX-03）',
+      (WidgetTester tester) async {
+    ManagedRoom? result;
+    final Completer<HttpResponseData> pending = Completer<HttpResponseData>();
+    await openDialog(
+      tester,
+      onResult: (ManagedRoom? room) => result = room,
+      // 永不返回的传输层：模拟弱网 / DNS 挂起；阈值取短值，测试结束前让超时落地
+      // （否则 flutter_test 会以「A Timer is still pending」判失败）。
+      resolver: RoomLinkResolver(
+        transport: FakeTransport(
+          (Uri uri, Map<String, String> headers) => pending.future,
+        ),
+        resolveTimeout: const Duration(milliseconds: 20),
+      ),
+    );
+
+    await tester.enterText(
+      find.byType(TextField).first,
+      'https://v.douyin.com/iABC123/',
+    );
+    await tester.tap(find.text('添加'));
+    await tester.pump();
+
+    final TextButton cancelButton = tester.widget<TextButton>(
+      find.widgetWithText(TextButton, '取消'),
+    );
+    expect(cancelButton.onPressed, isNotNull, reason: '解析期间取消必须可用');
+
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+
+    expect(result, isNull, reason: '取消不该等联网解析返回');
+    expect(find.byType(AlertDialog), findsNothing);
+
+    // 解析超时后结果才回来：此时表单已 pop，不能再 pop 一次把首页也弹掉。
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('open'), findsOneWidget, reason: '首页不该被二次 pop 弹掉');
+  });
+
+  testWidgets('链接联网解析超时后按原文添加并提示（UX-03）',
+      (WidgetTester tester) async {
+    ManagedRoom? result;
+    final Completer<HttpResponseData> pending = Completer<HttpResponseData>();
+    await openDialog(
+      tester,
+      onResult: (ManagedRoom? room) => result = room,
+      resolver: RoomLinkResolver(
+        transport: FakeTransport(
+          (Uri uri, Map<String, String> headers) => pending.future,
+        ),
+        resolveTimeout: const Duration(milliseconds: 20),
+      ),
+    );
+
+    const String link = 'https://v.douyin.com/iABC123/';
+    await tester.enterText(find.byType(TextField).first, link);
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+
+    expect(result, isNotNull, reason: '解析不出来不拦，按原文保存');
+    expect(result!.webRid, link);
+    expect(
+      find.text('未能联网解析链接，已按原文添加'),
+      findsOneWidget,
+      reason: '粘的是链接却没解析出来，必须明确告知，否则用户以为加的是那个直播间',
+    );
+
+    // 排掉 SnackBar 的自动消失定时器，避免测试结束时残留 pending timer。
+    await tester.pumpAndSettle(const Duration(seconds: 5));
   });
 }
