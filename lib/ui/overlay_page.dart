@@ -1824,13 +1824,17 @@ class _OverlayPaneState extends State<_OverlayPane> {
   }
 
   /// 连接状态的短文本（prd F6：栏目标识需含连接状态）。
+  ///
+  /// 未开播但仍在自动复检时补一句「自动复检中」：挂机看多栏时用户需要知道这一栏是
+  /// 在等开播，而不是已经死掉；复检次数用尽后不再显示该后缀，避免给出假承诺。
   String _stageText(LiveSessionStage stage) => switch (stage) {
     LiveSessionStage.idle => _bound ? '未连接' : '未绑定',
     LiveSessionStage.resolvingRoom => '解析房间…',
     LiveSessionStage.signing => '签名中…',
     LiveSessionStage.connecting => '连接中…',
     LiveSessionStage.live => '已连接',
-    LiveSessionStage.offline => '未开播',
+    LiveSessionStage.offline =>
+      (_session?.autoRechecking ?? false) ? '未开播 · 自动复检中' : '未开播',
     LiveSessionStage.error => '异常',
   };
 

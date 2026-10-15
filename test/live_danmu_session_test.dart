@@ -30,6 +30,25 @@ class FakeRoomInfoClient extends RoomInfoClient {
   }
 }
 
+/// 按调用次序依次返回不同房间信息，用于验证未开播复检（UX-01）：
+/// 第一次返回未开播、第二次返回已开播，模拟主播中途开播。
+class SequenceRoomInfoClient extends RoomInfoClient {
+  SequenceRoomInfoClient(this.results);
+
+  final List<RoomInfo> results;
+  final List<String> calls = <String>[];
+
+  @override
+  Future<RoomInfo> fetchByWebRid(
+    String webRid, {
+    String? credentialCookies,
+  }) async {
+    calls.add(webRid);
+    final int index = calls.length - 1;
+    return results[index < results.length ? index : results.length - 1];
+  }
+}
+
 class FakeCookieProvider extends CookieProvider {
   FakeCookieProvider({this.error});
 
@@ -128,6 +147,18 @@ DanmakuEvent _event(String text) => DanmakuEvent(
 
 Future<void> _tick() => Future<void>.delayed(Duration.zero);
 
+/// 轮询等待条件成立，超时即返回由调用方断言失败。
+///
+/// 复检由真实定时器驱动（测试注入毫秒级间隔），固定 sleep 会 flaky：等不到就让
+/// 断言报错，而不是让测试偶发变红。
+Future<void> _waitFor(bool Function() condition, {int timeoutMs = 2000}) async {
+  final DateTime deadline =
+      DateTime.now().add(Duration(milliseconds: timeoutMs));
+  while (!condition() && DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
 void main() {
   group('LiveDanmuSession', () {
     late FakeRoomInfoClient roomClient;
@@ -136,13 +167,21 @@ void main() {
     late List<Map<String, String>> socketArgs;
     late FakeSocket socket;
 
-    LiveDanmuSession build({String webRid = '12345', String? credentialCookies}) =>
+    LiveDanmuSession build({
+      String webRid = '12345',
+      String? credentialCookies,
+      RoomInfoClient? client,
+      Duration offlineRecheckInterval = defaultOfflineRecheckInterval,
+      int maxOfflineRechecks = defaultMaxOfflineRechecks,
+    }) =>
         LiveDanmuSession(
           webRid: webRid,
-          roomInfoClient: roomClient,
+          roomInfoClient: client ?? roomClient,
           cookieProvider: cookieProvider,
           credentialCookies: credentialCookies,
           signer: signer,
+          offlineRecheckInterval: offlineRecheckInterval,
+          maxOfflineRechecks: maxOfflineRechecks,
           socketFactory: ({
             required String liveId,
             required String userUniqueId,
@@ -183,6 +222,109 @@ void main() {
       expect(session.stage, LiveSessionStage.offline);
       expect(socketArgs, isEmpty, reason: '未开播不得发起弹幕连接');
       expect(cookieProvider.calls, 0, reason: '未开播不必取凭证');
+      await session.stop();
+    });
+
+    test('未开播时按间隔自动复检，开播后自动接上弹幕连接（UX-01）', () async {
+      final SequenceRoomInfoClient client = SequenceRoomInfoClient(<RoomInfo>[
+        const RoomInfo.offline(webRid: '12345', api: RoomInfoApi.web),
+        _livingRoom(),
+      ]);
+      final LiveDanmuSession session = build(
+        client: client,
+        offlineRecheckInterval: const Duration(milliseconds: 5),
+      );
+      final List<LiveSessionStage> stages = <LiveSessionStage>[];
+      session.stages.listen(stages.add);
+
+      await session.start();
+      expect(session.stage, LiveSessionStage.offline);
+      expect(
+        session.autoRechecking,
+        isTrue,
+        reason: '未开播要排定复检，栏位才显示得出「自动复检中」',
+      );
+      expect(socketArgs, isEmpty, reason: '未开播不得发起弹幕连接');
+
+      await _waitFor(() => socketArgs.isNotEmpty);
+      expect(client.calls, hasLength(2), reason: '复检到开播即停止轮询');
+      expect(session.autoRechecking, isFalse, reason: '已开播，不该再有复检定时器');
+
+      socket.emitState(DanmuConnectionState.connected);
+      await _tick();
+      expect(session.stage, LiveSessionStage.live);
+      expect(
+        stages.where(
+          (LiveSessionStage stage) => stage == LiveSessionStage.resolvingRoom,
+        ),
+        hasLength(1),
+        reason: '复检不得重走 start()，否则文案会在「解析房间」与「未开播」之间反复闪',
+      );
+      await session.stop();
+    });
+
+    test('未开播复检次数达上限后停止轮询，栏位停在未开播（UX-01）', () async {
+      final SequenceRoomInfoClient client = SequenceRoomInfoClient(<RoomInfo>[
+        const RoomInfo.offline(webRid: '12345', api: RoomInfoApi.web),
+      ]);
+      final LiveDanmuSession session = build(
+        client: client,
+        offlineRecheckInterval: const Duration(milliseconds: 5),
+        maxOfflineRechecks: 3,
+      );
+
+      await session.start();
+      // 首次解析 1 次 + 复检 3 次。
+      await _waitFor(() => client.calls.length >= 4);
+      expect(client.calls, hasLength(4));
+      expect(session.stage, LiveSessionStage.offline);
+      expect(
+        session.autoRechecking,
+        isFalse,
+        reason: '到顶后不该继续显示「自动复检中」，那是假承诺',
+      );
+
+      // 再等若干个间隔，确认是真的停了（而不是还没触发）。
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(client.calls, hasLength(4), reason: '达上限后必须停止轮询，避免无限请求');
+      await session.stop();
+    });
+
+    test('stop() 取消复检定时器，会话结束后不再请求房间信息（UX-01）', () async {
+      final SequenceRoomInfoClient client = SequenceRoomInfoClient(<RoomInfo>[
+        const RoomInfo.offline(webRid: '12345', api: RoomInfoApi.web),
+      ]);
+      final LiveDanmuSession session = build(
+        client: client,
+        offlineRecheckInterval: const Duration(milliseconds: 5),
+      );
+
+      await session.start();
+      await _waitFor(() => client.calls.length >= 2);
+      await session.stop();
+      final int settled = client.calls.length;
+
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(
+        client.calls,
+        hasLength(settled),
+        reason: 'stop() 必须取消复检定时器，不能在会话结束后继续发请求',
+      );
+    });
+
+    test('start() 重入不会重复建连（UX-01）', () async {
+      final LiveDanmuSession session = build();
+
+      final Future<void> first = session.start();
+      final Future<void> second = session.start();
+      await Future.wait(<Future<void>>[first, second]);
+
+      expect(roomClient.calls, hasLength(1), reason: '重入的 start() 必须直接返回');
+      expect(
+        socketArgs,
+        hasLength(1),
+        reason: '重复建连会覆盖旧 socket 与订阅，造成连接泄漏',
+      );
       await session.stop();
     });
 
