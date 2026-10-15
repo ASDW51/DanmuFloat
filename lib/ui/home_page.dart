@@ -513,6 +513,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         lightTheme: prefs.lightTheme,
         themeId: prefs.themeId,
         colorOverrides: prefs.colorOverrides,
+        contrastPolicy: prefs.contrastPolicy,
         showTitleBar: prefs.showTitleBar,
         focusBehavior: prefs.focusBehavior,
         dragLocked: prefs.dragLocked,

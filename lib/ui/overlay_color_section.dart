@@ -1,8 +1,27 @@
+import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:danmu_float/ui/overlay_theme.dart';
 import 'package:flutter/material.dart';
 
 /// 主题展示名（顺序即 chips 顺序）。
+/// 对比度策略的可选项与展示名（顺序即 UI 顺序）。
+const List<String> overlayContrastPolicyIds = <String>[
+  overlayStyleAdjustPolicy,
+  overlayStyleWarnPolicy,
+  overlayStyleAllowPolicy,
+];
+
+const Map<String, String> overlayContrastPolicyLabels = <String, String>{
+  overlayStyleAdjustPolicy: '自动校正',
+  overlayStyleWarnPolicy: '仅提示',
+  overlayStyleAllowPolicy: '原样显示',
+};
+
+/// 三态的一句话解释。'自动校正'只调明度、不改色相；参照底色是面板底色（maskColor），
+/// 未计入窗口不透明度、也未与直播画面合成，保证的是相对面板底色的可读性。
+const String overlayContrastPolicyHint =
+    '自动校正只调明度、不改色相；参照色是面板底色，未计入窗口不透明度与直播画面。';
+
 const Map<String, String> overlayThemeLabels = <String, String>{
   'dark': '深邃',
   'light': '清爽',
@@ -87,6 +106,8 @@ class OverlayColorSection extends StatelessWidget {
     required this.overrides,
     required this.onThemeChanged,
     required this.onOverrideChanged,
+    required this.contrastPolicy,
+    required this.onContrastPolicyChanged,
   });
 
   /// 当前主题标识（未知值由 [OverlayTheme.preset] 回落深色）。
@@ -100,9 +121,21 @@ class OverlayColorSection extends StatelessWidget {
   /// 角色色变化回调；[argb] 为 null 表示恢复「跟随主题」。
   final void Function(String role, int? argb) onOverrideChanged;
 
+  /// 当前对比度策略（adjust / warn / allow）。
+  final String contrastPolicy;
+
+  /// 切换对比度策略。
+  final ValueChanged<String> onContrastPolicyChanged;
+
   @override
   Widget build(BuildContext context) {
-    final OverlayTheme theme = OverlayTheme.preset(themeId).resolve(overrides);
+    final OverlayTheme base = OverlayTheme.preset(themeId).resolve(overrides);
+    // 显示值必须等于运行时真正渲染的值：adjust 下窗内会先过一遍对比度守卫，
+    // 设置页若照原样显示用户的选色，就会出现「我选的色怎么变了」。除了
+    // enforceTextContrast 这一处，本组件与窗内 _palette 用的是同一套调用。
+    final OverlayTheme theme = contrastPolicy == overlayStyleAdjustPolicy
+        ? base.enforceTextContrast(4.5)
+        : base;
     final Brightness brightness = Theme.of(context).brightness;
     // 默认折叠：11 个角色铺开会把设置页后面几项挤出懒加载窗口（那会让既有用例
     // 找不到「导出数据」这类条目），而且一次列 11 行本身也不好挑。
@@ -116,6 +149,35 @@ class OverlayColorSection extends StatelessWidget {
         summary,
         style: TextStyle(fontSize: 12, color: secondaryTextColor(brightness)),
       ),
+      children: <Widget>[
+        // 三态放在预设 chips 之前：它决定「用户选的颜色要不要被救回来」，是这组
+        // 设置的前置语义。
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              for (final String policy in overlayContrastPolicyIds)
+                ChoiceChip(
+                  key: ValueKey<String>('overlayContrastPolicy_$policy'),
+                  label: Text(overlayContrastPolicyLabels[policy] ?? policy),
+                  selected: policy == contrastPolicy,
+                  onSelected: (_) => onContrastPolicyChanged(policy),
+                ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            overlayContrastPolicyHint,
+            style: TextStyle(
+              fontSize: 12,
+              color: secondaryTextColor(brightness),
+            ),
+          ),
+        ),
       children: <Widget>[
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
