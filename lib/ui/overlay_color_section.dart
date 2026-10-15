@@ -339,7 +339,6 @@ class _OverlayColorPickerDialogState extends State<_OverlayColorPickerDialog> {
             ),
             const SizedBox(height: 12),
           ],
-        children: <Widget>[
           Wrap(
             spacing: 8,
             runSpacing: 8,
