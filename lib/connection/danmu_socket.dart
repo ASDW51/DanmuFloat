@@ -8,11 +8,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:danmu_float/connection/connection_state.dart';
+import 'package:danmu_float/danmu/model/danmaku_event.dart';
+import 'package:danmu_float/danmu/push_frame_pipeline.dart';
 import 'package:web_socket_channel/io.dart';
-
-import '../danmu/model/danmaku_event.dart';
-import '../danmu/push_frame_pipeline.dart';
-import 'connection_state.dart';
 
 /// 弹幕 WS 默认主机（与参考实现一致）。
 const String defaultDanmuHost = 'webcast100-ws-web-hl.douyin.com';

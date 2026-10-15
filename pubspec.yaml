@@ -15,8 +15,6 @@ dependencies:
   flutter_js: ^0.8.5
   # 每直播间一条 WebSocket 连接
   web_socket_channel: ^3.0.1
-  # 房间信息 Web API / ttwid 获取
-  http: ^1.2.2
   # X-MS-STUB 的 md5 计算
   crypto: ^3.0.6
   # 悬浮窗：覆盖在其他 App 之上，前台服务保活（prd F2 / 4.11）
