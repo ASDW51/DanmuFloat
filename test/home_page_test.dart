@@ -182,6 +182,15 @@ void _markOverlayShown() {
   addTearDown(() => setOverlayShownForTest(false));
 }
 
+/// 放大测试视口（PM-002 用）：默认 800×600 下底部菜单里的「移除主播」
+/// （Offset y≈635）落在视口外，tap 打不中。把高度提到 1200 让整个
+/// bottom sheet 与确认对话框都可见可点。用完须恢复，避免影响其他用例。
+Future<void> _withTallViewport(WidgetTester tester) async {
+  tester.view.physicalSize = const Size(800, 1600);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+}
+
 void main() {
   testWidgets('悬浮窗由弹幕页开启（本页没开过）时，首页仍显示关闭入口（PM-001）',
       (WidgetTester tester) async {
@@ -274,6 +283,7 @@ void main() {
     _mockOverlayChannels(tester, active: true);
     _mockMessengerReplies(tester);
     _markOverlayShown();
+    await _withTallViewport(tester);
 
     await _pumpHomeWithDir(tester, dir);
     expect(find.text('主播甲'), findsOneWidget);
@@ -333,6 +343,7 @@ void main() {
     _mockOverlayChannels(tester, active: true);
     _mockMessengerReplies(tester);
     _markOverlayShown();
+    await _withTallViewport(tester);
 
     await _pumpHomeWithDir(tester, dir);
     _overlayCalls.clear();
