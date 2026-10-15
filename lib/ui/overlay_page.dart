@@ -1933,79 +1933,130 @@ class _OverlayPaneState extends State<_OverlayPane> {
       color: palette.chrome,
       fontSize: smallerFontSize(widget.fontSize, 2),
     );
-    // 状态文案必须短（UX-07）：多栏窄窗里长句会把标识行撑出溢出条，而溢出只在
-    // debug 可见。重试入口统一收在悬浮球菜单的「栏位状态」里。
-    final Widget statusLabel = Text(
-      // 已连上且有在线数据时右上是人数；否则退回连接状态，保证能看出当前所处阶段。
-      _online > 0 ? '在线 ${formatOnlineCount(_online)}' : _stageText(_stage),
-      style: labelStyle,
-    );
+    // 已连上且有在线数据时右上是人数，否则退回连接状态。
+    final bool hasOnline = _online > 0;
+    // 状态文案必须短（UX-07），且**允许被省略**（UX-12）：连接状态另有状态点用颜色
+    // 表示。人数相反——它是这一行最该保住的信息，一律给完整数字且绝不裁掉。
+    final Widget labelText = hasOnline
+        ? Text('在线 ${formatOnlineCount(_online)}', style: labelStyle)
+        : Text(
+            _stageText(_stage),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: labelStyle,
+          );
+    // 需要重试时挂 Tooltip 给出完整原因与去处（UX-07 / UX-08）：短词看不出为什么
+    // 失败，长按即可看到，点击重试则去悬浮球菜单。
+    final Widget label = _retryable
+        ? Tooltip(message: _stageTooltip, child: labelText)
+        : labelText;
     final Widget bar = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: _stageColor(_stage),
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 5),
-          Expanded(
-            child: Text(
-              owner.isEmpty
-                  ? (_bound ? widget.webRid : '第 ${widget.index + 1} 栏未绑定')
-                  : owner,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: palette.chrome,
-                fontSize: smallerFontSize(widget.fontSize, 1),
-              ),
-            ),
-          ),
-          // 有候选房间时给出可切换的提示（prd F15）。
-          if (widget.roomOptions.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: 2),
-              child: Icon(Icons.swap_horiz, size: 13, color: palette.secondary),
-            ),
-          // 需要重试时挂 Tooltip 给出完整原因与去处（UX-07 / UX-08）：短词看不出
-          // 为什么失败，长按即可看到，点击重试则去悬浮球菜单。
-          if (_retryable)
-            Tooltip(message: _stageTooltip, child: statusLabel)
-          else
-            statusLabel,
-          // 焦点模式（prd F7）：放大本栏 / 还原；单栏布局下没有其它栏可让位，不显示。
-          if (widget.onToggleFocus != null)
-            InkWell(
-              onTap: widget.onToggleFocus,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Icon(
-                  widget.focused ? Icons.fullscreen_exit : Icons.fullscreen,
-                  size: 14,
-                  color: widget.focused
-                      ? palette.activeColor
-                      : palette.secondary,
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          // 极窄（多栏 + 小窗）时先折叠装饰性图标：换绑在「栏位管理」里、焦点与暂停
+          // 还能双击，都有替代入口；人数没有替代入口——所以让路的必须是图标。
+          final bool narrow = constraints.maxWidth < 120;
+          final bool tiny = constraints.maxWidth < 84;
+          final bool showSwap = widget.roomOptions.isNotEmpty && !narrow;
+          final bool showFocus = widget.onToggleFocus != null && !narrow;
+          final bool showPause = !tiny;
+          // 状态点 + 间隔 + 留给图标的位置 + 一点余量：人数可用宽度必须扣掉它们，
+          // 否则窄窗里刚性的数字会把整行顶出溢出条。
+          final double reserved =
+              8 +
+              5 +
+              (showSwap ? 15 : 0) +
+              (showFocus ? 22 : 0) +
+              (showPause ? 22 : 0) +
+              4;
+          final double labelMax = (constraints.maxWidth - reserved).clamp(
+            0.0,
+            double.infinity,
+          );
+          return Row(
+            children: <Widget>[
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: _stageColor(_stage),
+                  shape: BoxShape.circle,
                 ),
               ),
-            ),
-          // 单栏暂停 / 继续（prd F9）：只影响本栏的自动滚动，不干扰其它栏。
-          InkWell(
-            onTap: _togglePaused,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              child: Icon(
-                _paused ? Icons.play_arrow : Icons.pause,
-                size: 14,
-                color: _paused ? palette.activeColor : palette.secondary,
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  owner.isEmpty
+                      ? (_bound ? widget.webRid : '第 ${widget.index + 1} 栏未绑定')
+                      : owner,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: palette.chrome,
+                    fontSize: smallerFontSize(widget.fontSize, 1),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ],
+              // 有候选房间时给出可切换的提示（prd F15）。
+              if (showSwap)
+                Padding(
+                  padding: const EdgeInsets.only(right: 2),
+                  child: Icon(
+                    Icons.swap_horiz,
+                    size: 13,
+                    color: palette.secondary,
+                  ),
+                ),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: labelMax),
+                // 人数用 FittedBox 兜底：窄到放不下时整体等比缩小，而不是把末尾几位
+                // 裁掉——「人数不可省略」是硬要求（UX-12）。
+                child: hasOnline
+                    ? FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: label,
+                      )
+                    : label,
+              ),
+              // 焦点模式（prd F7）：放大本栏 / 还原；单栏布局下没有其它栏可让位，不显示。
+              if (showFocus)
+                InkWell(
+                  onTap: widget.onToggleFocus,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
+                    ),
+                    child: Icon(
+                      widget.focused ? Icons.fullscreen_exit : Icons.fullscreen,
+                      size: 14,
+                      color: widget.focused
+                          ? palette.activeColor
+                          : palette.secondary,
+                    ),
+                  ),
+                ),
+              // 单栏暂停 / 继续（prd F9）：只影响本栏的自动滚动，不干扰其它栏。
+              if (showPause)
+                InkWell(
+                  onTap: _togglePaused,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
+                    ),
+                    child: Icon(
+                      _paused ? Icons.play_arrow : Icons.pause,
+                      size: 14,
+                      color: _paused ? palette.activeColor : palette.secondary,
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
     if (widget.roomOptions.isEmpty) return bar;

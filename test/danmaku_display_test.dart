@@ -46,11 +46,16 @@ void main() {
     expect(danmakuTypeLabel(DanmakuKind.gift), '礼物');
   });
 
-  test('在线人数过万折算为 x.x万', () {
+  test('在线人数给完整数字，不再折算成万（UX-12）', () {
     expect(formatOnlineCount(0), '0');
     expect(formatOnlineCount(9999), '9999');
-    expect(formatOnlineCount(10000), '1.0万');
-    expect(formatOnlineCount(123456), '12.3万');
+    expect(formatOnlineCount(10000), '10000');
+    expect(formatOnlineCount(123456), '123456');
+    expect(
+      formatOnlineCount(123456),
+      isNot(contains('万')),
+      reason: '人数不可省略：折算后就拿不到准确人数了',
+    );
   });
 
   test('时间戳为毫秒，0 或负数给占位', () {
