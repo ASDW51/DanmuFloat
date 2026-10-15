@@ -134,7 +134,9 @@ class _AddRoomDialogState extends State<AddRoomDialog> {
                 ? TextInputType.number
                 : TextInputType.url,
             inputFormatters: _isDigitsOnly(_inputController.text)
-                ? const <TextInputFormatter>[
+                ? <TextInputFormatter>[
+                    // 不写 const：部分 Flutter 版本的 digitsOnly 不是 const 值，
+                    // 常量列表字面量会编译失败（CI 已验证）。
                     FilteringTextInputFormatter.digitsOnly,
                   ]
                 : null,

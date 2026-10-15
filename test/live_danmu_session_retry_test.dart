@@ -149,7 +149,8 @@ void main() {
   });
 
   test('房间信息获取失败后重试成功', () async {
-    roomClient.error = const RoomInfoException('网络异常');
+    // RoomInfoException 构造函数不是 const，这里只能运行时构造。
+    roomClient.error = RoomInfoException('网络异常');
     final LiveDanmuSession session = build();
     await session.start();
     expect(session.stage, LiveSessionStage.error);
