@@ -467,6 +467,73 @@ void main() {
     );
   });
 
+  testWidgets('主播行的「更多操作」把长按里的三个入口变成可见入口（UX-18）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '111',
+          name: '主播甲',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+        ManagedRoom(
+          webRid: '222',
+          name: '主播乙',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: true);
+    _mockMessengerReplies(tester);
+    _markOverlayShown();
+    await _withTallViewport(tester);
+
+    await _pumpHomeWithDir(tester, dir);
+
+    // 可见入口是「每行一个」：两个主播就该有两个，不能再靠长按去猜。
+    expect(find.byTooltip('更多操作'), findsNWidgets(2));
+
+    // 点可见入口必须打开与长按同一份菜单——分组 / 凭证 / 移除三条都在；
+    // 动画推满 500ms 再断言（同 _pumpHome 的理由，pumpAndSettle 在首页不收敛）。
+    await tester.tap(find.byTooltip('更多操作').first);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('设置分组'), findsOneWidget);
+    expect(find.text('使用凭证'), findsOneWidget);
+    expect(find.text('移除主播'), findsOneWidget);
+  });
+
+  testWidgets('窄屏（360dp）下 trailing 三个按钮不把主播行挤溢出（UX-18）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '111',
+          name: '主播甲',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: true);
+    _mockMessengerReplies(tester);
+    _markOverlayShown();
+    // 多一个「更多」按钮后，360dp 机型是空间最紧的常见情况：刷新 + 连接弹幕 +
+    // 更多之后，标题只剩 ~80dp，必须仍然只有省略号、没有溢出条。
+    tester.view.physicalSize = const Size(360, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await _pumpHomeWithDir(tester, dir);
+
+    expect(tester.takeException(), isNull);
+    expect(find.byTooltip('更多操作'), findsOneWidget);
+  });
+
   testWidgets('移除正在悬浮窗显示的主播时，重排栏位并不再绑定它（PM-002）',
       (WidgetTester tester) async {
     final Directory dir = await _seedRooms(

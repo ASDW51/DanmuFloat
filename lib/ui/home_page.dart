@@ -1227,6 +1227,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             onPressed: () => _connectSingle(room),
             child: const Text('连接弹幕'),
           ),
+          IconButton(
+            // 长按是隐藏操作：新用户看不到分组 / 凭证 /「移除主播」在哪，TalkBack
+            // 用户更不可发现（UX-18）。这里补一个可见入口，打开的仍是同一份
+            // _showRoomActions，长按行为保持不动。
+            tooltip: '更多操作',
+            icon: const Icon(Icons.more_vert),
+            onPressed: () => _showRoomActions(room),
+          ),
         ],
       ),
     );
