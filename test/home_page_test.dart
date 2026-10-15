@@ -759,28 +759,23 @@ void main() {
       reason: '只补刷过期的两栏；阈值内的 736 不该被重复请求',
     );
 
-    // 补刷也要让窗内「栏位状态」的名字跟上，但每批只推一次（不是逐条推）。
-    await _pumpUntil(
-      tester,
-      () => _sentMessages.any(
-        (Object? message) => message is Map && message['type'] == 'rooms',
-      ),
+    // 落盘发生在各条刷新之后，等它真正发生再断言：UI 更新早于 save，抢时序会读到 0。
+    await _pumpUntil(tester, () => store.saves >= 1);
+    expect(
+      store.saves,
+      1,
+      reason: '补刷整批只落盘一次（UX-11）',
     );
+    // 悬浮窗没开时 `_syncOverlayRooms` 直接返回、一条都不推：这里锁的是「不逐条推」，
+    // 所以上限是 1 而不是恰好 1（开窗场景由 UX-04 用例覆盖）。
     expect(
       _sentMessages
           .where(
             (Object? message) => message is Map && message['type'] == 'rooms',
           )
           .length,
-      1,
+      lessThanOrEqualTo(1),
       reason: '每批最多推送一次悬浮窗候选（UX-13）',
-    );
-    // 落盘发生在各条刷新之后、推送之前，所以等推送出现再断言，
-    // 否则读到的是「还没写」（首轮 CI 就是栽在这个时序上）。
-    expect(
-      store.saves,
-      1,
-      reason: '补刷整批只落盘一次（UX-11）',
     );
 
     // 同一节流窗口内再回前台不重复补刷：失败路径不写 lastRefreshedAt，
