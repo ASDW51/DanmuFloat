@@ -135,6 +135,23 @@ Future<void> _pumpHomeWithDir(WidgetTester tester, Directory dir) async {
       credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
     ),
   ));
+  // 首页 initState 里 unawaited(_load()) 的真实文件读也在 FakeAsync 里等待，
+  // pump 推不动它：用 runAsync 排空真实事件循环让读盘完成，再 pump 处理 setState。
+  await tester.runAsync(
+    () => Future<void>.delayed(const Duration(milliseconds: 200)),
+  );
+  await tester.pump(const Duration(seconds: 1));
+  await tester.pump(const Duration(seconds: 2));
+}
+
+/// 等待首页移除流程里 await 的真实文件写入（_store.save）完成。
+///
+/// 与 _pumpHomeWithDir 同理：pump 推不动 FakeAsync 里的真实 I/O，须先经
+/// runAsync 排空事件循环，再 pump 让后续的重排 / 关窗 setState 走完。
+Future<void> _flushFileIo(WidgetTester tester) async {
+  await tester.runAsync(
+    () => Future<void>.delayed(const Duration(milliseconds: 200)),
+  );
   await tester.pump(const Duration(seconds: 1));
   await tester.pump(const Duration(seconds: 2));
 }
@@ -250,8 +267,7 @@ void main() {
     await tester.tap(find.text('移除主播'));
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('移除'));
-    await tester.pump(const Duration(seconds: 1));
-    await tester.pump(const Duration(seconds: 2));
+    await _flushFileIo(tester);
 
     expect(find.text('主播甲'), findsNothing, reason: '主播甲应从列表移除');
 
@@ -302,8 +318,7 @@ void main() {
     await tester.tap(find.text('移除主播'));
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('移除'));
-    await tester.pump(const Duration(seconds: 1));
-    await tester.pump(const Duration(seconds: 2));
+    await _flushFileIo(tester);
 
     // 没有剩余栏位可下发：走关窗，而不是下发空绑定的 config。
     expect(
