@@ -9,7 +9,7 @@
 
 | 项 | 状态 | 位置 |
 | --- | --- | --- |
-| 迭代基线 | 已就位 | `main` @ fa75279（第 5 轮起点；UX-01 ~ UX-16 已交付） |
+| 迭代基线 | 已就位 | `main` @ baa2d60（PR #36 合并点；第 5 轮进行中，UX-17 / UX-18 已交付） |
 | CR-01 代码审查修复 | ✅ 已合入 | PR #11 / PR #12 → `main` |
 | PM-001 | ✅ 已合入 | PR #7 → `main` |
 | PM-002 | ✅ 已合入 | PR #8 → `main` |
@@ -29,13 +29,17 @@
 | UX-14 弹幕页失败原因口径对齐 | ✅ 已合入 | PR #29 → `main` |
 | UX-15 菜单未绑定栏位文案 | ✅ 已合入 | PR #30 → `main` |
 | UX-16 权限 banner 补「去系统设置」 | ✅ 已合入 | PR #31 → `main` |
-| UX-17 弹幕页状态栏溢出 | ⬜ 未开始 | 第 5 轮新增（P1）→ PR1 |
-| UX-18 首页操作只藏长按 | ⬜ 未开始 | 第 5 轮新增（P1）→ PR2 |
+| UX-17 弹幕页状态栏溢出 | ✅ 已合入 | PR #35 → `main` |
+| UX-18 首页操作只藏长按 | ✅ 已合入 | PR #36 → `main` |
 | UX-19 深色模式文字不可见 | ⬜ 未开始 | 第 5 轮新增（P1）→ PR3（排 PR1 后） |
 | UX-20 最小窗宽弹窗溢出 | ⬜ 未开始 | 第 5 轮新增（P2）→ PR4（先于 UX-21） |
 | UX-21 悬浮球/菜单触控过小 | ⬜ 未开始 | 第 5 轮新增（P2）→ PR4 |
 | UX-22 术语不一致 | ⬜ 未开始 | 第 5 轮新增（P2）· 预算外插队 |
 | UX-23 添加无反馈 / 清空无确认 | ⬜ 未开始 | 第 5 轮新增（P2）· 预算外插队 |
+| UX-24 穿透态补关闭窗动作 | ⬜ 未开始 | 第 5 轮补充（P1）→ PR5（PM 建议优先） |
+| UX-25 栏位异常/开播提醒 | ⬜ 未开始 | 第 5 轮补充（P2）→ PR7（先冒烟） |
+| UX-26 查看弹幕时屏幕常亮 | ⬜ 未开始 | 第 5 轮补充（P2）→ PR6（零依赖） |
+| UX-27 网络状态感知 | ⬜ 未开始 | 第 5 轮补充（P2）→ PR8（pub 依赖+权限） |
 
 > 待办清单已按 PM 子代理 2026-10-15 的第一版审查**整版重写**：旧编号 PM-003 ~ PM-006 作废（保留项重新编号为 UX-01 ~ UX-06；其中旧 PM-006 的问题描述与现状不符，已改写为 UX-06）。
 >
@@ -454,3 +458,57 @@ git checkout main && git pull --ff-only
 4. 重做悬浮窗 `OverlayPalette` 配色——深浅皮肤已按画面亮度分别取色且经 UX-12 验证，本轮无新证据。
 5. 给 `DanmuPage` 补整套 widget 测试基建——需三处注入口与 mock，成本远超本轮其余条目；只按 UX-17 抽一个可独测组件。
 6. 弹幕页 AppBar 四个图标收敛成溢出菜单——360dp 下无溢出证据，属审美取舍。
+
+### 第 5 轮补充（放宽口径后的新能力条目 UX-24 ~ UX-27）
+
+**口径**：允许新增 pub 依赖 / Android 权限 / 后台机制 / 原生通道；仍禁止改宿主机环境、改 `.github/workflows/`、动 AGENTS.md 硬边界、删既有入口。每条须写「为什么非它不可 + 替代对比 + 拒绝授权时的降级路径」。
+
+#### UX-24　悬浮窗常驻通知补「关闭悬浮窗」动作（P1 · 原生改动，复用既有通道）
+
+- **现状（已核实）**：开启点击穿透后窗口 flag 含 `FLAG_NOT_TOUCHABLE`（`third_party/flutter_screen_overlay/android/.../OverlayService.java:66-68`），窗内收不到任何触摸；通知里只有「关闭点击穿透」一个动作（`:390-424`）→ 关一个窗要三步。
+- **期望**：`buildOverlayNotification()` 在任何状态下都附「关闭悬浮窗」动作，点击后 `detachOverlayView()` + `stopSelf()` + 撤通知，并经既有下行通道让 Dart 侧收敛状态（先例 `:443-467`）。
+- **权限/降级**：不新增权限与后台机制；通知渠道被关 → 动作消失，窗内悬浮球菜单仍是完整出口。
+- **验收**：Dart 侧沿用注入下行消息的写法，断言关窗 + 聚合状态上报一次；原生动作项人工验收（开穿透 → 通知栏点「关闭悬浮窗」→ 窗口消失、服务停止、主 App 按钮状态纠正）。
+- **PM 评估**：**已核实的确定性缺口、改动最小，建议优先**；若本轮只放 4 个 PR，用它换掉属读代码推断的 UX-20。
+
+#### UX-25　栏位异常 / 开播的本机提醒（P2 · 插件新增自有通道）
+
+- **现状（已核实）**：栏位 `error`（复检预算耗尽）或未开播房间开播时，唯一呈现是**窗内**标识行（`overlay_page.dart:914-951`）；用户离开去干别的就永远看不到。
+- **为什么非它不可**：不能写进通知常驻文案（耗电、打断）；主 App 发通知不可靠（常已被杀，连接跑在插件前台服务引擎里）；`flutter_local_notifications` 要求该引擎有插件注册，而本仓库一律把悬浮窗引擎当无插件环境（`_copy` 走 `showData` 代理、`MissingPluginException` 当已授权），失败模式是**静默不提醒**。→ 在插件服务加 `x-slayer/overlay_notify` 通道（约 40 行 `NotificationManagerCompat`），与既有插件侧改动同一先例。
+- **期望**：新增 `lib/app/overlay_alerts.dart`（`OverlayAlertSink` 抽象 + 纯逻辑合并节流：同栏 10 分钟一条、全局每分钟一条）；事件源为既有栏位状态上报（`error` 且不可重试）与 `offline → live`；设置页开关「栏位异常 / 开播提醒」（默认开）。
+- **权限/降级**：复用已声明的 `POST_NOTIFICATIONS`（三处申请入口已齐，AGENTS §5）；被拒 → 退回窗内 `showOverlayNotice` + 标识行，开关副标题显示「提醒不可用：未授予通知权限」。
+- **验收**：`test/overlay_alerts_test.dart` + 假 sink / 假通道：权限被拒不发系统通知、开关关闭不发、同栏 10 分钟内第二次被节流、`offline → live` 发一条且含主播名、通道抛 `MissingPluginException` 不崩；原生部分人工验收。
+- ⚠️ 动工前先做一次「悬浮窗引擎能否拿到通道」的冒烟验证。
+
+#### UX-26　App 内查看弹幕时保持屏幕常亮（P2 · 零依赖，复用 `danmu_float/system` 通道）
+
+- **现状（已核实）**：弹幕页无任何常亮处理，系统 30 秒~2 分钟熄屏，读长弹幕要反复点屏。
+- **方案**：在既有 `MainActivity.kt` 通道加 `setKeepScreenOn(true/false)`（`window.addFlags/clearFlags`，约 10 行、零依赖、零权限）；不引 `wakelock_plus`——为一句 `FLAG_KEEP_SCREEN_ON` 多一个插件不划算。
+- **范围/可关闭**：只在弹幕页**可见**时置位，`dispose` 与生命周期 `paused` 清除；设置页「显示」分区开关（默认开）。
+- **验收**：`test/keep_screen_on_test.dart` 挂载 `KeepScreenOnScope`（内含 `@visibleForTesting KeepScreenOnBackend`）即可，**不需要挂 `DanmuPage`**：挂载调 true 一次、卸载 / paused 调 false、假后端抛 `MissingPluginException` 不崩、设置关闭时一次都不调。
+
+#### UX-27　网络状态感知：无网络文案 + 暂停复检预算 + 恢复即补刷（P2 · 新增 pub 依赖）
+
+- **现状（读代码推断）**：无网络时只看到底层异常文案，无法区分「自己断网 / 服务端挂了」；且未开播复检在无网期间照常消耗重试预算与流量。
+- **方案**：`connectivity_plus ^7.3.2`（`fluttercommunity.dev`、pub 160/160、Flutter Favorite、近 30 天约 398 万下载；要求 Dart ≥3.2 / Flutter ≥3.7，与仓库兼容）。零依赖替代（把 `SocketException` 归类为疑似断网）改善文案但**拿不到「网络回来了」事件**，故不采用。新增 `ACCESS_NETWORK_STATE`（正常权限、非运行时、无需申请入口）。**悬浮窗引擎不感知**，保持现状。
+- **期望**：新增 `lib/net/network_status.dart`（抽象 `NetworkStatusSource`，真实现包 `connectivity_plus`）；无网时提示「当前无网络，已暂停自动复检」且不消耗复检预算；恢复即补一次复检。
+- **降级**：查询失败 / `PlatformException` → 完全退回现状（照常按时间复检、按原始错误提示），连接功能不受影响。
+- **验收**：`test/network_status_test.dart` 用假源 + 假 transport：无网 → 提示出现且请求次数 0；恢复 → 请求次数 +1 且提示消失；抛 `PlatformException` → 不显示提示、行为如常；正常联网 → 与本轮之前完全一致（防回归）。
+- ⚠️ 动工前先做插件注册冒烟验证。
+
+#### 第 5 轮补充：明确不做
+
+1. 开机自恢复悬浮窗（`RECEIVE_BOOT_COMPLETED`）——Android 12+/15 限制 `BOOT_COMPLETED` 启前台服务，本项目的 `specialUse` 不在允许清单内，大概率抛 `ForegroundServiceStartNotAllowedException`；「主 App 冷启动探测并提示恢复」已覆盖同一需求。
+2. 引入 `wakelock_plus` 做常亮——与复用既有通道相比无额外收益，只多一份依赖负担。
+3. 在悬浮窗引擎里用 `flutter_local_notifications`——能否拿到插件注册要赌，失败模式是静默不提醒。
+4. 屏幕常亮做成全局永久置位——与用户对耗电的预期不符。
+5. 通知栏磁贴（`TileService`）作为悬浮窗开关——零权限但可发现性极差，收益不抵原生成本。
+6. 任何使用数据采集 / 崩溃上报 / 联网统计——与「纯本地、非商业、免登录」定位直接冲突。
+7. 上一版已列并维持不做：收敛全局 `textScaler`、删除首页「连接弹幕」按钮、设置页「恢复默认样式」、重做 `OverlayPalette`、给 `DanmuPage` 补全套测试基建、收敛 AppBar 图标。
+
+#### 更新后的 PR 计划
+
+- **已交付**：PR1 / UX-17（#35）、PR2 / UX-18（#36）。
+- **待办**：PR3 / UX-19（`danmu_text_colors.dart` + 对比度单测）、PR4 / UX-20 + UX-21（overlay 最小窗）、UX-22（术语）、UX-23（添加反馈 / 清空确认）。
+- **新能力（按收益 ÷ 改动面）**：**PR5 / UX-24（P1，建议优先）** → PR6 / UX-26（零依赖）→ PR7 / UX-25（需冒烟）→ PR8 / UX-27（pub 依赖 + 权限）。
+- 若本轮只允许 4 个 PR：用 UX-24 换掉 UX-20。**跨文件串行**：`danmu_page.dart` → PR1 → PR3 → UX-23b；`overlay_page.dart` → PR4 → PR5 → UX-22(overlay)；插件 `OverlayService.java` → PR5 → PR7。
