@@ -37,16 +37,26 @@ class HomePage extends StatefulWidget {
   /// 「清除所有本地数据」完成后回调外层，把入口切回免责声明页（prd F26）。
   final VoidCallback? onResetAll;
 
+  /// 各 store 的目录解析器可注入，便于单测用临时目录隔离、不依赖 path_provider
+  /// 插件通道（默认走应用私有目录）。
+  final Future<Directory> Function()? directoryResolver;
+
+  /// 凭证存储可整体注入（默认用加密落盘后端）；单测传内存后端以避开
+  /// flutter_secure_storage 的原生通道。
+  final CredentialStore? credentialStore;
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
-  final RoomStore _store = RoomStore();
-  final OverlayPrefsStore _prefsStore = OverlayPrefsStore();
+  /// 各 store 用注入的目录解析器构造时可隔离到临时目录（单测用）；
+  /// 默认走应用私有目录。字段在 [initState] 按 [widget.directoryResolver] 初始化。
+  late final RoomStore _store;
+  late final OverlayPrefsStore _prefsStore;
 
   /// 凭证存储：用户配置的多份凭证加密落盘，启动时读回；主播可分别指定使用哪份。
-  late final CredentialStore _credentialStore = CredentialStore();
+  late final CredentialStore _credentialStore;
 
   /// 已配置的凭证列表，用于长按菜单里的「使用凭证」选择与行内展示。
   List<CredentialProfile> _credentials = const <CredentialProfile>[];
@@ -96,6 +106,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // 单测可注入临时目录解析器，把本地存储隔离到临时目录、不依赖 path_provider
+    // 插件通道（见 HomePage.directoryResolver）。默认仍走应用私有目录。
+    final Future<Directory> Function()? resolver = widget.directoryResolver;
+    _store = RoomStore(directoryResolver: resolver);
+    _prefsStore = OverlayPrefsStore(directoryResolver: resolver);
+    _credentialStore = widget.credentialStore ?? CredentialStore();
     WidgetsBinding.instance.addObserver(this);
     _overlaySubscription = overlayStatusStream.listen((OverlayStatus status) {
       if (!mounted) return;

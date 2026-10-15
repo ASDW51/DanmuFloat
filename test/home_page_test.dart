@@ -1,13 +1,14 @@
 // 首页悬浮窗状态收敛（PM-001）：窗口可能由弹幕页开启或进程重启后仍存活，
 // 首页的「关闭悬浮窗」入口必须以窗口真实存在为准，而不是只认本页的开窗动作。
 //
-// 插件通道全部 mock：窗口查询走 mock 应答；悬浮窗上行状态经
-// handlePlatformMessage 注入（等价于插件原生侧发来的 JSON）。
-// 测试不依赖真机，也不真的建窗 / 关窗。
+// 不依赖任何原生通道：本地存储用临时目录解析器注入、凭证用内存后端，插件窗口
+// 查询通道用 mock 应答。悬浮窗上行状态经消息通道 handler 直接驱动首页监听分支。
+import 'dart:async';
 import 'dart:io';
 
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
+import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/ui/home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,47 +19,49 @@ const MethodChannel _overlayControlChannel = MethodChannel(
   'x-slayer/overlay_channel',
 );
 
-/// path_provider 通道名：首页各 store 默认从这里解析应用目录。
-const MethodChannel _pathProviderChannel = MethodChannel(
-  'plugins.flutter.io/path_provider',
-);
-
 /// 插件的上行消息通道名：悬浮窗状态经它送进主 App 引擎。
 const BasicMessageChannel<dynamic> _messengerChannel =
     BasicMessageChannel<dynamic>('x-slayer/overlay_messenger',
         JSONMessageCodec());
 
-/// 把应用支持目录指向临时目录：测试不读写真实应用数据，
-/// 也避免 path_provider 插件通道缺失导致的未捕获异步异常。
-Future<void> _mockAppDirectory(WidgetTester tester) async {
-  final Directory dir = await Directory.systemTemp.createTemp(
-    'danmu_float_home_test',
-  );
-  addTearDown(() => dir.delete(recursive: true));
-  final TestDefaultBinaryMessenger messenger =
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-  messenger.setMockMethodCallHandler(_pathProviderChannel,
-      (MethodCall call) async {
-    if (call.method == 'getApplicationSupportPath') return dir.path;
-    if (call.method == 'getApplicationDocumentsPath') return dir.path;
-    if (call.method == 'getTemporaryPath') return dir.path;
-    throw MissingPluginException('测试未实现: ${call.method}');
-  });
-  addTearDown(
-    () => messenger.setMockMethodCallHandler(_pathProviderChannel, null),
-  );
+/// 内存凭证后端：测试不依赖 flutter_secure_storage 原生通道。
+class _MemoryCredentialBackend implements CredentialBackend {
+  String? _stored;
+
+  @override
+  Future<String?> read() async => _stored;
+
+  @override
+  Future<void> write(String value) async => _stored = value;
+
+  @override
+  Future<void> delete() async => _stored = null;
+}
+
+/// 临时目录解析器：把 RoomStore / OverlayPrefsStore 的落盘指向临时目录，
+/// 不依赖 path_provider 原生通道，也不读写真实应用数据。
+Future<Directory> Function() _tempResolver() {
+  final Directory dir =
+      Directory.systemTemp.createTempSync('danmu_float_home_test');
+  return () async => dir;
 }
 
 /// 向插件的窗口查询通道注入 mock：isActive 按 [active] 应答，权限恒为已授予，
-/// 其余方法一律抛错，保证测试不会真的去建窗 / 关窗。
+/// 其余方法一律返回 false，保证测试不会真的去建窗 / 关窗，也不会因方法名
+/// 不完全匹配而抛错导致异步挂起。
 void _mockOverlayChannels(WidgetTester tester, {required bool active}) {
   final TestDefaultBinaryMessenger messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   messenger.setMockMethodCallHandler(_overlayControlChannel,
       (MethodCall call) async {
-    if (call.method == 'isOverlayActive') return active;
-    if (call.method == 'checkPermission') return true;
-    throw MissingPluginException('测试未实现: ${call.method}');
+    switch (call.method) {
+      case 'isOverlayActive':
+        return active;
+      case 'checkPermission':
+        return true;
+      default:
+        return false;
+    }
   });
   addTearDown(
     () => messenger.setMockMethodCallHandler(_overlayControlChannel, null),
@@ -84,19 +87,21 @@ Future<void> _pushOverlayStatus(
 }
 
 Future<void> _pumpHome(WidgetTester tester) async {
-  await tester.pumpWidget(const MaterialApp(home: HomePage()));
-  // 首页 initState 有一串异步加载（列表 / 偏好 / 凭证 / 权限 / 状态收敛），
-  // 还要等 1s 的状态探测延时常量过去，才能把收敛结果断言出来。
-  await tester.pump();
-  await tester.pump(const Duration(seconds: 2));
+  await tester.pumpWidget(MaterialApp(
+    home: HomePage(
+      directoryResolver: _tempResolver(),
+      credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
+    ),
+  ));
+  // 首页 initState 有一串异步加载（列表 / 偏好 / 凭证 / 权限 / 状态收敛）。
+  // pumpAndSettle 会等到所有 microtask / timer 落下；再加等 1s 的状态探测延时常量。
+  await tester.pumpAndSettle();
   await tester.pump(const Duration(seconds: 2));
 }
 
 void main() {
   testWidgets('悬浮窗由弹幕页开启（本页没开过）时，首页仍显示关闭入口（PM-001）',
       (WidgetTester tester) async {
-    await _mockAppDirectory(tester);
-    // 窗口已被弹幕页打开：isActive 返回真。
     _mockOverlayChannels(tester, active: true);
 
     await _pumpHome(tester);
@@ -110,7 +115,6 @@ void main() {
 
   testWidgets('悬浮窗未开启时，首页不显示关闭入口（PM-001 回归）',
       (WidgetTester tester) async {
-    await _mockAppDirectory(tester);
     _mockOverlayChannels(tester, active: false);
 
     await _pumpHome(tester);
@@ -120,8 +124,6 @@ void main() {
 
   testWidgets('悬浮窗上报活跃栏位绑定后，首页补上已开启状态（PM-001）',
       (WidgetTester tester) async {
-    await _mockAppDirectory(tester);
-    // 初始未检测到窗口（例如前台服务还在恢复中）。
     _mockOverlayChannels(tester, active: false);
 
     await _pumpHome(tester);
@@ -148,7 +150,6 @@ void main() {
 
   testWidgets('权限撤销上报后，首页关闭入口消失并显示降级提示（PM-001 回归）',
       (WidgetTester tester) async {
-    await _mockAppDirectory(tester);
     _mockOverlayChannels(tester, active: true);
 
     await _pumpHome(tester);
