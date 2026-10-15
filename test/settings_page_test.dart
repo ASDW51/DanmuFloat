@@ -329,10 +329,15 @@ void main() {
     // 主题改动要走一次 ThemeStore，才会落到 theme.json。
     expect(resolved, greaterThan(0));
 
-    await tester.tap(_switchInTile('悬浮窗浅色皮肤'));
+    // 浅色皮肤开关已由「悬浮窗配色」的四套预设 chips 取代：lightTheme 现在是派生值
+    // （themeId == 'light'），「清爽」预设等价于原来的开关。
+    final Finder coolChip = find.byKey(const ValueKey<String>('overlayTheme_light'));
+    await tester.ensureVisible(coolChip);
     await tester.pumpAndSettle();
+    await tester.tap(coolChip);
+    await tester.pumpAndSettle();
+    expect(latest.themeId, 'light');
     expect(latest.lightTheme, isTrue);
-    expect(persisted.last, isTrue);
 
     await tester.tap(_switchInTile('显示栏目标识'));
     await tester.pumpAndSettle();
