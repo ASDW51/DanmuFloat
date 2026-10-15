@@ -312,3 +312,112 @@ class _ColorSwatch extends StatelessWidget {
     );
   }
 }
+
+/// 窗内配色入口的选择结果。
+class OverlayColorChoice {
+  const OverlayColorChoice({
+    required this.themeId,
+    required this.resetOverrides,
+  });
+
+  final String themeId;
+
+  /// 是否要求「全部跟随主题」——即清空主 App 里设过的角色级覆盖。
+  final bool resetOverrides;
+}
+
+/// 悬浮窗内的配色入口。
+///
+/// 窗内只给「换一套预设」与「全部跟随主题」：窗口本身是叠在直播画面上的小块区域，
+/// 逐元素取色（11 行 + 取色盘）在这里既放不下也会挡视线，细调留在主 App 设置页。
+///
+/// 抽成公开函数而不是塞进页面私有方法：这样它可以被 widget 测试直接挂载断言，
+/// 不必 mount 整个 `OverlayPage`（后者受「每个测试文件只能 mount 一次」限制）。
+Future<OverlayColorChoice?> showOverlayColorDialog(
+  BuildContext context, {
+  required String themeId,
+  required int overrideCount,
+}) => showDialog<OverlayColorChoice>(
+  context: context,
+  builder: (BuildContext context) => _OverlayColorChoiceDialog(
+    themeId: themeId,
+    overrideCount: overrideCount,
+  ),
+);
+
+class _OverlayColorChoiceDialog extends StatefulWidget {
+  const _OverlayColorChoiceDialog({
+    required this.themeId,
+    required this.overrideCount,
+  });
+
+  final String themeId;
+  final int overrideCount;
+
+  @override
+  State<_OverlayColorChoiceDialog> createState() =>
+      _OverlayColorChoiceDialogState();
+}
+
+class _OverlayColorChoiceDialogState extends State<_OverlayColorChoiceDialog> {
+  late String _themeId = OverlayTheme.preset(widget.themeId).id;
+  late bool _reset = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      // 与 UX-20 的三处弹窗同一口径：窗内尺寸最小可到 200×150，必须放得下且可滚动。
+      insetPadding: const EdgeInsets.all(8),
+      scrollable: true,
+      title: const Text('悬浮窗配色'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              for (final OverlayTheme preset in OverlayTheme.presets)
+                ChoiceChip(
+                  key: ValueKey<String>('overlayColorChoice_${preset.id}'),
+                  label: Text(overlayThemeLabels[preset.id] ?? preset.id),
+                  selected: preset.id == _themeId,
+                  onSelected: (_) => setState(() => _themeId = preset.id),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          CheckboxListTile(
+            key: const ValueKey<String>('overlayColorResetAll'),
+            value: _reset,
+            onChanged: (bool? value) => setState(() => _reset = value ?? false),
+            title: const Text('全部跟随主题', style: TextStyle(fontSize: 14)),
+            subtitle: Text(
+              widget.overrideCount == 0
+                  ? '当前没有自定义颜色'
+                  : '将清除 ${widget.overrideCount} 个自定义颜色',
+              style: const TextStyle(fontSize: 12),
+            ),
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            dense: true,
+          ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          key: const ValueKey<String>('overlayColorConfirm'),
+          onPressed: () => Navigator.of(context).pop(
+            OverlayColorChoice(themeId: _themeId, resetOverrides: _reset),
+          ),
+          child: const Text('确定'),
+        ),
+      ],
+    );
+  }
+}
