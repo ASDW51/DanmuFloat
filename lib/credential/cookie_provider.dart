@@ -3,8 +3,8 @@
 // 依据 design.md 2.2：
 // - 请求 https://live.douyin.com/（桌面版 UA），从响应 set-cookie 提取并拼接为 Cookie 串；
 // - 内存缓存 6 小时；若新响应不含 ttwid 且已有缓存，复用上次缓存。
-import '../net/http_transport.dart';
-import 'credential_store.dart';
+import 'package:danmu_float/credential/credential_store.dart';
+import 'package:danmu_float/net/http_transport.dart';
 
 /// 桌面版 Chrome UA，与参考实现一致。
 const String defaultDesktopUserAgent =

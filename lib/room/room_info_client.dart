@@ -8,10 +8,10 @@
 // 说明：本期仅实现 web 通道；webHTML / mobile / userHTML 与负载均衡按 11.8 后续补齐。
 import 'dart:convert';
 
-import '../credential/cookie_provider.dart';
-import '../net/http_transport.dart';
-import '../sign/abogus.dart';
-import 'room_info.dart';
+import 'package:danmu_float/credential/cookie_provider.dart';
+import 'package:danmu_float/net/http_transport.dart';
+import 'package:danmu_float/room/room_info.dart';
+import 'package:danmu_float/sign/abogus.dart';
 
 /// 组装 webcast/room/web/enter 的查询参数。
 ///
