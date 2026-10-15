@@ -157,7 +157,7 @@ void main() {
     test('皮肤、栏目标识与焦点模式经 JSON 往返后保留，缺省回落默认值', () {
       final OverlayPrefs? parsed = OverlayPrefs.tryParse(
         const OverlayPrefs(
-          lightTheme: true,
+          themeId: 'light',
           showTitleBar: false,
           focusBehavior: focusBehaviorHide,
         ).toJson(),
@@ -322,7 +322,7 @@ void main() {
       final OverlayPrefsStore prefsStore = store();
       await prefsStore.save(
         const OverlayPrefs(
-          lightTheme: true,
+          themeId: 'light',
           showTitleBar: false,
           focusBehavior: focusBehaviorHide,
         ),

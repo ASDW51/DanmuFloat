@@ -15,6 +15,70 @@ import 'package:path_provider/path_provider.dart';
 const String overlayPrefsFileName = 'overlay.json';
 
 /// 悬浮窗样式与分栏偏好。
+/// 默认主题标识：与既有「深色」外观一一对应（第 6 轮 UX-29）。
+const String defaultOverlayThemeId = 'dark';
+
+/// 浅色主题标识：[OverlayPrefs.lightTheme] 由它派生，避免两处真相。
+const String overlayThemeLightId = 'light';
+
+/// 对比度策略默认值：自动提高对比度，但保留用户选择的色相与饱和度。
+const String defaultOverlayContrastPolicy = 'adjust';
+
+/// 最近使用色上限。
+const int maxRecentOverlayColors = 8;
+
+/// 偏好文件的 schema 版本，只写不分支（见 toJson 注释）。
+const int overlayPrefsSchemaVersion = 2;
+
+/// 对比度策略白名单：非法值一律回落默认值。
+String clampOverlayContrastPolicy(Object? raw) =>
+    raw == 'adjust' || raw == 'warn' || raw == 'allow'
+    ? raw! as String
+    : defaultOverlayContrastPolicy;
+
+/// 解析主题标识：没有 themeId 的旧配置由 lightTheme 推导（外观与升级前一致）。
+String _parseThemeId(Map<dynamic, dynamic> raw) {
+  final Object? id = raw['themeId'];
+  if (id is String && id.isNotEmpty) return id;
+  return raw['lightTheme'] == true
+      ? overlayThemeLightId
+      : defaultOverlayThemeId;
+}
+
+/// 解析角色级颜色覆盖：非 int、越界、半透明（alpha ≠ 255）一律**逐键丢弃**，不是
+/// 整表丢弃——这样后续版本增删角色时，旧配置里多出来的键不会让整份配色失效。
+///
+/// 角色名是否认得由渲染侧（OverlayTheme.resolve）把关，存储层不依赖 UI 层。
+Map<String, int> _parseColorOverrides(Object? raw) {
+  if (raw is! Map) return const <String, int>{};
+  final Map<String, int> result = <String, int>{};
+  for (final MapEntry<Object?, Object?> entry in raw.entries) {
+    final Object? key = entry.key;
+    final Object? value = entry.value;
+    if (key is! String || key.isEmpty) continue;
+    if (value is! int) continue;
+    if (value < 0 || value > 0xFFFFFFFF) continue;
+    if (((value >> 24) & 0xFF) != 0xFF) continue;
+    result[key] = value;
+  }
+  return result;
+}
+
+/// 解析最近使用色：只留合法的不透明色，去重、按首次出现顺序、最多 8 个。
+List<int> _parseRecentColors(Object? raw) {
+  if (raw is! List) return const <int>[];
+  final List<int> result = <int>[];
+  for (final Object? item in raw) {
+    if (item is! int) continue;
+    if (item < 0 || item > 0xFFFFFFFF) continue;
+    if (((item >> 24) & 0xFF) != 0xFF) continue;
+    if (result.contains(item)) continue;
+    result.add(item);
+    if (result.length >= maxRecentOverlayColors) break;
+  }
+  return result;
+}
+
 class OverlayPrefs {
   const OverlayPrefs({
     this.webRids = const <String>[],
@@ -24,7 +88,10 @@ class OverlayPrefs {
     this.windowWidth = defaultOverlayWidth,
     this.windowHeight = defaultOverlayHeight,
     this.paneStyles = const <String, PaneStyle>{},
-    this.lightTheme = false,
+    this.themeId = defaultOverlayThemeId,
+    this.colorOverrides = const <String, int>{},
+    this.recentColors = const <int>[],
+    this.contrastPolicy = defaultOverlayContrastPolicy,
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
     this.dragLocked = false,
@@ -56,7 +123,20 @@ class OverlayPrefs {
   final Map<String, PaneStyle> paneStyles;
 
   /// 悬浮窗是否为浅色皮肤（prd F20 样式预设）；false 为默认深色。
-  final bool lightTheme;
+  /// 主题标识（第 6 轮 UX-29）：取值是预设 id，未知值由渲染侧回落深色。
+  final String themeId;
+
+  /// 角色级颜色覆盖：角色名 → 不透明 ARGB；空表表示完全跟随主题。
+  final Map<String, int> colorOverrides;
+
+  /// 最近使用色（最多 [maxRecentOverlayColors] 个）。本轮只落盘，UI 与去重测试推后。
+  final List<int> recentColors;
+
+  /// 对比度策略：adjust / warn / allow，非法值回落 adjust。
+  final String contrastPolicy;
+
+  /// 是否浅色皮肤。**由 [themeId] 派生**，不再单独存储——两处真相会互相打架。
+  bool get lightTheme => themeId == overlayThemeLightId;
 
   /// 是否显示栏目标识行（prd F6）。
   final bool showTitleBar;
@@ -93,7 +173,11 @@ class OverlayPrefs {
     double? windowWidth,
     double? windowHeight,
     Map<String, PaneStyle>? paneStyles,
+    String? themeId,
     bool? lightTheme,
+    Map<String, int>? colorOverrides,
+    List<int>? recentColors,
+    String? contrastPolicy,
     bool? showTitleBar,
     String? focusBehavior,
     bool? dragLocked,
@@ -109,7 +193,13 @@ class OverlayPrefs {
     windowWidth: windowWidth ?? this.windowWidth,
     windowHeight: windowHeight ?? this.windowHeight,
     paneStyles: paneStyles ?? this.paneStyles,
-    lightTheme: lightTheme ?? this.lightTheme,
+    themeId: themeId ??
+        (lightTheme == null
+            ? this.themeId
+            : (lightTheme ? overlayThemeLightId : defaultOverlayThemeId)),
+    colorOverrides: colorOverrides ?? this.colorOverrides,
+    recentColors: recentColors ?? this.recentColors,
+    contrastPolicy: clampOverlayContrastPolicy(contrastPolicy ?? this.contrastPolicy),
     showTitleBar: showTitleBar ?? this.showTitleBar,
     focusBehavior: focusBehavior ?? this.focusBehavior,
     dragLocked: dragLocked ?? this.dragLocked,
@@ -128,7 +218,10 @@ class OverlayPrefs {
     windowWidth: patch.windowWidth ?? windowWidth,
     windowHeight: patch.windowHeight ?? windowHeight,
     paneStyles: paneStyles,
-    lightTheme: lightTheme,
+    themeId: themeId,
+    colorOverrides: colorOverrides,
+    recentColors: recentColors,
+    contrastPolicy: contrastPolicy,
     showTitleBar: showTitleBar,
     focusBehavior: focusBehavior,
     dragLocked: patch.dragLocked ?? dragLocked,
@@ -185,7 +278,15 @@ class OverlayPrefs {
     'opacity': clampOverlayOpacity(opacity),
     'fontSize': clampDanmuFontSize(fontSize),
     'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed),
+    // schemaVersion 只写不分支：字段级「缺则推导」已能兼容前后版本，多一层版本分支
+    // 只会多出不可测路径；写出来是为了让备份文件可读、可人工诊断。
+    'schemaVersion': overlayPrefsSchemaVersion,
+    'themeId': themeId,
+    // 继续写 lightTheme 作为旧版本回滚保险：老代码读它仍能还原深浅。
     'lightTheme': lightTheme,
+    'colorOverrides': colorOverrides,
+    'recentColors': recentColors,
+    'contrastPolicy': clampOverlayContrastPolicy(contrastPolicy),
     'showTitleBar': showTitleBar,
     'focusBehavior': clampFocusBehavior(focusBehavior),
     'dragLocked': dragLocked,
@@ -231,7 +332,10 @@ class OverlayPrefs {
       windowHeight: height is num
           ? clampOverlayHeight(height.toDouble())
           : defaultOverlayHeight,
-      lightTheme: raw['lightTheme'] == true,
+      themeId: _parseThemeId(raw),
+      colorOverrides: _parseColorOverrides(raw['colorOverrides']),
+      recentColors: _parseRecentColors(raw['recentColors']),
+      contrastPolicy: clampOverlayContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
       dragLocked: raw['dragLocked'] == true,
