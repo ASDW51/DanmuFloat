@@ -21,6 +21,13 @@ const MethodChannel _overlayControlChannel = MethodChannel(
   'x-slayer/overlay_channel',
 );
 
+/// 插件的窗口尺寸通道名：resizeOverlay / closeOverlay 走的是它而不是上面的
+/// 控制通道（third_party/flutter_screen_overlay 里是两个独立 MethodChannel）。
+const MethodChannel _overlaySizeChannel = MethodChannel('x-slayer/overlay');
+
+/// 记录尺寸 / 关窗通道上调过的插件方法（PM-002 用：断言走了 resize / close 路径）。
+final List<MethodCall> _sizeCalls = <MethodCall>[];
+
 /// 插件的双向消息通道名：主 App 下发的 config / credential / close 都经它 send 出去。
 const BasicMessageChannel<dynamic> _messengerChannel =
     BasicMessageChannel<dynamic>('x-slayer/overlay_messenger',
@@ -92,6 +99,7 @@ final List<MethodCall> _overlayCalls = <MethodCall>[];
 /// 也不会因方法名不完全匹配而抛错导致异步挂起。
 void _mockOverlayChannels(WidgetTester tester, {required bool active}) {
   _overlayCalls.clear();
+  _sizeCalls.clear();
   final TestDefaultBinaryMessenger messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   messenger.setMockMethodCallHandler(_overlayControlChannel,
@@ -108,6 +116,15 @@ void _mockOverlayChannels(WidgetTester tester, {required bool active}) {
   });
   addTearDown(
     () => messenger.setMockMethodCallHandler(_overlayControlChannel, null),
+  );
+  // resizeOverlay / closeOverlay 走独立尺寸通道：不 mock 会抛 MissingPluginException，
+  // resize 记录不下来（重排断言失败），close 则被 finally 复位掩盖成假绿。
+  messenger.setMockMethodCallHandler(_overlaySizeChannel, (MethodCall call) async {
+    _sizeCalls.add(call);
+    return true;
+  });
+  addTearDown(
+    () => messenger.setMockMethodCallHandler(_overlaySizeChannel, null),
   );
 }
 
@@ -314,12 +331,12 @@ void main() {
 
     // 走了重排（resize）而不是关窗：还剩一栏可显示。
     expect(
-      _overlayCalls.any((MethodCall call) => call.method == 'resizeOverlay'),
+      _sizeCalls.any((MethodCall call) => call.method == 'resizeOverlay'),
       isTrue,
       reason: '移除后应按剩余栏位重排，卸载被删主播那一栏',
     );
     expect(
-      _overlayCalls.any((MethodCall call) => call.method == 'closeOverlay'),
+      _sizeCalls.any((MethodCall call) => call.method == 'closeOverlay'),
       isFalse,
       reason: '还有剩余栏位，不应关窗',
     );
@@ -369,7 +386,7 @@ void main() {
 
     // 没有剩余栏位可下发：走关窗，而不是下发空绑定的 config。
     expect(
-      _overlayCalls.any((MethodCall call) => call.method == 'closeOverlay'),
+      _sizeCalls.any((MethodCall call) => call.method == 'closeOverlay'),
       isTrue,
       reason: '最后一栏被移除后应关窗，避免留下空窗',
     );
