@@ -1091,12 +1091,23 @@ class _OverlayPageState extends State<OverlayPage> {
       await _showNotice('没有可添加的主播', '请先在主 App 的主播管理里添加更多主播。');
       return;
     }
+    // 栏位硬上限（PM-003）：达到上限不再弹选择框，直接提示。
+    if (_webRids.length >= maxOverlayPaneCount) {
+      await _showNotice('已达上限', '最多支持 $maxOverlayPaneCount 栏，无法继续添加。');
+      return;
+    }
+    // 加完这栏会进入高性能模式（prd F4）：与首页同一口径强制确认，无「不再提示」。
+    final int nextCount = _webRids.length + 1;
+    if (nextCount > maxStandardPaneCount) {
+      final bool goOn = await _confirmHighPerformance(nextCount);
+      if (!goOn || !mounted) return;
+    }
     final String? picked = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => _RoomPickerDialog(
         options: candidates,
         current: '',
-        fontSize: paneFontSize(_fontSize, _webRids.length + 1),
+        fontSize: paneFontSize(_fontSize, nextCount),
       ),
     );
     if (picked == null || !mounted) return;
@@ -1105,6 +1116,33 @@ class _OverlayPageState extends State<OverlayPage> {
       _reports.clear();
     });
     _reportState();
+  }
+
+  /// 高性能模式确认（PM-003，prd F4）：栏数越多，同时维持的弹幕连接与绘制负载
+  /// 越高，低端设备可能卡顿发热。与首页多栏弹窗同一文案口径，强制确认且不提供
+  /// 「不再提示」——AGENTS.md 要求高性能模式不允许记忆开关。
+  Future<bool> _confirmHighPerformance(int paneCount) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('高性能模式'),
+        content: Text(
+          '本次要开 $paneCount 栏：栏数越多，同时维持的弹幕连接与绘制负载越高，'
+          '低端设备可能出现卡顿或发热。建议先按栏数调大悬浮窗尺寸，并关闭不必要的栏。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('继续开启'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
   }
 
   /// 悬浮球菜单里的「减少栏位」：移除最后一栏，至少保留一栏。
@@ -2158,6 +2196,34 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
   Future<void> _add() async {
     final List<RoomOption> candidates = _unbound;
     if (candidates.isEmpty) return;
+    // 栏位硬上限（PM-003）：达到上限「添加栏位」按钮本应禁用，这里兜一次
+    // （如候选与绑定不同步的边界情况），不再继续加栏。
+    if (_webRids.length >= maxOverlayPaneCount) return;
+    // 加完这栏会进入高性能模式（prd F4）：与首页同一口径强制确认。
+    final int nextCount = _webRids.length + 1;
+    if (nextCount > maxStandardPaneCount) {
+      final bool? goOn = await showDialog<bool>(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+          title: const Text('高性能模式'),
+          content: Text(
+            '本次要开 $nextCount 栏：栏数越多，同时维持的弹幕连接与绘制负载越高，'
+            '低端设备可能出现卡顿或发热。建议先按栏数调大悬浮窗尺寸，并关闭不必要的栏。',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('继续开启'),
+            ),
+          ],
+        ),
+      );
+      if (goOn != true || !mounted) return;
+    }
     final String? picked = await _pickRoom(candidates: candidates, current: '');
     if (picked == null || !mounted) return;
     setState(() => _webRids.add(picked));
@@ -2238,10 +2304,17 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                onPressed: _unbound.isEmpty ? null : _add,
+                // 栏位硬上限（PM-003）：达到 9 栈禁止再加，提示文案说明原因。
+                onPressed: (_unbound.isEmpty || _webRids.length >= maxOverlayPaneCount)
+                    ? null
+                    : _add,
                 icon: const Icon(Icons.add, size: 18),
                 label: Text(
-                  _unbound.isEmpty ? '已无未添加的主播' : '添加栏位',
+                  _webRids.length >= maxOverlayPaneCount
+                      ? '已达上限（$maxOverlayPaneCount 栏）'
+                      : _unbound.isEmpty
+                          ? '已无未添加的主播'
+                          : '添加栏位',
                   style: TextStyle(fontSize: titleSize),
                 ),
               ),
