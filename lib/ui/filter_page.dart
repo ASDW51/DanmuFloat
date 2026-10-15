@@ -403,10 +403,15 @@ class _RuleListEditorState extends State<_RuleListEditor> {
       ...widget.values,
       raw,
     ]);
+    // 没产生变化时必须说清原因，而且**不能清空输入框**（UX-23）：旧版先
+    // `_controller.clear()` 再静默 `return`，用户看到的是「输入框被清空、列表没变化、
+    // 一句提示都没有」，只会以为「添加」按钮坏了。
+    if (next.length == widget.values.length) {
+      setState(() => _error = raw.trim().isEmpty ? '请输入内容' : '该词已在列表中');
+      return;
+    }
     _controller.clear();
     setState(() => _error = null);
-    // 空输入或重复项不产生变化，跳过回调避免无谓落盘。
-    if (next.length == widget.values.length) return;
     widget.onChanged(next);
   }
 
