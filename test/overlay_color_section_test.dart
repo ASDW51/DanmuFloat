@@ -81,6 +81,10 @@ void main() {
         home: Scaffold(
           body: SingleChildScrollView(
             child: OverlayColorSection(
+              // 本文件断言的是「用户选的色被如实展示与回报」，所以用原样显示；
+              // 自动校正下的显示值由 test/overlay_color_policy_ui_test.dart 覆盖。
+              contrastPolicy: 'allow',
+              onContrastPolicyChanged: (String _) {},
               themeId: themeId,
               overrides: overrides,
               onThemeChanged: onThemeChanged ?? (_) {},

@@ -265,8 +265,14 @@ class _SettingsPageState extends State<SettingsPage> {
           OverlayColorSection(
             themeId: _prefs.themeId,
             overrides: _prefs.colorOverrides,
+            contrastPolicy: _prefs.contrastPolicy,
             onThemeChanged: (String id) =>
                 _apply(_prefs.copyWith(themeId: id), persist: true),
+            onContrastPolicyChanged: (String policy) =>
+                _apply(
+                  _prefs.copyWith(contrastPolicy: policy),
+                  persist: true,
+                ),
             onOverrideChanged: (String role, int? argb) => _apply(
               _prefs.copyWith(
                 colorOverrides: withColorOverride(
