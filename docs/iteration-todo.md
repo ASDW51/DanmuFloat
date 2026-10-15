@@ -776,3 +776,19 @@ git checkout main && git pull --ff-only
 - UX-25 / UX-27 不做：分别需插件原生新通道 / 新 pub 依赖，冒烟必须能构建运行 APK，本环境做不到。
 - UX-26 不做（本轮）：需改 `MainActivity.kt` 原生侧，拿不到门禁，收益低于 ④。
 - 「悬浮窗跟随系统深浅色」不做：需新增下发字段 + 生命周期联动，本环境无法验证真机行为，且与「外观零突变」钉子冲突，属下一轮。
+
+### 第 8 轮 ④ 交付记录
+
+7 类类型弹幕色下沉为 `OverlayTheme` 的 7 个字段（`typeScreenChat` / `typePrivilegeScreenChat` / `typeGift` / `typeMember` / `typeLike` / `typeSocial` / `typeRoomRank`），进 `colorKeys`、**不进** `textColorKeys`；`OverlayPalette.typeColor()` 不再按 `isLight` 猜，改为逐预设读字段。PR #72。
+
+取值：`dark`/`light` 与原取值表**逐位相等**（外观零突变）；`contrast` 沿用 dark 值；`sepia` 换 7 个暖色变体（`0xFFFFB74D` `0xFFAED581` `0xFFF48FB1` `0xFF80CBC4` `0xFFE57373` `0xFF90CAF9` `0xFFFFD54F`），对自身 `maskColor` 均 ≥4.5:1。**外观突变仅限护眼主题**——这正是本项的目的：它此前整片继承深色皮肤的亮色，暖暗底上顶着为纯黑底设计的橙/粉前缀。
+
+验收（单测）：dark/light 逐位相等；sepia 整组与 dark 逐位不同、且组内两两不同；sepia 7 值对 `maskColor` ≥4.5:1；`DanmakuKind.values` 中恰好 7 类有专属色、其余返回 `null`；类型色随 `themeId` 变、不随 `colorOverrides` 变；两个角色集口径正确。
+
+**待 PM 裁决的口径冲突**：裁决里散文写「`contrast` 可直接沿用现有 dark 值（同为纯黑底，天然达标）」，同一项验收断言写「`contrast`/`sepia` 的 7 值与 dark **逐位不同**」——两者不能同时成立。本轮**按散文执行**（`contrast` = dark：纯黑底上换更亮的色没有收益），测试只断言 `sepia` 与 dark 整组不同。若 PM 要求 `contrast` 也必须不同，需为它单独设计 7 个高对比变体，作为独立 PR。
+
+**新增踩坑（第 8 轮）**
+
+- **幂等守卫不能按「整个文件」判断**：我用「文件里是否已出现 `typeScreenChat'`」来跳过已插入的站点，结果 `toPalette()` 的块级插入被整段跳过，analyze 报缺 7 个必填参数。守卫必须**按块切片**判断。
+- **警告同样拦门禁**：AGENTS 要求 `flutter analyze` 输出 `No issues found`，`unused_local_variable` 一样让 CI 失败。这次它恰好暴露了真 bug——我生成的测试把 7 类都拿去和 `Colors.orangeAccent` 比，参照色表因此闲置，断言等于只覆盖 1 个色。
+- **CI 反馈要一次读全**：我只 grep `error •`，漏掉了 `warning •`，白白多推了一轮。
