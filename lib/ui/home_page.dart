@@ -32,12 +32,28 @@ import 'package:flutter/material.dart';
 /// 的中间态；延后再查一次，把偶发的中间态避过去，避免漏掉关闭入口。
 const Duration _overlayAliveProbeDelay = Duration(seconds: 1);
 
+/// 「最近刷新」的相对时间文案；[refreshedAt] 为 epoch 毫秒，null / 非正数返回空串。
+///
+/// [now] 由调用方注入，便于单测固定在某个时间点。只做到「天」这一档：再久远对
+/// 「这份数据是不是过期了」的判断已没有区别（UX-04）。
+String formatRefreshedAgo(int? refreshedAt, {required DateTime now}) {
+  if (refreshedAt == null || refreshedAt <= 0) return '';
+  final int seconds =
+      (now.millisecondsSinceEpoch - refreshedAt) ~/ 1000;
+  // 时钟回拨（seconds 为负）时按「刚刚」处理，不显示「-3 分钟前」这种文案。
+  if (seconds < 60) return '刚刚';
+  if (seconds < 3600) return '${seconds ~/ 60} 分钟前';
+  if (seconds < 86400) return '${seconds ~/ 3600} 小时前';
+  return '${seconds ~/ 86400} 天前';
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({
     super.key,
     this.onResetAll,
     this.directoryResolver,
     this.credentialStore,
+    this.roomInfoClient,
   });
 
   /// 「清除所有本地数据」完成后回调外层，把入口切回免责声明页（prd F26）。
@@ -50,6 +66,9 @@ class HomePage extends StatefulWidget {
   /// 凭证存储可整体注入（默认用加密落盘后端）；单测传内存后端以避开
   /// flutter_secure_storage 的原生通道。
   final CredentialStore? credentialStore;
+
+  /// 房间信息客户端可注入（默认走真实接口）；单测传假实现以隔离网络。
+  final RoomInfoClient? roomInfoClient;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -73,13 +92,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   );
 
   /// 刷新房间信息用的客户端：复用同一个实例以共享 ttwid 缓存与连接池。
-  final RoomInfoClient _roomInfoClient = RoomInfoClient();
+  late final RoomInfoClient _roomInfoClient =
+      widget.roomInfoClient ?? RoomInfoClient();
 
   List<ManagedRoom> _rooms = const <ManagedRoom>[];
   bool _loading = true;
 
   /// 正在刷新房间信息的直播间号（行内按钮转圈用）。
   final Set<String> _refreshing = <String>{};
+
+  /// 是否正在「刷新全部」；以及它的进度（已完成 / 总数），用于列表上方的进度条。
+  ///
+  /// 批量刷新可能要跑十几秒，没有进度用户会以为卡死并反复点按钮（UX-04）。
+  bool _refreshAllRunning = false;
+  int _refreshAllDone = 0;
+  int _refreshAllTotal = 0;
 
   /// 悬浮窗样式与分栏偏好（透明度、上次勾选的主播）。
   OverlayPrefs _prefs = const OverlayPrefs();
@@ -599,14 +626,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   // ---------- 单个主播 ----------
 
-  /// 拉取一次房间信息，更新主播名 / 标题 / 开播状态并落盘。
+  /// 拉取一次房间信息，更新主播名 / 标题 / 开播状态并落盘，并给出行内提示。
   Future<void> _refreshRoom(String webRid) async {
-    final ManagedRoom? current = _roomOf(webRid);
-    if (current == null || _refreshing.contains(webRid)) return;
+    if (_roomOf(webRid) == null || _refreshing.contains(webRid)) return;
     setState(() => _refreshing.add(webRid));
 
+    final String? error = await _refreshRoomQuiet(webRid);
+    if (!mounted) return;
+    setState(() => _refreshing.remove(webRid));
+
+    if (error != null) {
+      _snack('刷新失败：$error');
+      return;
+    }
+    _syncOverlayRooms();
+    final ManagedRoom? target = _roomOf(webRid);
+    if (target != null) _snack('已刷新 ${target.displayName}');
+  }
+
+  /// 刷新单个主播的静默版本：成功返回 null，失败返回可读原因。
+  ///
+  /// 与 [_refreshRoom] 的区别是不弹提示、不推送悬浮窗候选：批量刷新时由调用方
+  /// 统一收尾，否则刷 8 个主播会弹 8 个 SnackBar、发 8 次配置（UX-04）。
+  Future<String?> _refreshRoomQuiet(String webRid) async {
+    final ManagedRoom? current = _roomOf(webRid);
+    if (current == null) return '主播已不在列表中';
+
     ManagedRoom? updated;
-    String? error;
     try {
       final RoomInfo info = await _roomInfoClient.fetchByWebRid(
         webRid,
@@ -618,26 +664,69 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         owner: info.owner.isNotEmpty ? info.owner : null,
         title: info.title.isNotEmpty ? info.title : null,
         living: info.living,
+        // 只有成功这一条路径写时间：失败还标「刚刚刷新过」等于骗用户（UX-04）。
+        lastRefreshedAt: _nowMillis(),
       );
     } on Object catch (exception) {
-      error = '$exception';
+      return '$exception';
     }
-    if (!mounted) return;
-    setState(() => _refreshing.remove(webRid));
+    if (!mounted) return '页面已关闭';
 
-    if (updated == null) {
-      _snack('刷新失败：$error');
-      return;
-    }
     final ManagedRoom target = updated;
     final List<ManagedRoom> next = _rooms
         .map((ManagedRoom item) => item.webRid == webRid ? target : item)
         .toList(growable: false);
     setState(() => _rooms = next);
     await _store.save(next);
-    _syncOverlayRooms();
-    if (mounted) _snack('已刷新 ${target.displayName}');
+    return null;
   }
+
+  /// 串行刷新列表里全部主播（UX-04）。
+  ///
+  /// 刻意串行而不是并发：房间接口对同 IP 的并发请求不友好，一次打太多容易整批失败；
+  /// 串行还能让进度条逐行往前走，用户看得见进展。
+  Future<void> _refreshAll() async {
+    if (_refreshAllRunning) return;
+    final List<String> targets = <String>[
+      for (final ManagedRoom room in _rooms)
+        if (!_refreshing.contains(room.webRid)) room.webRid,
+    ];
+    if (targets.isEmpty) {
+      _snack(_rooms.isEmpty ? '列表为空，没有可刷新的主播' : '所有主播都在刷新中');
+      return;
+    }
+    // 行内正在单独刷新的主播会被跳过：提示里说清楚，否则用户会以为漏刷了。
+    final int skipped = _rooms.length - targets.length;
+
+    setState(() {
+      _refreshAllRunning = true;
+      _refreshAllDone = 0;
+      _refreshAllTotal = targets.length;
+    });
+    int ok = 0;
+    int failed = 0;
+    for (final String webRid in targets) {
+      final String? error = await _refreshRoomQuiet(webRid);
+      if (!mounted) return;
+      if (error == null) {
+        ok++;
+      } else {
+        failed++;
+      }
+      setState(() => _refreshAllDone++);
+    }
+    if (!mounted) return;
+    setState(() => _refreshAllRunning = false);
+    _syncOverlayRooms();
+    String summary = failed == 0
+        ? '已刷新全部 $ok 个主播'
+        : '刷新完成：成功 $ok 个，失败 $failed 个';
+    if (skipped > 0) summary = '$summary（$skipped 个正在刷新中，已跳过）';
+    _snack(summary);
+  }
+
+  /// 当前时间（epoch 毫秒）；与 [formatRefreshedAgo] 的口径一致（AGENTS 第 5 节）。
+  int _nowMillis() => DateTime.now().millisecondsSinceEpoch;
 
   ManagedRoom? _roomOf(String webRid) {
     for (final ManagedRoom item in _rooms) {
@@ -787,6 +876,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               onPressed: _closeOverlay,
             ),
           IconButton(
+            tooltip: '刷新全部',
+            icon: _refreshAllRunning
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+            onPressed: _rooms.isEmpty || _refreshAllRunning ? null : _refreshAll,
+          ),
+          IconButton(
             tooltip: '多栏连接',
             icon: const Icon(Icons.grid_view),
             onPressed: _rooms.isEmpty ? null : _openMulti,
@@ -807,11 +907,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         children: <Widget>[
           if (_overlayPermissionDenied && !_overlayVisible)
             _buildPermissionBanner(),
+          if (_refreshAllRunning) _buildRefreshAllProgress(),
           Expanded(child: _buildBody()),
         ],
       ),
     );
   }
+
+  /// 「刷新全部」进行中的进度条：批量刷新可能持续十几秒，没有进度用户会以为卡死。
+  Widget _buildRefreshAllProgress() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            LinearProgressIndicator(
+              value: _refreshAllTotal == 0
+                  ? null
+                  : _refreshAllDone / _refreshAllTotal,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '正在刷新 $_refreshAllDone/$_refreshAllTotal …',
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+      );
 
   /// 悬浮窗权限被拒时的常驻提示（prd 4.10 权限拒绝降级）。
   ///
@@ -921,6 +1042,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final bool refreshing = _refreshing.contains(room.webRid);
     final bool? living = room.living;
     final String? credentialName = _credentialNameOf(room);
+    // 数据新旧直接影响「要不要再刷一次」的判断，行内必须能看出来（UX-04）。
+    final String refreshedAgo = formatRefreshedAgo(
+      room.lastRefreshedAt,
+      now: DateTime.now(),
+    );
     return ListTile(
       onTap: () => _connectSingle(room),
       onLongPress: () => _showRoomActions(room),
@@ -943,6 +1069,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             '${room.webRid} · ${_livingLabel(living)}',
             style: const TextStyle(fontSize: 12),
           ),
+          if (refreshedAgo.isNotEmpty)
+            Text(
+              '已刷新 $refreshedAgo',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
           if (room.title.isNotEmpty)
             Text(
               room.title,

@@ -46,6 +46,39 @@ void main() {
       expect(_room().copyWith(group: '关注').group, '关注');
       expect(_room().copyWith(group: '关注').copyWith(group: '').group, '');
     });
+
+    test('老版本记录没有 last_refreshed_at 时按「从未刷新」处理', () {
+      expect(
+        ManagedRoom.tryParse(<String, Object?>{'room_id': '1'})!.lastRefreshedAt,
+        isNull,
+      );
+      // 0 / 负数 / 非数字一律当没刷过，免得行内显示成 1970 年。
+      expect(
+        ManagedRoom.tryParse(
+          <String, Object?>{'room_id': '1', 'last_refreshed_at': 0},
+        )!.lastRefreshedAt,
+        isNull,
+      );
+      expect(
+        ManagedRoom.tryParse(
+          <String, Object?>{'room_id': '1', 'last_refreshed_at': 'abc'},
+        )!.lastRefreshedAt,
+        isNull,
+      );
+    });
+
+    test('copyWith 写入刷新时间，未传时保留原值（UX-04）', () {
+      expect(
+        _room().copyWith(lastRefreshedAt: 1700000123000).lastRefreshedAt,
+        1700000123000,
+      );
+      expect(
+        _room(lastRefreshedAt: 1700000123000)
+            .copyWith(name: '老王')
+            .lastRefreshedAt,
+        1700000123000,
+      );
+    });
   });
 
   group('encodeRooms / decodeRooms', () {
@@ -71,6 +104,15 @@ void main() {
       ]));
       expect(decoded.first.group, '比赛');
       expect(decoded.last.group, '');
+    });
+
+    test('刷新时间随房间记录一起落盘，缺失时回落 null（UX-04）', () {
+      final List<ManagedRoom> decoded = decodeRooms(encodeRooms(<ManagedRoom>[
+        _room(lastRefreshedAt: 1700000123000),
+        _room(webRid: '736'),
+      ]));
+      expect(decoded.first.lastRefreshedAt, 1700000123000);
+      expect(decoded.last.lastRefreshedAt, isNull);
     });
 
     test('空内容、非 JSON、结构不符一律按空列表处理', () {
@@ -133,6 +175,7 @@ ManagedRoom _room({
   String title = '',
   String group = '',
   bool? living,
+  int? lastRefreshedAt,
 }) =>
     ManagedRoom(
       webRid: webRid,
@@ -141,5 +184,6 @@ ManagedRoom _room({
       title: title,
       group: group,
       living: living,
+      lastRefreshedAt: lastRefreshedAt,
       addedAt: 1700000000,
     );

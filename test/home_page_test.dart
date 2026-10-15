@@ -9,6 +9,8 @@ import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
 import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/room/managed_room.dart';
+import 'package:danmu_float/room/room_info.dart';
+import 'package:danmu_float/room/room_info_client.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/ui/home_page.dart';
@@ -91,6 +93,33 @@ class _MemoryCredentialBackend implements CredentialBackend {
 
   @override
   Future<void> delete() async => _stored = null;
+}
+
+/// 假房间信息客户端：记录调用顺序，一律返回「直播中」。
+///
+/// 刷新相关用例（UX-04）靠它隔离网络，并断言批量刷新是串行、每个主播只刷一次。
+class _FakeRoomInfoClient extends RoomInfoClient {
+  final List<String> calls = <String>[];
+
+  @override
+  Future<RoomInfo> fetchByWebRid(
+    String webRid, {
+    String? credentialCookies,
+  }) async {
+    calls.add(webRid);
+    return RoomInfo(
+      living: true,
+      isLiveRadio: false,
+      webRid: webRid,
+      liveId: '7$webRid',
+      owner: '主播$webRid',
+      title: '标题$webRid',
+      avatar: '',
+      cover: '',
+      secUid: 'sec',
+      api: RoomInfoApi.web,
+    );
+  }
 }
 
 /// 临时目录解析器：把 RoomStore / OverlayPrefsStore 的落盘指向临时目录，
@@ -216,7 +245,6 @@ void _markOverlayShown() {
   setOverlayShownForTest(true);
   addTearDown(() => setOverlayShownForTest(false));
 }
-
 /// 放大测试视口（PM-002 用）：默认 800×600 下底部菜单里的「移除主播」
 /// （Offset y≈635）落在视口外，tap 打不中。把高度提到 1200 让整个
 /// bottom sheet 与确认对话框都可见可点。用完须恢复，避免影响其他用例。
@@ -458,5 +486,98 @@ void main() {
       findsNothing,
       reason: '窗口已关闭，不该再显示关闭入口',
     );
+  });
+
+  group('formatRefreshedAgo', () {
+    final DateTime now = DateTime.fromMillisecondsSinceEpoch(1700000000000);
+
+    test('未刷新过（null / 非正数）返回空串，行内不显示这一行', () {
+      expect(formatRefreshedAgo(null, now: now), '');
+      expect(formatRefreshedAgo(0, now: now), '');
+      expect(formatRefreshedAgo(-5, now: now), '');
+    });
+
+    test('按分钟 / 小时 / 天分档给出相对时间', () {
+      int ago(Duration duration) =>
+          now.subtract(duration).millisecondsSinceEpoch;
+
+      expect(formatRefreshedAgo(ago(const Duration(seconds: 5)), now: now), '刚刚');
+      expect(
+        formatRefreshedAgo(ago(const Duration(minutes: 3)), now: now),
+        '3 分钟前',
+      );
+      expect(
+        formatRefreshedAgo(ago(const Duration(hours: 5)), now: now),
+        '5 小时前',
+      );
+      expect(formatRefreshedAgo(ago(const Duration(days: 2)), now: now), '2 天前');
+    });
+
+    test('时间戳比当前时间还新（时钟回拨）时按「刚刚」处理，不显示负数', () {
+      expect(
+        formatRefreshedAgo(
+          now.add(const Duration(minutes: 5)).millisecondsSinceEpoch,
+          now: now,
+        ),
+        '刚刚',
+      );
+    });
+  });
+
+  testWidgets('「刷新全部」串行刷新每个主播，并把刷新时间落盘（UX-04）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(webRid: '735', name: '主播甲', addedAt: 1700000000),
+        ManagedRoom(webRid: '736', name: '主播乙', addedAt: 1700000000),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: false);
+    _mockMessengerReplies(tester);
+
+    final _FakeRoomInfoClient client = _FakeRoomInfoClient();
+    await tester.pumpWidget(MaterialApp(
+      home: HomePage(
+        directoryResolver: () async => dir,
+        credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
+        roomInfoClient: client,
+      ),
+    ));
+    await _pumpUntil(tester, () => find.text('主播甲').evaluate().isNotEmpty);
+    // 排掉 initState 里的悬浮窗存活探测延时常量（1s），否则用例结束时它还在等。
+    await tester.pump(const Duration(seconds: 2));
+
+    expect(find.text('已刷新 刚刚'), findsNothing, reason: '还没刷新过，不显示刷新时间');
+
+    await tester.tap(find.byTooltip('刷新全部'));
+    await _pumpUntil(
+      tester,
+      () => find.textContaining('已刷新全部').evaluate().isNotEmpty,
+    );
+
+    expect(client.calls, <String>['735', '736'], reason: '串行按列表顺序各刷一次');
+    expect(find.textContaining('直播中'), findsNWidgets(2));
+    expect(find.text('已刷新 刚刚'), findsNWidgets(2));
+
+    // 刷新时间要落盘：冷启动读回本地列表时行内仍能看出数据新旧。
+    final List<ManagedRoom> saved =
+        await tester.runAsync(
+          () => RoomStore(directoryResolver: () async => dir).load(),
+        ) ??
+        const <ManagedRoom>[];
+    expect(saved.length, 2);
+    expect(
+      saved.every((ManagedRoom room) => (room.lastRefreshedAt ?? 0) > 0),
+      isTrue,
+      reason: '刷新成功的时间必须写进 rooms.json',
+    );
+
+    // 排掉 SnackBar 的自动消失定时器与退场动画，避免用例结束时残留 pending timer。
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(seconds: 1));
   });
 }
