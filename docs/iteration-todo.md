@@ -752,3 +752,27 @@ git checkout main && git pull --ff-only
 ### 下一批候选（待 PM 裁决）
 
 ③ 浅色 `secondary`（当前 `Colors.black54`，≈4.61:1，监控：跌破 4.5 才换 `0xFF49454F`）；④ `typeColor()` 未由 `OverlayTheme` 数据驱动（`contrast`/`sepia` 仍继承 dark 的 7 个类型色）；UX-24（原生 Java 通知「关闭悬浮窗」）；UX-23b（清屏二次确认）；UX-22b 尾项（`filter_page.dart:304`）；UX-25/26/27（`overlay_notify` 提醒 / 保持屏幕常亮 / `connectivity_plus`，各自需先做冒烟验证）。
+
+### 第 8 轮 PM 优先级裁决（本轮执行口径）
+
+**执行顺序：④ → UX-23b → UX-22b（仅术语）。** 三项全为纯 Dart、零依赖/权限/通道——本机无 Flutter 工具链且禁止改宿主机，只有纯 Dart 项能拿到真门禁。
+
+**④ 类型色由 `OverlayTheme` 数据驱动（先做）**
+7 类 `DanmakuKind` 色值下沉为 `OverlayTheme` 的 7 个字段，进 `colorKeys`、**不进** `textColorKeys`；`_palette` 不再按 `isLight` 猜。可见收益：`contrast`/`sepia` 的 `isLight` 都是 `false`，弹幕一律继承 dark 的 7 个亮色——`sepia` 暖暗底（`0xFF1A1713`）上顶着米白正文与刺眼的 `orangeAccent`/`pinkAccent` 前缀，护眼主题在类型弹幕这条路径上是半成品。已复核：`typeColor()` 仅在 `overlay_page.dart:2421` 一处被消费（`markColor`）。
+验收：① dark/light 的 7 值与原 switch **逐位相等**；② contrast/sepia 的 7 值与 dark **逐位不同**，且各自 7 值两两不同；③ 各预设 7 值对其 `maskColor` 均 ≥4.5:1；④ `typeColor()` 对未登记 kind 仍返回 `null`。边界：`colorOverrides` 只含角色名时类型色随 `themeId` 变、不随覆盖变。
+风险：`OverlayPalette` 两个 const 构造与取值表要一起补；外观突变仅限护眼主题（contrast 可直接沿用 dark 值）。
+
+**UX-23b 弹幕页「清空」二次确认**
+`_raw` 是内存态，误触即丢当前会话全部弹幕。
+验收：点「清空」→ 出现确认弹窗且**此时不清空**；「取消」→ 列表/计数不变；「确认」→ 计数归零；已连接时确认不得影响连接状态。
+口径收窄：`_raw` 私有且 `DanmuPage` 无会话注入口，不改代码就无法在单测里构造非空列表——本轮只抽「对话框 → `bool`」的可测确认流程并覆盖上述三条，「清空后列表为空」列为后续项；**不得**为凑测试引入假会话注入（那是独立前置 PR）。
+
+**UX-22b 尾项（仅术语）**
+只做「主播 / 房间 / 直播间号 → 直播间」，保留列表标题「主播管理」。`filter_page.dart:304` 的 `Colors.grey[700]` 对白底 ≈4.6:1 **已达标**，且属 `muted`（禁用/次要）分支，改跟随主题反而削弱选中态与未选中态区分 → **不改，转监控**。
+
+**否决与理由**
+- ③ 不做：4.61:1 达标，改动会破坏「dark/light 与旧 const 逐位相等」钉子，维持监控（跌破 4.5 才换 `0xFF49454F`）。
+- UX-24 不做（降级为手工步骤文档）：需改 `third_party` 的 `OverlayService.java`，而 CI 只跑 Dart；本环境无法冒烟、CI 对原生改动零门禁。
+- UX-25 / UX-27 不做：分别需插件原生新通道 / 新 pub 依赖，冒烟必须能构建运行 APK，本环境做不到。
+- UX-26 不做（本轮）：需改 `MainActivity.kt` 原生侧，拿不到门禁，收益低于 ④。
+- 「悬浮窗跟随系统深浅色」不做：需新增下发字段 + 生命周期联动，本环境无法验证真机行为，且与「外观零突变」钉子冲突，属下一轮。
