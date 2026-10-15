@@ -199,6 +199,7 @@ Future<void> shareOverlayStyle({
   bool lightTheme = false,
   String? themeId,
   Map<String, int> colorOverrides = const <String, int>{},
+  String contrastPolicy = overlayStyleAdjustPolicy,
   bool showTitleBar = true,
   String focusBehavior = defaultFocusBehavior,
   bool dragLocked = false,
@@ -212,6 +213,7 @@ Future<void> shareOverlayStyle({
   await FlutterScreenOverlay.shareData(
     OverlayStyle(
       opacity: opacity,
+      contrastPolicy: contrastPolicy,
       fontSize: fontSize,
       scrollSpeed: scrollSpeed,
       paneStyles: paneStyles,

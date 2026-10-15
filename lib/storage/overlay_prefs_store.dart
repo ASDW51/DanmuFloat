@@ -31,10 +31,10 @@ const int maxRecentOverlayColors = 8;
 const int overlayPrefsSchemaVersion = 2;
 
 /// 对比度策略白名单：非法值一律回落默认值。
+/// 钳制对比度策略；白名单的实现在桥接层（`clampOverlayStyleContrastPolicy`），
+/// 这里只转发，避免同一套取值出现两份判断。
 String clampOverlayContrastPolicy(Object? raw) =>
-    raw == 'adjust' || raw == 'warn' || raw == 'allow'
-    ? raw! as String
-    : defaultOverlayContrastPolicy;
+    clampOverlayStyleContrastPolicy(raw);
 
 /// 解析主题标识：没有 themeId 的旧配置由 lightTheme 推导（外观与升级前一致）。
 String _parseThemeId(Map<dynamic, dynamic> raw) {
