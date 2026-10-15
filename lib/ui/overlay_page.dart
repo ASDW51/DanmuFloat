@@ -42,6 +42,20 @@ String paneStageText(LiveSessionStage stage, {bool autoRechecking = false}) =>
       LiveSessionStage.error => '失败',
     };
 
+/// 悬浮球菜单里一行栏位状态的文案（UX-15）。
+///
+/// 未绑定栏没有会话，写「等待中」会让人以为正在连；空的主播名还会留下
+/// 「第 1 栏 ·  · 等待中」这样的空分隔符。这里与标识行「第 N 栏未绑定」同口径，
+/// 只写「未绑定」。抽成纯函数是为了不依赖 widget 注入口就能覆盖这条渲染规则。
+String paneStatusLabel({
+  required int index,
+  required String webRid,
+  required String name,
+  required String? stage,
+}) => webRid.isEmpty
+    ? '第 ${index + 1} 栏 · 未绑定'
+    : '第 ${index + 1} 栏 · $name · ${stage ?? '等待中'}';
+
 /// 悬浮窗配色（prd F20 样式预设）：深色为默认，浅色用于亮色直播画面。
 ///
 /// 深浅两套在**同一处**收敛，避免把颜色散落在各个 build 里——
@@ -903,14 +917,14 @@ class _OverlayPageState extends State<OverlayPage> {
     int index,
   ) {
     final String webRid = _webRids[index];
-    // 未绑定栏根本没有会话，写「等待中」会让人以为正在连（UX-15）：与标识行同口径
-    // 只写「未绑定」，并且不拼第二个分隔符，避免出现「第 1 栏 ·  · 等待中」。
-    final bool bound = webRid.isNotEmpty;
     final _PaneReport? report = _reports[index];
-    final String label = bound
-        ? '第 ${index + 1} 栏 · ${_roomNameOf(webRid)} · '
-              '${report == null ? '等待中' : paneStageText(report.stage)}'
-        : '第 ${index + 1} 栏 · 未绑定';
+    // 文案规则抽在 paneStatusLabel 里（UX-15）：未绑定栏写「未绑定」，不拼状态。
+    final String label = paneStatusLabel(
+      index: index,
+      webRid: webRid,
+      name: _roomNameOf(webRid),
+      stage: report == null ? null : paneStageText(report.stage),
+    );
     return Row(
       children: <Widget>[
         Expanded(
