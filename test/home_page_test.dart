@@ -21,6 +21,28 @@ const MethodChannel _overlayControlChannel = MethodChannel(
   'x-slayer/overlay_channel',
 );
 
+/// 插件的双向消息通道名：主 App 下发的 config / credential / close 都经它 send 出去。
+const BasicMessageChannel<dynamic> _messengerChannel =
+    BasicMessageChannel<dynamic>('x-slayer/overlay_messenger',
+        JSONMessageCodec());
+
+/// 给消息通道挂一个「立即应答」的 handler（PM-002 用）。
+///
+/// `FlutterScreenOverlay.shareData` 内部是 `BasicMessageChannel.send`，会 await
+/// 原生侧回包；测试里没有真实原生侧，不挂 handler 这个 await 永远不会返回，
+/// 整个移除流程就挂死在 10 分钟超时上。
+void _mockMessengerReplies(WidgetTester tester) {
+  final TestDefaultBinaryMessenger messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  messenger.setMockMessageHandler(
+    _messengerChannel.name,
+    (ByteData? message) async => message,
+  );
+  addTearDown(
+    () => messenger.setMockMessageHandler(_messengerChannel.name, null),
+  );
+}
+
 /// 内存凭证后端：测试不依赖 flutter_secure_storage 原生通道。
 class _MemoryCredentialBackend implements CredentialBackend {
   String? _stored;
@@ -203,6 +225,7 @@ void main() {
       boundWebRids: <String>['111', '222'],
     );
     _mockOverlayChannels(tester, active: true);
+    _mockMessengerReplies(tester);
     _markOverlayShown();
 
     await _pumpHomeWithDir(tester, dir);
@@ -255,6 +278,7 @@ void main() {
       boundWebRids: <String>['111'],
     );
     _mockOverlayChannels(tester, active: true);
+    _mockMessengerReplies(tester);
     _markOverlayShown();
 
     await _pumpHomeWithDir(tester, dir);
