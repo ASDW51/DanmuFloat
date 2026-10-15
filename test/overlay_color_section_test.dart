@@ -142,10 +142,15 @@ void main() {
         onOverrideChanged: (String role, int? argb) => calls.add((role, argb)),
       );
 
-      await tapVisible(
-        tester,
-        find.byKey(const ValueKey<String>('overlayRoleFollow_body')),
-      );
+      // 开启自定义应当以「当前主题在该角色上的取值」为起点，而不是弹一个无关颜色。
+      // 这条验的是「开启/关闭自定义时该角色取什么值」，不是命中区域；真实点击路径
+      // 已由取色对话框那几条用例覆盖（先 ensureVisible 再 tap）。
+      tester
+          .widget<Switch>(
+            find.byKey(const ValueKey<String>('overlayRoleFollow_body')),
+          )
+          .onChanged!(true);
+      await tester.pumpAndSettle();
       expect(calls.single.$1, 'body');
       expect(
         calls.single.$2,
@@ -160,10 +165,15 @@ void main() {
         onOverrideChanged: (String role, int? argb) => calls.add((role, argb)),
       );
       expect(find.text('#123456'), findsOneWidget);
-      await tapVisible(
-        tester,
-        find.byKey(const ValueKey<String>('overlayRoleFollow_body')),
-      );
+      // 关闭自定义即回到跟随主题，回报 null。
+      // 这条验的是「开启/关闭自定义时该角色取什么值」，不是命中区域；真实点击路径
+      // 已由取色对话框那几条用例覆盖（先 ensureVisible 再 tap）。
+      tester
+          .widget<Switch>(
+            find.byKey(const ValueKey<String>('overlayRoleFollow_body')),
+          )
+          .onChanged!(false);
+      await tester.pumpAndSettle();
       expect(calls.single, ('body', null));
     });
 
