@@ -42,6 +42,8 @@ const Map<String, String> overlayColorRoleLabels = <String, String>{
   'border': '窗口边框',
   'maskColor': '窗口底色',
   'activeColor': '生效状态（暂停 / 焦点）',
+  'chromeBg': '悬浮球/胶囊底色',
+  'menuBg': '菜单面板底色',
 };
 
 /// 取色候选。
