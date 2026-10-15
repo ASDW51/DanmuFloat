@@ -49,23 +49,25 @@ void main() {
         'body': nearBlack,
       });
       // 窗内 _palette 在 adjust 下做的就是这一步。
-      final OverlayPalette rendered = base.enforceTextContrast(4.5).toPalette();
+      // 只取 Color：本文件不导入 OverlayPalette 的声明库，避免为一个类型名拉进整个页面。
+      final Color rendered = base.enforceTextContrast(4.5).toPalette().body;
       expect(
-        OverlayTheme.contrastRatio(rendered.body, OverlayTheme.dark.maskColor),
+        OverlayTheme.contrastRatio(rendered, OverlayTheme.dark.maskColor),
         greaterThanOrEqualTo(4.5),
       );
       // 守卫只动 HSV 的 value：色相必须保持，否则「我选的色怎么变样了」。
       expect(
-        HSVColor.fromColor(rendered.body).hue,
+        HSVColor.fromColor(rendered).hue,
         closeTo(HSVColor.fromColor(const Color(nearBlack)).hue, 0.5),
       );
     });
 
     test('warn/allow：不经过守卫，用户选色原样渲染', () {
-      final OverlayPalette rendered = OverlayTheme.dark
+      final Color asIs = OverlayTheme.dark
           .resolve(<String, int>{'body': nearBlack})
-          .toPalette();
-      expect(rendered.body, const Color(nearBlack));
+          .toPalette()
+          .body;
+      expect(asIs, const Color(nearBlack));
     });
 
     test('合规的取值在 adjust 下保持不变（守卫是幂等的）', () {
