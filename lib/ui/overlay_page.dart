@@ -159,6 +159,34 @@ class OverlayApp extends StatelessWidget {
       MaterialApp(debugShowCheckedModeBanner: false, home: const OverlayPage());
 }
 
+/// 插件桥接消息的广播中继。
+///
+/// 插件侧 `overlayListener` 是静态单例的普通 StreamController（非 broadcast），
+/// 只能被 listen 一次（PM-003 攻坚发现：widget 测试里多次挂载页面会抛
+/// `Bad state: Stream has already been listened to`）。与主 App 侧
+/// overlay_launcher 的状态流同一口径：这里只订阅插件一次，再以广播流分发，
+/// 页面可反复订阅 / 重建。
+StreamController<dynamic>? _bridgeController;
+
+/// 仅供测试重置中继状态（widget 测试之间进程不退出，静态单例会跨用例残留）。
+@visibleForTesting
+void resetOverlayBridgeForTest() {
+  _bridgeController?.close();
+  _bridgeController = null;
+}
+
+Stream<dynamic> get overlayBridgeStream =>
+    (_bridgeController ??= _relayBridgeMessages()).stream;
+
+StreamController<dynamic> _relayBridgeMessages() {
+  final StreamController<dynamic> controller =
+      StreamController<dynamic>.broadcast();
+  FlutterScreenOverlay.overlayListener.listen(
+    (dynamic message) => controller.add(message),
+  );
+  return controller;
+}
+
 class OverlayPage extends StatefulWidget {
   const OverlayPage({super.key});
 
@@ -296,9 +324,7 @@ class _OverlayPageState extends State<OverlayPage> {
     super.initState();
     // 插件在主 App 启动时就会预热本引擎，此处尽早注册监听，
     // 避免主 App 下发 config 时消息无人接收。
-    _bridgeSubscription = FlutterScreenOverlay.overlayListener.listen(
-      _onBridgeMessage,
-    );
+    _bridgeSubscription = overlayBridgeStream.listen(_onBridgeMessage);
   }
 
   @override
