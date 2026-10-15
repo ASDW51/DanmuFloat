@@ -20,6 +20,7 @@ import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/ui/danmu_status_bar.dart';
+import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -482,7 +483,10 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
                 event.text,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.black54, fontSize: 13),
+                style: TextStyle(
+                  color: secondaryTextColor(Theme.of(context).brightness),
+                  fontSize: 13,
+                ),
               ),
             ),
             const Divider(height: 1),
@@ -584,7 +588,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   Widget _buildStatusBar(RoomInfo? room) {
     return DanmuStatusBar(
       stageLabel: _stageLabel(_stage),
-      stageColor: _stageColor(_stage),
+      stageColor: _stageColor(context, _stage),
       received: _received,
       online: _online,
       connectionLabel: _session == null
@@ -602,15 +606,10 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 状态色：浅色主题下这几个原色对比度偏低，UX-19 会统一收敛到文字取色表；
-  /// 本轮只搬布局不动视觉，所以先按原样保留映射。
-  Color _stageColor(LiveSessionStage stage) => switch (stage) {
-    LiveSessionStage.live => Colors.green,
-    LiveSessionStage.offline => Colors.orange,
-    LiveSessionStage.error => Colors.red,
-    LiveSessionStage.idle => Colors.grey,
-    _ => Colors.blue,
-  };
+  /// 状态色统一走 [stageTextColor]：旧版直接用 green/orange/grey 原色，浅色主题下
+  /// 对白底只有约 2.2~2.9:1，而状态词是中文文本，不能只靠旁边 10dp 的圆点传达。
+  Color _stageColor(BuildContext context, LiveSessionStage stage) =>
+      stageTextColor(stage, Theme.of(context).brightness);
 
   /// 未开播且仍在自动复检时补一句「自动复检中」：让用户知道会话没死，不用退出重连。
   String _stageLabel(LiveSessionStage stage) => switch (stage) {
@@ -687,9 +686,11 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
         TextSpan(
           style: TextStyle(fontSize: smallerFontSize(_prefs.fontSize, 1)),
           children: <InlineSpan>[
-            const TextSpan(
+            TextSpan(
               text: '欢迎 ',
-              style: TextStyle(color: Colors.black54),
+              style: TextStyle(
+                color: entryBannerWelcomeColor(Theme.of(context).brightness),
+              ),
             ),
             if (user.nickName.isNotEmpty)
               TextSpan(
@@ -745,7 +746,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
               TextSpan(
                 text: '${formatClock(event.timeMs)} ',
                 style: TextStyle(
-                  color: Colors.grey,
+                  color: secondaryTextColor(Theme.of(context).brightness),
                   fontSize: smallerFontSize(_prefs.fontSize, 2),
                 ),
               ),
