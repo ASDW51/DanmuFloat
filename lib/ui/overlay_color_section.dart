@@ -44,6 +44,13 @@ const Map<String, String> overlayColorRoleLabels = <String, String>{
   'activeColor': '生效状态（暂停 / 焦点）',
   'chromeBg': '悬浮球/胶囊底色',
   'menuBg': '菜单面板底色',
+  'typeScreenChat': '类型·普通弹幕',
+  'typePrivilegeScreenChat': '类型·特权弹幕',
+  'typeGift': '类型·礼物',
+  'typeMember': '类型·上舰',
+  'typeLike': '类型·点赞',
+  'typeSocial': '类型·关注分享',
+  'typeRoomRank': '类型·排行榜',
 };
 
 /// 取色候选。

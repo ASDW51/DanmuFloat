@@ -79,6 +79,13 @@ class OverlayPalette {
     required this.activeColor,
     required this.chromeBg,
     required this.menuBg,
+    required this.typeScreenChat,
+    required this.typePrivilegeScreenChat,
+    required this.typeGift,
+    required this.typeMember,
+    required this.typeLike,
+    required this.typeSocial,
+    required this.typeRoomRank,
     required this.highlightStyle,
   });
 
@@ -87,6 +94,15 @@ class OverlayPalette {
 
   /// 菜单面板底色（窗内唯一承载文字的面板）。
   final Color menuBg;
+
+  /// 各类型弹幕的前缀与正文字色，由 [OverlayTheme] 逐预设给出。
+  final Color typeScreenChat;
+  final Color typePrivilegeScreenChat;
+  final Color typeGift;
+  final Color typeMember;
+  final Color typeLike;
+  final Color typeSocial;
+  final Color typeRoomRank;
 
   /// 是否为浅色皮肤。
   final bool isLight;
@@ -137,6 +153,13 @@ class OverlayPalette {
     maskColor: Colors.black,
     chromeBg: Colors.white70,
     menuBg: Color(0xF0FFFFFF),
+    typeScreenChat: Colors.orangeAccent,
+    typePrivilegeScreenChat: Colors.lightGreenAccent,
+    typeGift: Colors.pinkAccent,
+    typeMember: Colors.tealAccent,
+    typeLike: Colors.redAccent,
+    typeSocial: Colors.lightBlueAccent,
+    typeRoomRank: Colors.amberAccent,
     border: Colors.white24,
     userAccent: Colors.lightBlueAccent,
     levelColor: Colors.amber,
@@ -159,6 +182,13 @@ class OverlayPalette {
     maskColor: Colors.white,
     chromeBg: Colors.black54,
     menuBg: Color(0xE6000000),
+    typeScreenChat: Color(0xFFE65100),
+    typePrivilegeScreenChat: Color(0xFF2E7D32),
+    typeGift: Color(0xFFC2185B),
+    typeMember: Color(0xFF00695C),
+    typeLike: Color(0xFFC62828),
+    typeSocial: Color(0xFF1565C0),
+    typeRoomRank: Color(0xFF8D6E00),
     border: Colors.black26,
     userAccent: Color(0xFF1565C0),
     levelColor: Color(0xFF8D6E00),
@@ -176,27 +206,16 @@ class OverlayPalette {
 
   /// 各类型在皮肤上的配色（列表过滤与类型前缀文案见 danmaku_display.dart）：
   /// 普通弹幕正文用 [body]；其余类型前缀与正文同色（prd F13 类型区分）。
-  Color? typeColor(DanmakuKind kind) => isLight
-      ? switch (kind) {
-          DanmakuKind.screenChat => const Color(0xFFE65100),
-          DanmakuKind.privilegeScreenChat => const Color(0xFF2E7D32),
-          DanmakuKind.gift => const Color(0xFFC2185B),
-          DanmakuKind.member => const Color(0xFF00695C),
-          DanmakuKind.like => const Color(0xFFC62828),
-          DanmakuKind.social => const Color(0xFF1565C0),
-          DanmakuKind.roomRank => const Color(0xFF8D6E00),
-          _ => null,
-        }
-      : switch (kind) {
-          DanmakuKind.screenChat => Colors.orangeAccent,
-          DanmakuKind.privilegeScreenChat => Colors.lightGreenAccent,
-          DanmakuKind.gift => Colors.pinkAccent,
-          DanmakuKind.member => Colors.tealAccent,
-          DanmakuKind.like => Colors.redAccent,
-          DanmakuKind.social => Colors.lightBlueAccent,
-          DanmakuKind.roomRank => Colors.amberAccent,
-          _ => null,
-        };
+  Color? typeColor(DanmakuKind kind) => switch (kind) {
+    DanmakuKind.screenChat => typeScreenChat,
+    DanmakuKind.privilegeScreenChat => typePrivilegeScreenChat,
+    DanmakuKind.gift => typeGift,
+    DanmakuKind.member => typeMember,
+    DanmakuKind.like => typeLike,
+    DanmakuKind.social => typeSocial,
+    DanmakuKind.roomRank => typeRoomRank,
+    _ => null,
+  };
 }
 
 /// 悬浮窗入口点对应的 App，由 `overlayMain()` 启动。

@@ -24,6 +24,13 @@ class OverlayTheme {
     required this.maskColor,
     required this.chromeBg,
     required this.menuBg,
+    required this.typeScreenChat,
+    required this.typePrivilegeScreenChat,
+    required this.typeGift,
+    required this.typeMember,
+    required this.typeLike,
+    required this.typeSocial,
+    required this.typeRoomRank,
     required this.border,
     required this.userAccent,
     required this.levelColor,
@@ -81,6 +88,16 @@ class OverlayTheme {
   /// 菜单面板底色：窗内唯一承载文字的面板。
   final Color menuBg;
 
+  /// 各类型弹幕的前缀与正文字色（prd F13 类型区分）。normal 之外的 7 类由主题给出，
+  /// 不再按 isLight 猜——否则护眼/高对比主题会整片继承深色皮肤的亮色。
+  final Color typeScreenChat;
+  final Color typePrivilegeScreenChat;
+  final Color typeGift;
+  final Color typeMember;
+  final Color typeLike;
+  final Color typeSocial;
+  final Color typeRoomRank;
+
   static const List<String> colorKeys = <String>[
     'body',
     'secondary',
@@ -95,6 +112,13 @@ class OverlayTheme {
     'activeColor',
     'chromeBg',
     'menuBg',
+    'typeScreenChat',
+    'typePrivilegeScreenChat',
+    'typeGift',
+    'typeMember',
+    'typeLike',
+    'typeSocial',
+    'typeRoomRank',
   ];
 
   /// 深邃（默认）：逐字段等于原有 `darkPalette`。
@@ -109,6 +133,13 @@ class OverlayTheme {
     maskColor: Colors.black,
     chromeBg: Colors.white70,
     menuBg: Color(0xF0FFFFFF),
+    typeScreenChat: Colors.orangeAccent,
+    typePrivilegeScreenChat: Colors.lightGreenAccent,
+    typeGift: Colors.pinkAccent,
+    typeMember: Colors.tealAccent,
+    typeLike: Colors.redAccent,
+    typeSocial: Colors.lightBlueAccent,
+    typeRoomRank: Colors.amberAccent,
     border: Colors.white24,
     userAccent: Colors.lightBlueAccent,
     levelColor: Colors.amber,
@@ -133,6 +164,13 @@ class OverlayTheme {
     maskColor: Colors.white,
     chromeBg: Colors.black54,
     menuBg: Color(0xE6000000),
+    typeScreenChat: Color(0xFFE65100),
+    typePrivilegeScreenChat: Color(0xFF2E7D32),
+    typeGift: Color(0xFFC2185B),
+    typeMember: Color(0xFF00695C),
+    typeLike: Color(0xFFC62828),
+    typeSocial: Color(0xFF1565C0),
+    typeRoomRank: Color(0xFF8D6E00),
     border: Colors.black26,
     userAccent: Color(0xFF1565C0),
     levelColor: Color(0xFF8D6E00),
@@ -158,6 +196,13 @@ class OverlayTheme {
     maskColor: Colors.black,
     chromeBg: Colors.black,
     menuBg: Colors.black,
+    typeScreenChat: Colors.orangeAccent,
+    typePrivilegeScreenChat: Colors.lightGreenAccent,
+    typeGift: Colors.pinkAccent,
+    typeMember: Colors.tealAccent,
+    typeLike: Colors.redAccent,
+    typeSocial: Colors.lightBlueAccent,
+    typeRoomRank: Colors.amberAccent,
     border: Color(0x8AFFFFFF),
     userAccent: Color(0xFF8FD3FF),
     levelColor: Color(0xFFFFD54F),
@@ -183,6 +228,13 @@ class OverlayTheme {
     maskColor: Color(0xFF1A1713),
     chromeBg: Color(0xE61A1713),
     menuBg: Color(0xFF1A1713),
+    typeScreenChat: Color(0xFFFFB74D),
+    typePrivilegeScreenChat: Color(0xFFAED581),
+    typeGift: Color(0xFFF48FB1),
+    typeMember: Color(0xFF80CBC4),
+    typeLike: Color(0xFFE57373),
+    typeSocial: Color(0xFF90CAF9),
+    typeRoomRank: Color(0xFFFFD54F),
     border: Color(0x40FFE9C4),
     userAccent: Color(0xFFA8C7E8),
     levelColor: Color(0xFFE2C070),
@@ -245,6 +297,13 @@ class OverlayTheme {
     activeColor: colors['activeColor'] ?? activeColor,
     chromeBg: colors['chromeBg'] ?? chromeBg,
     menuBg: colors['menuBg'] ?? menuBg,
+    typeScreenChat: colors['typeScreenChat'] ?? typeScreenChat,
+    typePrivilegeScreenChat: colors['typePrivilegeScreenChat'] ?? typePrivilegeScreenChat,
+    typeGift: colors['typeGift'] ?? typeGift,
+    typeMember: colors['typeMember'] ?? typeMember,
+    typeLike: colors['typeLike'] ?? typeLike,
+    typeSocial: colors['typeSocial'] ?? typeSocial,
+    typeRoomRank: colors['typeRoomRank'] ?? typeRoomRank,
     highlightStyle: highlightStyle,
   );
 
@@ -265,6 +324,13 @@ class OverlayTheme {
     'activeColor' => activeColor,
     'chromeBg' => chromeBg,
     'menuBg' => menuBg,
+    'typeScreenChat' => typeScreenChat,
+    'typePrivilegeScreenChat' => typePrivilegeScreenChat,
+    'typeGift' => typeGift,
+    'typeMember' => typeMember,
+    'typeLike' => typeLike,
+    'typeSocial' => typeSocial,
+    'typeRoomRank' => typeRoomRank,
     _ => body,
   };
 
@@ -284,6 +350,13 @@ class OverlayTheme {
     activeColor: activeColor,
     chromeBg: chromeBg,
     menuBg: menuBg,
+    typeScreenChat: typeScreenChat,
+    typePrivilegeScreenChat: typePrivilegeScreenChat,
+    typeGift: typeGift,
+    typeMember: typeMember,
+    typeLike: typeLike,
+    typeSocial: typeSocial,
+    typeRoomRank: typeRoomRank,
     highlightStyle: highlightStyle,
   );
 
