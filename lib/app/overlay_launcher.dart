@@ -27,6 +27,15 @@ bool _overlayShown = false;
 /// 窗口当前是否已建立（供调用方决定走建窗还是重排）。
 bool get overlayShown => _overlayShown;
 
+/// 测试辅助：直接置位「窗口已建立」这一全局标记（PM-002 测试用）。
+///
+/// 这是跨页面的全局状态，真实取值来自建窗 / 关窗；测试里没有真实窗口，
+/// 只能直接置位来驱动首页的「已建窗」分支（如移除主播后的栏位重排）。
+@visibleForTesting
+void setOverlayShownForTest(bool shown) {
+  _overlayShown = shown;
+}
+
 /// 窗口拖动是否已锁定（锁定后栏内列表才能正常上下滑动）。
 ///
 /// 插件只通过 `resizeOverlay(w, h, enableDrag)` 写这个开关，因此每次改尺寸
