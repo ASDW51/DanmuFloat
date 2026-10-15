@@ -9,7 +9,7 @@
 
 | 项 | 状态 | 位置 |
 | --- | --- | --- |
-| 迭代基线 | 已就位 | `main` @ f355f31（PR #31 合并点，UX-01 ~ UX-16 全部交付） |
+| 迭代基线 | 已就位 | `main` @ fa75279（第 5 轮起点；UX-01 ~ UX-16 已交付） |
 | CR-01 代码审查修复 | ✅ 已合入 | PR #11 / PR #12 → `main` |
 | PM-001 | ✅ 已合入 | PR #7 → `main` |
 | PM-002 | ✅ 已合入 | PR #8 → `main` |
@@ -29,6 +29,13 @@
 | UX-14 弹幕页失败原因口径对齐 | ✅ 已合入 | PR #29 → `main` |
 | UX-15 菜单未绑定栏位文案 | ✅ 已合入 | PR #30 → `main` |
 | UX-16 权限 banner 补「去系统设置」 | ✅ 已合入 | PR #31 → `main` |
+| UX-17 弹幕页状态栏溢出 | ⬜ 未开始 | 第 5 轮新增（P1）→ PR1 |
+| UX-18 首页操作只藏长按 | ⬜ 未开始 | 第 5 轮新增（P1）→ PR2 |
+| UX-19 深色模式文字不可见 | ⬜ 未开始 | 第 5 轮新增（P1）→ PR3（排 PR1 后） |
+| UX-20 最小窗宽弹窗溢出 | ⬜ 未开始 | 第 5 轮新增（P2）→ PR4（先于 UX-21） |
+| UX-21 悬浮球/菜单触控过小 | ⬜ 未开始 | 第 5 轮新增（P2）→ PR4 |
+| UX-22 术语不一致 | ⬜ 未开始 | 第 5 轮新增（P2）· 预算外插队 |
+| UX-23 添加无反馈 / 清空无确认 | ⬜ 未开始 | 第 5 轮新增（P2）· 预算外插队 |
 
 > 待办清单已按 PM 子代理 2026-10-15 的第一版审查**整版重写**：旧编号 PM-003 ~ PM-006 作废（保留项重新编号为 UX-01 ~ UX-06；其中旧 PM-006 的问题描述与现状不符，已改写为 UX-06）。
 >
@@ -370,3 +377,80 @@ git checkout main && git pull --ff-only
 - `lib/ui/overlay_page.dart` 的 UX-05（悬浮窗侧）、UX-12、UX-15 三处同区域，**必须串行合入**（顺序 UX-05 → UX-12 → UX-15）。
 - 断言「落盘 / 推送次数」这类副作用时，要**等它真正发生**再断言（例如等 `rooms` 推送出现）；UI 更新早于 `save`，抢时序会随机读到旧值（PR #21 首轮 CI 两次栽在这里）。
 - 影响按钮可用性的可变状态变更必须走 `setState`：`_autoRefreshing` 最初直接 `add`，行内按钮不变灰（PR #21 CI 抓到）。
+
+---
+
+## 第 5 轮（UI / 交互方向自迭代 · PM 子代理体检）
+
+**总评**：悬浮窗侧经 UX-05/07/08/12/15 打磨已相当稳，短板转移到主 App —— `lib/ui/danmu_page.dart`（841 行、**零 widget 测试覆盖**）与 `lib/ui/home_page.dart` 展示层仍是「裸 `Row` 硬排 + 硬编码 `Colors.grey` / `Colors.black54` + 长按藏功能」。最该先修：弹幕页状态栏在主流机型宽度下必然溢出（默认路径，非极端组合）、深色模式下多处文字几乎不可见（设置页却明确提供深色模式）、首页含**移除主播**的三个操作零可见入口。
+
+**本轮口径**：允许提出需要新增 pub 依赖 / Android 权限 / 后台机制 / 原生通道的方案（须写明「为什么非它不可」+ 替代方案 + 拒绝授权时的降级路径）；仍然禁止改宿主机环境、改 `.github/workflows/`、动摇 AGENTS.md 硬边界、删除既有功能入口。**本报告 7 条均未用到新依赖/权限。**
+
+### UX-17　弹幕页状态栏在常见机型宽度 / 系统大字号下整体溢出（P1 · 新增）
+
+- **现状**：`lib/ui/danmu_page.dart:594-630` 的 `_buildStatusBar` 是**没有任何 `Flexible` / `Wrap` 的裸 `Row`**：状态点(10)+间隔(6)+状态词(`:602`)+可选「重试」(`:605-617`)+间隔(12)+`已收 N`+间隔(12)+`在线 N`(`:620-623`)+间隔(12)+`连接: …`。在线人数自 UX-12 起是完整数字（`danmaku_display.dart:361`），5 位常见。按 14sp 估算无「重试」时 ≈345dp > 360dp 机型的 336dp 内容区；带「重试」≈417dp。`grep textScaler lib/` 为空 → 项目无字号收敛点，系统放大即触发。**证据分级：读代码推断**。
+- **期望**：改为可换行/可让位（外层 `Wrap`，或给 `已收/在线/连接` 加 `Flexible`+ellipsis），**不删信息**；并把该行抽成公开组件 `lib/ui/danmu_status_bar.dart`（参数化 stage/stageLabel/received/online/connectionLabel/retryable/onRetry/errorMessage/overlaySummary），让这行第一次有测试面。
+- **验收**：新增 `test/danmu_status_bar_test.dart`（挂载抽出的组件，**不涉及 OverlayPage 的单订阅流限制**）：① 360dp 定宽 + `retryable: true` 下 `takeException() == null`（**若修复前不报错，说明宽度估算有误 → 本条降级为纯防回归用例**）；② `textScaleFactorTestValue = 2.0` 同断言；③ 信息不丢：`在线`/`已收` 各命中 1，`重试` 按钮存在且高度 ≥40（顺带修 `:613` 的 ~17dp 触控高度）。
+- **依赖**：与 UX-19 同文件 → 串行（PR1 → PR3）。
+
+### UX-18　首页三个操作（含「移除主播」）只藏在长按里（P1 · 新增）
+
+- **现状（已核实）**：`lib/ui/home_page.dart:1165-1167` 的 `ListTile` 只给 `onLongPress: () => _showRoomActions(room)`，`trailing`（`:1208-1231`）只有「刷新」「连接弹幕」，分组/凭证/移除全在 `_showRoomActions`（`:1263-1310`）里，无任何可见提示。
+- **期望**：保留长按，`trailing` 追加可见「更多」按钮（tooltip `更多操作`，触控 ≥40dp），点击打开**同一份** `_showRoomActions`。360dp 空间账：40(leading)+32(padding)+64+100+40(trailing) ≈ 276dp，标题仍有 ~84dp。
+- **验收**：`test/home_page_test.dart` 追加：① 2 个主播 → `find.byTooltip('更多操作')` 命中 2；② 点击后 `设置分组/使用凭证/移除主播` 各命中 1；③ 长按仍打开同一弹窗（保留旧行为）；④ 360×720 下 `takeException() == null`。
+- **依赖**：只改 `home_page.dart`，与其它条目零冲突。
+
+### UX-19　深色模式文字不可见 + 浅色次要文字对比度不足（P1 · 新增）
+
+- **现状（已核实）**：① `danmu_page.dart:731` 进场「欢迎」用 `Colors.black54`，底色是 `surfaceContainerHighest`（`:722`）→ 深色主题下等于看不见；② `danmu_page.dart:484` 弹幕原文同样写死 `Colors.black54`，M3 底部弹窗深色底上同样看不见；③ `danmu_page.dart:787` 时间戳 `Colors.grey` 白底 ≈2.9:1（WCAG AA 需 4.5:1），`filter_page.dart:422`、`home_page.dart:1190/1365`、`onboarding_page.dart:133` 同理；④ `danmu_page.dart:582-588` 状态色用原生 `green/orange/grey`，浅色下 ≈2.6/2.2:1（状态词是文本，不能只靠圆点）。对照：悬浮窗侧已有 `OverlayPalette` 按皮肤取色（`overlay_page.dart:1929-1942`），主 App 无对应收敛点。
+- **期望**：新增 `lib/ui/danmu_text_colors.dart`（`secondaryTextColor` / `stageTextColor` / `entryBannerWelcomeColor`，均按 `Brightness` 取色且 ≥4.5:1），三处硬编码改走它。
+- **验收**：新增 `test/danmu_text_colors_test.dart` 用 `Color.computeLuminance()` 直接算：① light 对白底、dark 对 M3 深色 surface 均 ≥4.5；② `entryBannerWelcomeColor(dark)` 对深色 `surfaceContainerHighest` ≥4.5 且 `!= Colors.black54`；③ 五阶段 × 两 Brightness 全部 ≥4.5；④ 搭配 PR1 组件在 `ThemeData(brightness: dark)` 下断言状态词 `style.color == stageTextColor(..., dark)`。
+- **依赖**：同文件 `danmu_page.dart` → 排在 PR1 之后（PR3）。
+
+### UX-20　悬浮窗最矮（200×150）时窗内弹窗纵向溢出（P2 · 新增）
+
+- **现状**：`overlay_page.dart` 5 处 `showDialog`（`:1284/:1324/:1702/:2087/:2457`）与 `showOverlayNotice`（`:233`）都没有 `insetPadding` / `scrollable`（grep 为空）；窗口高度下限 `minOverlayHeight = 150`（`overlay_bridge.dart:74`），AlertDialog 可用高度 ≈102dp，而「标题+内容+按钮」已 ≈120dp 起。**证据分级：读代码推断**。
+- **期望**：窗内弹窗统一 `insetPadding: EdgeInsets.all(8)` + `scrollable: true`（`showOverlayNotice` 同理）。
+- **验收**：新增 `test/overlay_minwindow_dialog_test.dart`（`OverlayApp` 每文件只能 mount 一次）：① `physicalSize = 200×150`；② 下发 1 栏 config → 悬浮球 → 栏位管理 → `takeException() == null` 且 `取消` 可点；③ `showOverlayNotice` 路径断言 `知道了` 命中。**若修复前已通过 → 降级为「收紧 insetPadding + 防回归用例」**。
+- **依赖**：与 UX-21 同文件，同一 PR 内 UX-20 先于 UX-21。
+
+### UX-21　悬浮球与菜单可点区域过小（P2 · 新增）
+
+- **现状（已核实，均为代码常量）**：① 悬浮球 `overlay_page.dart:706-729` 仅 `SizedBox(24×24)` + 闲置 `Opacity(0.4)`，却是窗内**唯一**菜单入口（尺寸/透明度/加栏/关闭）；② `_menuButton`（`:970-982`）`padding vertical 2` + `minimumSize: Size.zero` + `shrinkWrap` → 行高 ≈17dp，「添加/减少栏位、栏位管理、关闭悬浮窗」全是这个高度；③ 菜单内栏位「重试」（`:939-948`）同款 ≈17dp —— 而 UX-08 的整个承诺就是「菜单是窗内唯一能重连的地方」。
+- **期望**：视觉不变，只放大命中区：球外包 ≥32×32 `GestureDetector(behavior: opaque)`（闲置不透明度 0.4 → 0.55），`_menuButton` 与「重试」竖向 padding ≥6（行高 ≥28dp）；注释写明球扩大命中区会占用角落 32×32 的弹幕手势（那块本来被球压着）。
+- **验收**：新增 `test/overlay_touch_target_test.dart`（独立 mount）：① 球尺寸 ≥32（给球加 `ValueKey('overlayBall')`，或断言承载 `InkWell` 的 `RenderBox` 尺寸）；② 展开菜单后 `添加栏位` 高度 ≥28，且 `减少栏位` 仍在（未删入口）；③ 200×400 下 `takeException() == null`。
+- **依赖**：同一 PR 内排在 UX-20 之后。
+
+### UX-22　同一功能多个名字（P2 · 新增）
+
+- **现状（已核实）**：① 屏蔽名单在设置页 `settings_page.dart:278` 叫「屏蔽**关键词**」、过滤页 `filter_page.dart:67/204` 同，但 `filter_page.dart:219` 写「可与屏蔽**词**同时使用」，弹幕页 `danmu_page.dart:507/527` 与悬浮窗 `overlay_page.dart:1710/1728` 一律「屏蔽**词**」；② 同一对象三种叫法：首页「主播」（`home_page.dart:979/1004`）、添加表单「直播间号 / 抖音号」（`add_room_dialog.dart:124`）、状态文案「房间」（`danmu_page.dart:657`、`overlay_page.dart:2356`）；③ `settings_page.dart:472` 副标题「当前样式与凭证来源摘要」与实际内容（含主题/栏位/开关状态）不符；④ 悬浮窗「栏位 / 栏」混用。
+- **期望**：术语表固定为 `屏蔽词` / `直播间` / `栏位`（列表标题可保留「主播管理」）；`:472` 副标题改为「当前样式、凭证来源与悬浮窗状态摘要」。
+- **验收**：`settings_page_test.dart`（新副标题 + `屏蔽词`）、`filter_page_test.dart`（`屏蔽关键词` 命中 0）、复用 PR1 组件断言「解析直播间…」、`paneStageText` 纯函数扩展「栏位」口径。
+- **依赖**：跨 4 文件；overlay 部分排在 PR4 之后，danmu 部分排在 PR3 之后。
+
+### UX-23　点「添加」没反应；弹幕页「清空」误触即丢（P2 · 新增）
+
+- **现状（已核实）**：① `filter_page.dart:391-411` 的 `_add()` 先 `_controller.clear()`（`:406`）再判重，空输入/已存在则 `if (next.length == widget.values.length) return;`（`:409`）静默返回且 `_error` 被清空 → 用户看到「输入框被清空、列表无变化、无提示」；② `danmu_page.dart:560-567` 的「清空」直接 `_raw.clear(); _received = 0;`，无确认无撤销，且 `_online` / 进场行未复位。
+- **期望**：`_add()` 空输入 → `请输入内容`、重复 → `该词已在列表中`，**失败时不清空输入框**；「清空」前弹确认，确认后同时复位 `_received/_online/_latestEntry`。
+- **验收**：`filter_page_test.dart` 追加（该页可注入内存 store，无需新注入口）：重复词 → `该词已在列表中` 且 controller 文本保留；空输入 → `请输入内容`；合法新词仍可加（回归）。弹幕页清空：需加 `@visibleForTesting RoomInfoClient? roomInfoClient` 注入口（与 `_OverlayPane` 同款，用「返回未开播」的假客户端即可稳定到 `offline`），否则降级为人工验收并排到 P2 末位。
+- **依赖**：过滤页随时可做；弹幕页部分排在 PR3 之后。
+
+### 本轮 PR 拆分与顺序
+
+| PR | 覆盖 | 改动文件 | 测试 | 串行约束 |
+| --- | --- | --- | --- | --- |
+| PR1（P1） | UX-17 | `lib/ui/danmu_status_bar.dart`（新）、`danmu_page.dart` | `test/danmu_status_bar_test.dart`（新） | 无前置 |
+| PR2（P1） | UX-18 | `home_page.dart` | `home_page_test.dart`（追加） | 与其它零冲突，可先合 |
+| PR3（P1） | UX-19 | `lib/ui/danmu_text_colors.dart`（新）、`danmu_page.dart` | `test/danmu_text_colors_test.dart`（新） | **必须排在 PR1 后**（同文件） |
+| PR4（P2） | UX-20 + UX-21 | `overlay_page.dart` | `test/overlay_minwindow_dialog_test.dart`、`test/overlay_touch_target_test.dart`（各自独立 mount） | 同 PR 内 UX-20 → UX-21 |
+
+预算外按序插队：UX-22（overlay 部分排 PR4 后）→ UX-23（过滤页随时，弹幕页排 PR3 后）。**文件串行一句话**：`danmu_page.dart` = PR1 → PR3 → UX-23b；`overlay_page.dart` = PR4 → UX-22(overlay)。
+
+### 明确不做（本轮）
+
+1. 全局收敛 `textScaler`（锁 1.3 倍）——用压掉无障碍大字体换布局稳定，方向错误；改为让关键行可换行/可让位。
+2. 删掉首页行内「连接弹幕」按钮只留整行点击——触碰「不删既有入口」红线，且带文字主按钮更好发现；只在 UX-18 里压缩宽度。
+3. 设置页「恢复默认样式」一键重置——新增功能而非修缺陷，已有「导入数据」作逃生口。
+4. 重做悬浮窗 `OverlayPalette` 配色——深浅皮肤已按画面亮度分别取色且经 UX-12 验证，本轮无新证据。
+5. 给 `DanmuPage` 补整套 widget 测试基建——需三处注入口与 mock，成本远超本轮其余条目；只按 UX-17 抽一个可独测组件。
+6. 弹幕页 AppBar 四个图标收敛成溢出菜单——360dp 下无溢出证据，属审美取舍。
