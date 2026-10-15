@@ -9,7 +9,7 @@
 
 | 项 | 状态 | 位置 |
 | --- | --- | --- |
-| 迭代基线 | 已就位 | `main` @ baa2d60（PR #36 合并点；第 5 轮进行中，UX-17 / UX-18 已交付） |
+| 迭代基线 | 已就位 | `main` @ 1550b2a（PR #42 合并点；第 5 轮缺陷类已交付，余 UX-22b / UX-23b / UX-24 ~ UX-27） |
 | CR-01 代码审查修复 | ✅ 已合入 | PR #11 / PR #12 → `main` |
 | PM-001 | ✅ 已合入 | PR #7 → `main` |
 | PM-002 | ✅ 已合入 | PR #8 → `main` |
@@ -31,11 +31,11 @@
 | UX-16 权限 banner 补「去系统设置」 | ✅ 已合入 | PR #31 → `main` |
 | UX-17 弹幕页状态栏溢出 | ✅ 已合入 | PR #35 → `main` |
 | UX-18 首页操作只藏长按 | ✅ 已合入 | PR #36 → `main` |
-| UX-19 深色模式文字不可见 | ⬜ 未开始 | 第 5 轮新增（P1）→ PR3（排 PR1 后） |
-| UX-20 最小窗宽弹窗溢出 | ⬜ 未开始 | 第 5 轮新增（P2）→ PR4（先于 UX-21） |
-| UX-21 悬浮球/菜单触控过小 | ⬜ 未开始 | 第 5 轮新增（P2）→ PR4 |
-| UX-22 术语不一致 | ⬜ 未开始 | 第 5 轮新增（P2）· 预算外插队 |
-| UX-23 添加无反馈 / 清空无确认 | ⬜ 未开始 | 第 5 轮新增（P2）· 预算外插队 |
+| UX-19 深色模式文字不可见 | ✅ 已合入 | PR #38 → `main` |
+| UX-20 最小窗宽弹窗溢出 | ✅ 已合入 | PR #40 → `main`（属性断言，未复现基线） |
+| UX-21 悬浮球/菜单触控过小 | ✅ 已合入 | PR #39 → `main` |
+| UX-22 术语不一致 | 🟡 部分交付 | a: PR #42（屏蔽词 + 诊断副标题）；b: 待做（直播间 / 栏位） |
+| UX-23 添加无反馈 / 清空无确认 | 🟡 部分交付 | a: PR #41（过滤页）；b: 待做（弹幕页清空确认，需注入口） |
 | UX-24 穿透态补关闭窗动作 | ⬜ 未开始 | 第 5 轮补充（P1）→ PR5（PM 建议优先） |
 | UX-25 栏位异常/开播提醒 | ⬜ 未开始 | 第 5 轮补充（P2）→ PR7（先冒烟） |
 | UX-26 查看弹幕时屏幕常亮 | ⬜ 未开始 | 第 5 轮补充（P2）→ PR6（零依赖） |
@@ -512,3 +512,22 @@ git checkout main && git pull --ff-only
 - **待办**：PR3 / UX-19（`danmu_text_colors.dart` + 对比度单测）、PR4 / UX-20 + UX-21（overlay 最小窗）、UX-22（术语）、UX-23（添加反馈 / 清空确认）。
 - **新能力（按收益 ÷ 改动面）**：**PR5 / UX-24（P1，建议优先）** → PR6 / UX-26（零依赖）→ PR7 / UX-25（需冒烟）→ PR8 / UX-27（pub 依赖 + 权限）。
 - 若本轮只允许 4 个 PR：用 UX-24 换掉 UX-20。**跨文件串行**：`danmu_page.dart` → PR1 → PR3 → UX-23b；`overlay_page.dart` → PR4 → PR5 → UX-22(overlay)；插件 `OverlayService.java` → PR5 → PR7。
+
+### 第 5 轮交付记录（截至 `1550b2a`）
+
+| 条目 | 状态 | 交付说明 |
+| --- | --- | --- |
+| UX-17 状态栏溢出 | ✅ #35 | 抽出 `lib/ui/danmu_status_bar.dart`（状态行改 `Wrap`，状态词加 `Flexible`），`_buildStatusBar` 退化为「翻译会话状态 → 入参」。**CI 额外逮到**：2 倍系统字号下「状态点 + 状态词」这一组自身溢出 47px（外层 Wrap 救不了内层 Row），已一并修掉；对照组用例确认了「裸 Row 确实溢出」，未降级。 |
+| UX-18 首页操作可见入口 | ✅ #36 | `trailing` 追加「更多操作」IconButton，点击走**同一份** `_showRoomActions`，长按保留。 |
+| UX-19 深色模式对比度 | ✅ #38 | 新增 `lib/ui/danmu_text_colors.dart`（`secondaryTextColor` / `entryBannerWelcomeColor` / `stageTextColor`），四处硬编码改走它；单测用 `computeLuminance()` 直算 ≥4.5:1，并断言深色下不等于 `Colors.black54`。**未纳入**：PM 报告里同类 12px `Colors.grey` 还散在 `filter_page` / `home_page` / `onboarding_page`，可在 UX-22b 一并处理。 |
+| UX-21 悬浮球 / 菜单命中区 | ✅ #39 | 球外套 34×34 命中区（球仍 24dp、闲置不透明度 0.4→0.55），菜单按钮与栏位「重试」`minimumSize` 由 `Size.zero` 改为 `Size(0, 28)`。**刻意不做 48dp**：最小窗 200×150 放不下。 |
+| UX-20 最小窗弹窗溢出 | ✅ #40 | 窗内三处 `AlertDialog` 统一 `insetPadding: EdgeInsets.all(8)` + `scrollable: true`；测试用**属性断言**（弹窗对象属性）而非像素位置。**如实标注**：属读代码推断，未复现修复前基线，用例是防回归 + 属性钉死。 |
+| UX-23a 过滤页添加反馈 | ✅ #41 | 重复 / 空输入给出 `errorText`（`该词已在列表中` / `请输入内容`）且**不再清空输入框**，只有成功路径才 `clear()` + 回调。 |
+| UX-22a 术语（屏蔽词） | ✅ #42 | 「屏蔽关键词」统一为「屏蔽词」（设置页入口 + 过滤页分区 / 说明 / 教程 / 提示），诊断副标题改为「当前样式、凭证来源与悬浮窗状态摘要」；测试补 `findsNothing` 防回退。 |
+| UX-22b 术语（直播间 / 栏位） | ⬜ 待做 | 首页 / 表单 / 状态文案的「主播 / 直播间号 / 房间」统一为「直播间」；悬浮窗内「栏位 / 栏」统一为「栏位」。 |
+| UX-23b 弹幕页「清空」二次确认 | ⬜ 待做 | 需先给 `DanmuPage` 加 `@visibleForTesting RoomInfoClient? roomInfoClient` 注入口（与 `_OverlayPane` 同款），否则只能人工验收。 |
+
+**本轮两条可复用的经验（后来者别重踩）**：
+
+1. `find.widgetWithText(TextButton, '文案')` 抓不到 `TextButton.icon`——它的运行时类型是私有子类 `_TextButtonWithIcon`，而 `find.byType` 是**精确类型**匹配。改用 `ValueKey` 或 `find.text('文案')`；同时注意同一页可能有多个同名按钮（过滤页三个编辑器各一个「添加」），要 `.first` 或按 key 精确定位。
+2. `gh pr create --body "..."` 里出现行内反引号会被 shell 当命令替换、把正文吃坏（本轮与 PR #30 各中一次）。**PR 正文一律用 `--body-file`**。
