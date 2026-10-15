@@ -26,6 +26,7 @@ import 'package:danmu_float/ui/add_room_dialog.dart';
 import 'package:danmu_float/ui/danmu_page.dart';
 import 'package:danmu_float/ui/high_performance_dialog.dart';
 import 'package:danmu_float/ui/settings_page.dart';
+import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
 
 /// 冷启动 / 回前台时探测悬浮窗是否存活前的延后时长（PM-001）。
@@ -1094,7 +1095,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     SizedBox(height: 8),
                     Text(
                       '点击右上角 + 添加直播间号 / 链接 / 抖音号',
-                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                      style: TextStyle(
+                        color: secondaryTextColor(Theme.of(context).brightness),
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -1187,7 +1191,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           if (refreshedAgo.isNotEmpty)
             Text(
               '已刷新 $refreshedAgo',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 12,
+                color: secondaryTextColor(Theme.of(context).brightness),
+              ),
             ),
           if (room.title.isNotEmpty)
             Text(
@@ -1370,7 +1377,10 @@ class _GroupDialogState extends State<_GroupDialog> {
         children: <Widget>[
           Text(
             widget.title,
-            style: const TextStyle(fontSize: 12, color: Colors.grey),
+            style: TextStyle(
+              fontSize: 12,
+              color: secondaryTextColor(Theme.of(context).brightness),
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -1469,7 +1479,10 @@ class _CredentialPickerDialog extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
             child: Text(
               '还没有配置凭证，可在「设置 · 连接与凭证」里添加',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 12,
+                color: secondaryTextColor(Theme.of(context).brightness),
+              ),
             ),
           ),
       ],
