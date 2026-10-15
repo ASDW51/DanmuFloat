@@ -43,6 +43,25 @@ void _mockMessengerReplies(WidgetTester tester) {
   );
 }
 
+/// 给 path_provider 挂临时目录应答（PM-002 用）。
+///
+/// 首页 initState 里 `_loadFilter()` 走的 FilterStore 是默认构造，无法注入目录
+/// 解析器、经 path_provider 原生通道取目录；测试里不挂 mock 会在 runAsync 排空
+/// 真实事件循环时抛 MissingPluginException，打断整个移除流程。统一指到同一个
+/// 临时目录，与注入的 RoomStore / OverlayPrefsStore 隔离在测试目录内。
+void _mockPathProvider(WidgetTester tester, Directory dir) {
+  const MethodChannel channel = MethodChannel(
+    'plugins.flutter.io/path_provider',
+  );
+  final TestDefaultBinaryMessenger messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  messenger.setMockMethodCallHandler(
+    channel,
+    (MethodCall call) async => dir.path,
+  );
+  addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+}
+
 /// 内存凭证后端：测试不依赖 flutter_secure_storage 原生通道。
 class _MemoryCredentialBackend implements CredentialBackend {
   String? _stored;
@@ -250,6 +269,7 @@ void main() {
       ],
       boundWebRids: <String>['111', '222'],
     );
+    _mockPathProvider(tester, dir);
     _mockOverlayChannels(tester, active: true);
     _mockMessengerReplies(tester);
     _markOverlayShown();
@@ -306,6 +326,7 @@ void main() {
       ],
       boundWebRids: <String>['111'],
     );
+    _mockPathProvider(tester, dir);
     _mockOverlayChannels(tester, active: true);
     _mockMessengerReplies(tester);
     _markOverlayShown();
