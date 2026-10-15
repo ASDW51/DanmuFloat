@@ -348,12 +348,18 @@ void main() {
       reason: '还有剩余栏位，不应关窗',
     );
 
-    // 落盘的栏位绑定里也不再含被移除的主播（真实读盘须逃出 FakeAsync）。
-    late final OverlayPrefs persisted;
-    await tester.runAsync(() async {
-      persisted =
-          await OverlayPrefsStore(directoryResolver: () async => dir).load();
-    });
+    // 落盘的栏位绑定里也不再含被移除的主播。save 是 unawaited 的真实文件写，
+    // 插件调用出现时它可能还没写完：轮询读盘直到写入生效，不能读一次就断言。
+    OverlayPrefs persisted = const OverlayPrefs();
+    for (int i = 0; i < 20 && persisted.webRids.contains('111'); i++) {
+      await tester.runAsync(() async {
+        persisted =
+            await OverlayPrefsStore(directoryResolver: () async => dir).load();
+        if (persisted.webRids.contains('111')) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      });
+    }
     expect(persisted.webRids, isNot(contains('111')));
     expect(persisted.webRids, contains('222'));
   });
