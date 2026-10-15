@@ -63,6 +63,34 @@ void main() {
     setSystemPermissionBackend(const PlatformSystemPermissionBackend());
   });
 
+  testWidgets('手动类步骤视觉与文案不暗示「必须完成」（UX-06）',
+      (WidgetTester tester) async {
+    _useTallScreen(tester);
+    await tester.pumpWidget(_wrap(() async {}));
+    await tester.pumpAndSettle();
+
+    // 顶部引导语不再暗示「必须按顺序做完」。
+    expect(find.textContaining('按顺序完成以下准备'), findsNothing);
+    expect(find.textContaining('可按需完成'), findsOneWidget);
+
+    // 手动步骤（自启动）用「去设置」语义图标，且与「已完成」的对勾区分开。
+    expect(find.byIcon(Icons.tune), findsOneWidget);
+    expect(
+      find.ancestor(
+        of: find.text('4. 自启动权限（各厂商 ROM）'),
+        matching: find.byType(ListTile),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('可不处理'),
+      findsOneWidget,
+      reason: '要写明不做这步也不影响查看弹幕',
+    );
+    // 权限入口仍然可达：手动步骤的「去设置」按钮还在（AGENTS.md 第 5 节）。
+    expect(find.widgetWithText(TextButton, '去设置'), findsNWidgets(2));
+  });
+
   testWidgets('按 prd 4.10 顺序渲染 5 行步骤', (WidgetTester tester) async {
     _useTallScreen(tester);
     await tester.pumpWidget(_wrap(() async {}));
