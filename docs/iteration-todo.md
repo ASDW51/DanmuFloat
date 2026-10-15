@@ -648,7 +648,7 @@ git checkout main && git pull --ff-only
 | F1 | UX-33 第一步：patch 携带 `themeId`/`colorOverrides`（`null`=不改，空表=清空） | ✅ | #58 |
 | F2 | UX-33 第二步：悬浮球菜单内的配色入口（预设 chips + 全部跟随主题，含清空覆盖） | ✅ | #60 #61 |
 
-**第 7 轮候选（已由 PM 裁决推后）**：`chromeBg` 角色（球/菜单/胶囊三处 alpha 各不相同，须先定 1 个还是 2 个角色及四套预设取值）；「最近使用色」UI 与去重交互（字段已在 B 落盘）；浅色预设 `secondary` 若跌破 4.5:1 则换 `0xFF49454F` 并统一口径；`DanmakuKind.privilegeScreenChat` 等按弹幕类型写死的颜色与 `typeColor()` 派生口径并存的问题。
+**第 7 轮候选（已由 PM 裁决推后）**：`chromeBg` 角色（球/菜单/胶囊三处 alpha 各不相同，须先定 1 个还是 2 个角色及四套预设取值）；「最近使用色」UI 与去重交互（字段已在 B 落盘）；浅色预设 `secondary` 若跌破 4.5:1 则换 `0xFF49454F` 并统一口径；`DanmakuKind.privilegeScreenChat` 等按弹幕类型写死的颜色与 `typeColor()` 派生口径并存的问题。（**已作废**：PM 只读核查确认该前提有误，见第 7 轮裁决的纠正）
 
 **本轮新增踩坑**：⑤ 用「字段名 + 相邻行」当文本锚点在长文件里替换时，**同名邻居会让锚点撞车**——`if (windowX != null)` 在 `overlay_bridge.dart` 里出现两次（`OverlayStyle`/`OverlayConfig` 与 `OverlayPrefsPatch` 各一处），于是 `themeId` 被插进了不相干的类，`flutter analyze` 报 `undefined name`。正确做法是按 `class X {` 切片后只在该切片内替换（本轮的 C 与 F1 各踩一次）。⑥ **`git commit` 前先确认自己在哪个分支**：一次修复被提交到本地 `main` 上，导致「分支仍旧是坏的、main 多出一个 commit」的错位；处理方式是 `git branch fix-tmp <commit>` 保命 → `git reset --hard origin/main` → 回分支 `cherry-pick` → 推。⑦ `tester.tap(find.byKey(...))` 报 `Bad state: No element` 时，先看堆栈是不是 `getCenter`——那是 **finder 命中 0 个元素**，与回调逻辑无关；被测行为若是「开关取什么值」，直接驱动 `widget.onChanged!(...)` 比猜命中区域更诚实。
 
@@ -661,6 +661,42 @@ git checkout main && git pull --ff-only
 | **① 底色角色粒度** | 悬浮球（`white70`/`black54`）、菜单（`white@0.94`/`black@0.9`）、胶囊（`white70`/`black54`）三处底色 alpha 各不相同，**一个角色装不下三种取值** | 需先定「1 个角色」还是「2 个角色」，并为四套预设给出取值；涉及新增角色 → 预设取值 + 老配置迁移 + 对比度守卫口径 |
 | **② 最近使用色 UI** | `recentColors` 字段已随 UX-29 落盘，且做了过滤 / 去重 / 上限（8），但**没有任何 UI 在用**——落盘不展示等于白存 | 仅主 App 设置页；待决「何时入库」（选色即入 / 确定才入）与跨主题的去重与排序交互 |
 | **③ 浅色预设 `secondary` 余量** | 现值 `Colors.black54`（alpha 0.5412）在纯白上约 **4.61:1**，仅高于 4.5 门槛一点点；统一方案是换成 `0xFF49454F`（与 `danmu_text_colors.dart` 同值） | 会改变浅色观感，属用户可见变化；待决是否值得，以及是否同时统一两套对比度口径 |
-| **④ 弹幕类型颜色双来源** | `overlay_page.dart` 仍对 `DanmakuKind.privilegeScreenChat` 写死 `const Color(0xFF2E7D32)`，与 `_palette.typeColor()` 并存 | 同族两处真相，改法明确但属重构；待决是否本轮做、以及是否顺带把 `typeColor()` 的取值来源也纳入主题 |
+| **④ 弹幕类型颜色双来源** | `overlay_page.dart` 仍对 `DanmakuKind.privilegeScreenChat` 写死 `const Color(0xFF2E7D32)`，与 `_palette.typeColor()` 并存 | 同族两处真相，改法明确但属重构；待决是否本轮做、以及是否顺带把 `typeColor()` 的取值来源也纳入主题 |（**已作废**：PM 只读核查确认该前提有误，见第 7 轮裁决的纠正）
 
 **请 PM 裁决**：四项的**先后顺序**；每项的**验收口径**（尤其 ① 的角色个数与四套预设取值要求、② 的入库时机）；以及**是否有应剔除或合并的项**。
+
+### 第 7 轮 PM 优先级裁决（本轮执行口径，2026-10-16）
+
+只读 PM 核查后的裁决：**⑤ → ① → ②**；③ 剔除转监控；④ 剔除转 backlog 并纠正事实。
+
+| 代号 | 条目 | 优先级 | 来源 |
+| --- | --- | --- | --- |
+| ⑤ | 对比度策略真正接线（含三态 UI 与行内实测比值） | **P1** | PM 本轮新发现 |
+| ① | 底色角色 `chromeBg` + `menuBg`（**2 个**，不是 1 个） | P2 | 候选 ① |
+| ② | 最近使用色：新增写入 API + 一行展示（收窄） | P3 | 候选 ② |
+| ③ | 浅色预设 `secondary` 的 4.61:1 余量 | 剔除（监控项） | 候选 ③ |
+| ④ | 类型色未数据化 | 剔除（backlog） | 候选 ④（**前提有误**） |
+
+**PM 对既有描述的三处纠正（以纠正后的为准）**
+
+1. **④ 前提错误**：`const Color(0xFF2E7D32)`（`overlay_page.dart:170`）本身就在 `OverlayPalette.typeColor()`（`:165` 起）内部，`_palette.typeColor()` 就是那个 switch——**不存在两处真相**。真问题是 `typeColor()` 仍是对弹幕类型写死的 switch、**未由 `OverlayTheme` 数据驱动**，因此 `contrast`/`sepia` 只能继承 dark 的 7 个类型色，角色覆盖也影响不到它。台账里「两处真相 / 与 `_palette.typeColor()` 并存」的表述据此作废，避免错误前提被当作缺陷继续传递。
+2. **② 说轻了**：不是「落盘不展示」，而是 lib/ 内**没有任何写入点**（`recentColors` 只出现在 `overlay_prefs_store.dart` 与解析期归一化里），因此要**新增「记录一次使用」的 API**，不只是补 UI。
+3. **① 比台账更具体**：共 **4 个站点、2 组 alpha**——球 `:805`、菜单 `:851-852`、胶囊两处 `:2297`（回溯）与 `:2327`（透明度 HUD）。③ 数值复核无误（`overlay_theme.dart:117` 为 `Colors.black54`，展平后白底 ≈4.61:1）。
+
+**⑤ 对比度策略接线（P1，本轮第一优先）**
+
+- 事实：`overlay_page.dart:345` 是 `preset(_themeId).resolve(_colorOverrides).toPalette()`，**没有调 `enforceTextContrast`**；该方法在 lib/ 内零调用，`contrastPolicy` 除 store 与其解析测试外零消费者，设置页也没有三态控件。即：用户选出的不可读颜色在弹幕区**原样渲染**，三态**完全没有运行时效果**——与第 6 轮台账「默认 adjust…给一次轻提示」的记载不符（`ensureContrast` 当时只用在弹窗 `ThemeData`）。
+- 范围：`:345` 的调色板构造接入 `enforceTextContrast`；配色区加三态选择 + 行内实测比值；**设置页显示的值必须等于实际渲染的值**。
+- 验收：`adjust` 下任一覆盖满足 `contrastRatio(rendered, maskColor) ≥ 4.5` 且**色相偏移 = 0**；`warn` 不改色且行内显示比值字符串；`allow` 不改色不提示；合规时 `identical(theme.enforceTextContrast(4.5), theme)` 为真；新增断言「设置页显示的 hex == 运行时 `colorOf(role)`」。
+- 近似口径必须写进注释与降级说明：守卫以 `maskColor` 为参照，**未乘用户 `opacity`、也未与直播画面合成**。
+- 可拆两片：⑤a 纯接线（零 UI，`overlay_page.dart`）/ ⑤b 三态 UI（`overlay_color_section.dart`、`settings_page.dart`）。**不得**把 `contrastPolicy` 永远留成死字段。
+
+**① 底色角色（P2）**：定 **2 个**——`chromeBg`（球 + 胶囊，不承载文字）与 `menuBg`（菜单面板，唯一承载文字）。`dark`/`light` 必须与现有字面量**逐位相等**（`chromeBg` = `Colors.white70`/`Colors.black54`；`menuBg` = `Colors.white.withValues(alpha:0.94)`/`Colors.black.withValues(alpha:0.9)`），单测直接断言以保零外观突变；`contrast` 两者取不透明 `maskColor`；`sepia` 与 `maskColor` 同色相（暖暗 `0xE6` 级黑）。统一约束：面板不透明度 ≥0.9，球对 `maskColor` ≥3:1。两者进 `colorKeys`、**不进 `textColorKeys`**。无需迁移；`schemaVersion` 可升 3（仅诊断用，**不得据此分支**）。验收：4 个站点不再出现字面量；dark/light 逐位断言；老 JSON 解析后两角色跟随主题；两角色**不进对比度守卫的角色集**。
+
+**② 最近使用色（P3，收窄）**：入库时机 = **确认采用时**（色块 tap 与十六进制「应用」本就是同一个确认点，在 `_pickColor` 收到非 null 且非 `resetSentinel` 的返回值时记录一次；取消与恢复默认都不入），无需新增「应用」按钮。**跨主题共用一份**（颜色与主题无关，按主题切分会打碎 8 个槽位；暗色选的色在浅色下不可读的问题由 ⑤ 兜住——这也是 ② 排在 ⑤ 之后的第二个理由）。本轮只做「最近色一行 + 点击即采用 + 新色置顶 + 去重 + 上限 8」，**不做**长按删除、拖拽排序、按主题分组。验收：新增单一 `recordRecentColor` API（去重、置顶、截断）；连续记录 9 个不同色后 `length == 8` 且最新在首位；重复色不产生新条目；`resetSentinel`/取消不入库；`data_transfer` 往返仍一致。
+
+**③ 剔除本轮（保留为监控项）**：现值 4.61:1 **达标**；改它会破坏 A 的「dark/light 逐字段等于原 const」钉子，且属外观变更混入功能 PR。触发条件写死：`overlay_theme_contrast_test.dart` 的浅色断言一旦跌破 4.5，才换 `0xFF49454F`（与 `danmu_text_colors.dart` 同值）并统一两处口径，届时单独一个 PR。
+
+**④ 剔除本轮（转 backlog）**：见上面的纠错；去掉错误前提后剩下的是「`typeColor()` 未数据化」，属观感打磨，改动面 7×4 个取值、收益低，验收口径留待下一轮。
+
+**约束复核**：五项裁决全部落在纯 Dart，无新依赖、无权限、无后台机制、无原生通道。
