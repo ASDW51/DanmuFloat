@@ -157,15 +157,14 @@ class OverlayColorSection extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          // 行高按 UX-21 的触控口径不小于 28dp：这个开关是整行里最容易被误触的控件。
-          SizedBox(
-            height: 32,
-            child: Switch(
-              key: ValueKey<String>('overlayRoleFollow_$role'),
-              value: !followed,
-              onChanged: (bool value) =>
-                  onOverrideChanged(role, value ? color.toARGB32() : null),
-            ),
+          // ListTile 的行高本就 ≥56dp，已满足 UX-21 的触控口径；这里不要再套
+          // SizedBox 限高——Switch 自身约 48dp 高，被裁掉后点击会落到整行的 onTap 上，
+          // 于是「开自定义」变成了弹出取色对话框（用例里表现为回调一次都没触发）。
+          Switch(
+            key: ValueKey<String>('overlayRoleFollow_$role'),
+            value: !followed,
+            onChanged: (bool value) =>
+                onOverrideChanged(role, value ? color.toARGB32() : null),
           ),
           IconButton(
             key: ValueKey<String>('overlayRolePick_$role'),
