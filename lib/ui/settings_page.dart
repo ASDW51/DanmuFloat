@@ -265,6 +265,7 @@ class _SettingsPageState extends State<SettingsPage> {
           OverlayColorSection(
             themeId: _prefs.themeId,
             overrides: _prefs.colorOverrides,
+            recentColors: _prefs.recentColors,
             contrastPolicy: _prefs.contrastPolicy,
             onThemeChanged: (String id) =>
                 _apply(_prefs.copyWith(themeId: id), persist: true),
@@ -280,6 +281,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   role,
                   argb,
                 ),
+                // 入库时机是「确认采用时」：argb 为 null 代表恢复默认（不入库），
+                // 「取消」根本走不到这里（对话框返回 null，上层直接 return）。
+                recentColors: argb == null
+                    ? _prefs.recentColors
+                    : recordRecentColor(_prefs.recentColors, argb),
               ),
               persist: true,
             ),

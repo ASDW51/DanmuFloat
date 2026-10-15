@@ -36,6 +36,22 @@ const int overlayPrefsSchemaVersion = 2;
 String clampOverlayContrastPolicy(Object? raw) =>
     clampOverlayStyleContrastPolicy(raw);
 
+/// 记录一次「最近使用」的颜色：新色置顶、去重、截断到 [maxRecentOverlayColors]。
+///
+/// 只收不透明色（与 [parseColorOverrides] 同一口径）：半透明色换到别的角色上会叠出
+/// 完全不同的观感，作为「最近使用」复用的价值很低。
+///
+/// 跨主题共用一份：颜色与主题无关，按主题分会把 8 个槽位打碎；「深色下选的色在
+/// 浅色下不可读」由对比度策略兜住。
+List<int> recordRecentColor(List<int> recent, int argb) {
+  if (argb < 0 || argb > 0xFFFFFFFF || (argb >> 24) != 0xFF) return recent;
+  return <int>[
+    argb,
+    for (final int color in recent)
+      if (color != argb) color,
+  ].take(maxRecentOverlayColors).toList();
+}
+
 /// 解析主题标识：没有 themeId 的旧配置由 lightTheme 推导（外观与升级前一致）。
 String _parseThemeId(Map<dynamic, dynamic> raw) {
   final Object? id = raw['themeId'];
