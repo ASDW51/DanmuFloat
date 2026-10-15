@@ -10,6 +10,7 @@ class ManagedRoom {
     this.title = '',
     this.group = '',
     this.living,
+    this.lastRefreshedAt,
     this.credentialId,
     required this.addedAt,
   });
@@ -31,6 +32,14 @@ class ManagedRoom {
 
   /// 最近一次刷新的开播状态；null 表示尚未刷新过。
   final bool? living;
+
+  /// 最近一次刷新成功的时间（epoch **毫秒**，AGENTS 第 5 节要求时间戳统一毫秒）；
+  /// null 表示从未刷新成功过。
+  ///
+  /// 与 [living] 的区别是它只在刷新**成功**时写入：失败时留空，行内就不会标
+  /// 「刚刚刷新过」，避免把过期数据说成新的（UX-04）。
+  /// 隔壁 [addedAt] 是历史遗留的 epoch 秒，为兼容已落盘的 rooms.json 保持原样。
+  final int? lastRefreshedAt;
 
   /// 所属分组（prd F14）；空串表示未分组。
   ///
@@ -55,6 +64,7 @@ class ManagedRoom {
     String? group,
     bool? living,
     String? credentialId,
+    int? lastRefreshedAt,
     bool clearCredentialId = false,
   }) =>
       ManagedRoom(
@@ -64,6 +74,7 @@ class ManagedRoom {
         title: title ?? this.title,
         group: group ?? this.group,
         living: living ?? this.living,
+        lastRefreshedAt: lastRefreshedAt ?? this.lastRefreshedAt,
         credentialId:
             clearCredentialId ? null : (credentialId ?? this.credentialId),
         addedAt: addedAt,
@@ -76,6 +87,8 @@ class ManagedRoom {
         'title': title,
         'group': group,
         if (living != null) 'living': living,
+        // 老版本 rooms.json 没有这个字段，读回来是 null（=从未刷新过），不报错。
+        if (lastRefreshedAt != null) 'last_refreshed_at': lastRefreshedAt,
         if (credentialId != null) 'credential_id': credentialId,
         'added_at': addedAt,
       };
@@ -87,6 +100,8 @@ class ManagedRoom {
     if (webRid is! String || webRid.trim().isEmpty) return null;
     final Object? living = raw['living'];
     final Object? credentialId = raw['credential_id'];
+    // 只在拿到正数时间戳时认账：0 / 负数 / 非数字一律当「从未刷新」。
+    final int refreshedAt = _asInt(raw['last_refreshed_at']);
     return ManagedRoom(
       webRid: webRid.trim(),
       name: _asString(raw['room_name']),
@@ -94,6 +109,7 @@ class ManagedRoom {
       title: _asString(raw['title']),
       group: _asString(raw['group']).trim(),
       living: living is bool ? living : null,
+      lastRefreshedAt: refreshedAt > 0 ? refreshedAt : null,
       credentialId: credentialId is String && credentialId.trim().isNotEmpty
           ? credentialId.trim()
           : null,
