@@ -471,8 +471,6 @@ class OverlayConfig {
     'dragLocked': dragLocked,
     'ballCorner': clampBallCorner(ballCorner),
     'clickThrough': clickThrough,
-    if (themeId != null) 'themeId': themeId,
-    if (colorOverrides != null) 'colorOverrides': colorOverrides,
     if (windowX != null) 'windowX': windowX,
     if (windowY != null) 'windowY': windowY,
   };
