@@ -9,7 +9,7 @@
 
 | 项 | 状态 | 位置 |
 | --- | --- | --- |
-| 迭代基线 | 已就位 | `main` @ 04fab54（PR #27 合并点） |
+| 迭代基线 | 已就位 | `main` @ f355f31（PR #31 合并点，UX-01 ~ UX-16 全部交付） |
 | CR-01 代码审查修复 | ✅ 已合入 | PR #11 / PR #12 → `main` |
 | PM-001 | ✅ 已合入 | PR #7 → `main` |
 | PM-002 | ✅ 已合入 | PR #8 → `main` |
@@ -26,9 +26,9 @@
 | UX-11 批量刷新只落盘一次 | ✅ 已合入 | PR #21 → `main` |
 | UX-12 最小窗宽标识行溢出 | ✅ 已合入 | PR #27 → `main`（人数完整数字、不可省略） |
 | UX-13 补刷失败节流 + 同主播互斥 | ✅ 已合入 | PR #21 → `main`（第三轮新增，与 UX-10 同批收口） |
-| UX-14 弹幕页失败原因口径对齐 | ⬜ 未开始 | 第三轮新增（P2） |
-| UX-15 菜单未绑定栏位文案 | ⬜ 未开始 | 第三轮新增（P2），与 UX-12 同区域需串行 |
-| UX-16 权限 banner 补「去系统设置」 | ⬜ 未开始 | 第三轮新增（P2） |
+| UX-14 弹幕页失败原因口径对齐 | ✅ 已合入 | PR #29 → `main` |
+| UX-15 菜单未绑定栏位文案 | ✅ 已合入 | PR #30 → `main` |
+| UX-16 权限 banner 补「去系统设置」 | ✅ 已合入 | PR #31 → `main` |
 
 > 待办清单已按 PM 子代理 2026-10-15 的第一版审查**整版重写**：旧编号 PM-003 ~ PM-006 作废（保留项重新编号为 UX-01 ~ UX-06；其中旧 PM-006 的问题描述与现状不符，已改写为 UX-06）。
 >
@@ -220,21 +220,29 @@
 - **验收标准**：补刷失败后 1 分钟内再 `resumed` 不发请求；超过 30 分钟才允许再试；可挂起假客户端下，同一 webRid 在飞时行内入口禁用、批量刷新跳过它，仍只有 1 次请求；每批至多推送一次悬浮窗候选。
 - **风险/依赖**：无新依赖 / 权限；`_lastStaleRefreshAttemptAt` 只在内存，进程重启即重置（可接受：重启本身就会走一次首刷）。
 
-### ⬜ UX-14　弹幕页失败原因仍会被清掉，与悬浮窗口径不一致（P2）
+### ✅ UX-14　弹幕页失败原因不再被清掉，与悬浮窗同口径（P2 · 已合入 PR #29）
+
+- **改动**：抽出纯函数 `nextErrorReason(current, {stage, message})`（有原因就覆盖、没原因就留着，只有 `live` 清空）；阶段监听改走它，`_retry()` 不再提前清空。
 
 - **现状与问题**：弹幕页 `_retry()` 先 `setState(() => _errorMessage = null)`，阶段监听又**无条件** `_errorMessage = session.errorMessage` → 任何阶段变化（解析中 / 未开播）都会抹掉原因，空列表退回「暂无弹幕」；悬浮窗侧 UX-08 已改为「只覆盖、live 才清」。
 - **期望行为**：与悬浮窗同口径；把「何时保留 / 清空原因」抽成纯函数（沿用 UX-09 的做法），页面只调用。
 - **验收标准**：纯函数单测覆盖 error → offline → live 迁移（无需新增 widget 注入口）。
 - **风险/依赖**：零依赖；`lib/ui/danmu_page.dart` 无其它待办竞争。
 
-### ⬜ UX-15　菜单「栏位状态」把未绑定栏位显示成「第 1 栏 ·  · 等待中」（P2）
+### ✅ UX-15　菜单未绑定栏位改写「第 N 栏 · 未绑定」（P2 · 已合入 PR #30）
+
+- **改动**：抽出纯函数 `paneStatusLabel({index, webRid, name, stage})`，未绑定栏只写「第 N 栏 · 未绑定」，不再拼状态。
+- **过程修正（已核实）**：`OverlayConfig.tryParse` 会过滤空 webRid，所以「未绑定栏」（`_OverlayPaneState._bound => widget.webRid.isNotEmpty`）在当前协议下无法在 widget 测试里复现——首轮 CI 的 widget 用例因此失败，改为纯函数覆盖三条分支，不用不可达状态编造绿灯。要真正打通该路径需先让协议允许占位栏位（独立变更）。
 
 - **现状与问题**：`_buildPaneStatusRow` 用 `_roomNameOf(_webRids[index])`，未绑定栏 webRid 为空 → 名字空串；`_reports` 无条目时状态写死「等待中」→ 出现 `·  ·` 双空格且语义不符。
 - **期望行为**：显示「第 N 栏 · 未绑定」，与标题行「第 N 栏未绑定」同口径。
 - **验收标准**：多栏用例下发一个空 webRid 栏位，`find.textContaining('未绑定')` 命中且不出现 `·  ·`。
 - **风险/依赖**：与 UX-12 同区域（标识行 / 菜单），需串行或拆两个小 PR。
 
-### ⬜ UX-16　权限 banner 的「重试授权」在「拒绝且不再询问」后是死胡同（P2）
+### ✅ UX-16　权限 banner 补「去系统设置」出口（P2 · 已合入 PR #31）
+
+- **改动**：`_retryOverlayPermission` 按结果置 `_overlayRetryFailed`，banner 在重试仍被拒时追加「去系统设置」（`systemPermissions.openAppSettings()`，无新权限 / 依赖）；未重试前不显示。
+- **测试要点**：悬浮窗权限查询走插件通道 `FlutterScreenOverlay.checkPermission`，**不经** `systemPermissions`——`_mockOverlayChannels` 因此新增 `permissionGranted` 开关（默认 true，不影响既有用例）；假后端只用于断言 `openAppSettings` 被调用一次。
 
 - **现状与问题**：首页 banner 只有「重试授权」走 `ensureOverlayPermission()`；系统不再弹框时点了没有任何反馈，也没有「去系统设置」出口（该出口只在引导页第 4 步与设置页入口里）。AGENTS §5 要求权限入口任意时刻可达，这里是「可达但走不通」。
 - **期望行为**：重试返回 false 后 banner 给出「去系统设置」次级入口，复用 `systemPermissions.openAppSettings()`（无新权限 / 依赖）。
