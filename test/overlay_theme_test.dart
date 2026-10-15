@@ -3,30 +3,6 @@ import 'package:danmu_float/ui/overlay_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// WCAG 相对亮度对比度：(L1 + 0.05) / (L2 + 0.05)，L 为较亮一方。
-double _contrast(Color a, Color b) {
-  final double la = a.computeLuminance();
-  final double lb = b.computeLuminance();
-  final double hi = la > lb ? la : lb;
-  final double lo = la > lb ? lb : la;
-  return (hi + 0.05) / (lo + 0.05);
-}
-
-/// 把半透明色按 alpha 合成到 [base] 上再算对比度。
-///
-/// 为什么必须合成：`computeLuminance()` 只看 RGB、忽略 alpha——`Colors.white54`
-/// 会被算成 21:1，而它在黑底上实际约 6:1。不合成就是把断言写成假的。
-Color _flatten(Color color, Color base) {
-  final double a = color.a;
-  if (a >= 1) return color;
-  return Color.from(
-    alpha: 1,
-    red: color.r * a + base.r * (1 - a),
-    green: color.g * a + base.g * (1 - a),
-    blue: color.b * a + base.b * (1 - a),
-  );
-}
-
 /// 断言一组文字角色在指定主题下都达到对比度下限。
 void _expectTextRoles(OverlayTheme theme, double minimum) {
   final List<String> textRoles = <String>[
@@ -39,9 +15,8 @@ void _expectTextRoles(OverlayTheme theme, double minimum) {
     'activeColor',
   ];
   for (final String role in textRoles) {
-    final Color fg = _flatten(theme.colorOf(role), theme.maskColor);
     expect(
-      _contrast(fg, theme.maskColor),
+      OverlayTheme.contrastRatio(theme.colorOf(role), theme.maskColor),
       greaterThanOrEqualTo(minimum),
       reason: '${theme.id} 主题的 $role 对窗口底色对比度不足',
     );
@@ -124,9 +99,8 @@ void main() {
 
   test('四套预设的正文对窗口底色达标（含 alpha 合成）', () {
     for (final OverlayTheme theme in OverlayTheme.presets) {
-      final Color body = _flatten(theme.body, theme.maskColor);
       expect(
-        _contrast(body, theme.maskColor),
+        OverlayTheme.contrastRatio(theme.body, theme.maskColor),
         greaterThanOrEqualTo(4.5),
         reason: '${theme.id} 主题正文对比度不足',
       );

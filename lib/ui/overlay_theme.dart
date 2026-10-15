@@ -263,6 +263,91 @@ class OverlayTheme {
     highlightStyle: highlightStyle,
   );
 
+  /// 会被对比度守卫校正的文字角色（分隔线 / 底色 / 边框不参与文字对比度）。
+  static const List<String> textColorKeys = <String>[
+    'body',
+    'secondary',
+    'chrome',
+    'userAccent',
+    'levelColor',
+    'fanLevelColor',
+    'activeColor',
+  ];
+
+  /// 把半透明色按 alpha 合成到 [background] 上。
+  ///
+  /// 为什么必须先合成再算对比度：`Color.computeLuminance()` 只看 RGB、忽略 alpha，
+  /// 不合成的话 `Colors.white54` 会被算成 21:1，而它在黑底上实际约 6:1——断言会变成假的。
+  static Color flattenOver(Color color, Color background) {
+    final double alpha = color.a;
+    if (alpha >= 1) return color;
+    return Color.from(
+      alpha: 1,
+      red: color.r * alpha + background.r * (1 - alpha),
+      green: color.g * alpha + background.g * (1 - alpha),
+      blue: color.b * alpha + background.b * (1 - alpha),
+    );
+  }
+
+  /// WCAG 相对亮度对比度：(L1 + 0.05) / (L2 + 0.05)，L 为较亮一方。
+  ///
+  /// 全项目唯一的对比度口径：测试与守卫都调它，避免各写一份实现后互相漂移。
+  static double contrastRatio(Color foreground, Color background) {
+    final Color fg = flattenOver(foreground, background);
+    final Color bg = flattenOver(background, background);
+    final double l1 = fg.computeLuminance();
+    final double l2 = bg.computeLuminance();
+    final double hi = l1 > l2 ? l1 : l2;
+    final double lo = l1 > l2 ? l2 : l1;
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  /// 把 [foreground] 的明度沿明度轴调整到与 [background] 至少 [minimum] 的对比度。
+  ///
+  /// 只动明度、**不碰色相与饱和度**：用户选的是「这个颜色」，我们只能在可读性上补救，
+  /// 不能替他换成另一种颜色（色相偏移恒为 0，由单测钉住 <15°）。搜索按 1/20 步长从
+  /// 当前明度向两侧走，命中即停，因此改动幅度总是最小的那一档。
+  static Color ensureContrast(
+    Color foreground,
+    Color background, {
+    double minimum = 4.5,
+  }) {
+    if (contrastRatio(foreground, background) >= minimum) return foreground;
+    final HSVColor hsv = HSVColor.fromColor(flattenOver(foreground, background));
+    for (int step = 1; step <= 20; step++) {
+      final double delta = step / 20;
+      for (final double value in <double>[
+        hsv.value + delta,
+        hsv.value - delta,
+      ]) {
+        if (value < 0 || value > 1) continue;
+        final Color candidate = hsv.withValue(value).toColor();
+        if (contrastRatio(candidate, background) >= minimum) return candidate;
+      }
+    }
+    // 两侧都到不了（例如背景亮度卡在中间）：退回黑白中对比度更高的一侧，
+    // 宁可改变观感也不能把不可读的文字留在屏幕上。
+    return contrastRatio(Colors.white, background) >=
+            contrastRatio(Colors.black, background)
+        ? Colors.white
+        : Colors.black;
+  }
+
+  /// 对全部文字角色施加对比度守卫；[minimum] 为可读性下限。
+  ///
+  /// 没有任何角色需要改动时直接返回 `this`（用 identical 断言钉住），这样「合规就
+  /// 不动」是可测的，而不是每次 resolve 都产出一份新对象。
+  OverlayTheme enforceTextContrast(double minimum) {
+    final Map<String, Color> fixed = <String, Color>{};
+    for (final String key in textColorKeys) {
+      final Color current = colorOf(key);
+      final Color guarded = ensureContrast(current, maskColor, minimum: minimum);
+      if (guarded != current) fixed[key] = guarded;
+    }
+    if (fixed.isEmpty) return this;
+    return copyWithColors(fixed);
+  }
+
   /// 把落盘/下发的整数解析成不透明色：非 int、越界、带 alpha（透明度）一律判非法。
   ///
   /// 为什么要求 alpha 必须为 255：角色色最终会与蒙版相乘渲染，允许半透明会让
