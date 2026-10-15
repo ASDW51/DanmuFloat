@@ -1,0 +1,78 @@
+// 第 7 轮 ⑤：对比度策略要真正作用于悬浮窗渲染，而不是停在偏好字段里。
+//
+// 背景：第 6 轮把 contrastPolicy 落进了偏好，但窗内调色板构造处从未调用
+// enforceTextContrast，adjust/warn/allow 三态没有任何运行时效果。本文件钉住
+// 「策略经过消息通道到达窗内」与「adjust 下渲染值确实达标」这两件事。
+import 'package:danmu_float/app/overlay_bridge.dart';
+import 'package:danmu_float/storage/overlay_prefs_store.dart';
+import 'package:danmu_float/ui/overlay_theme.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  group('对比度策略经 style 通道下发', () {
+    test('三态都能往返，未知值回落到 adjust', () {
+      for (final String policy in <String>['adjust', 'warn', 'allow']) {
+        final OverlayStyle? style = OverlayStyle.tryParse(<String, Object?>{
+          'contrastPolicy': policy,
+        });
+        expect(style?.contrastPolicy, policy);
+        expect(style?.toJson()['contrastPolicy'], policy);
+      }
+      expect(
+        OverlayStyle.tryParse(<String, Object?>{'contrastPolicy': 'bogus'})
+            ?.contrastPolicy,
+        overlayStyleAdjustPolicy,
+      );
+    });
+
+    test('老 payload 没有该字段时默认 adjust', () {
+      final OverlayStyle? style = OverlayStyle.tryParse(<String, Object?>{
+        'lightTheme': false,
+      });
+      expect(style?.contrastPolicy, overlayStyleAdjustPolicy);
+    });
+
+    test('存储层的钳制转发到桥接层白名单', () {
+      expect(clampOverlayContrastPolicy('allow'), 'allow');
+      expect(clampOverlayContrastPolicy('warn'), 'warn');
+      expect(clampOverlayContrastPolicy('nope'), defaultOverlayContrastPolicy);
+      expect(clampOverlayContrastPolicy(null), defaultOverlayContrastPolicy);
+    });
+  });
+
+  group('策略对渲染取值的作用', () {
+    const int nearBlack = 0xFF111111;
+
+    test('adjust：不可读的自定义色被校正到 ≥4.5:1，且色相不变', () {
+      final OverlayTheme base = OverlayTheme.dark.resolve(<String, int>{
+        'body': nearBlack,
+      });
+      // 窗内 _palette 在 adjust 下做的就是这一步。
+      final OverlayPalette rendered = base.enforceTextContrast(4.5).toPalette();
+      expect(
+        OverlayTheme.contrastRatio(rendered.body, OverlayTheme.dark.maskColor),
+        greaterThanOrEqualTo(4.5),
+      );
+      // 守卫只动 HSV 的 value：色相必须保持，否则「我选的色怎么变样了」。
+      expect(
+        HSVColor.fromColor(rendered.body).hue,
+        closeTo(HSVColor.fromColor(const Color(nearBlack)).hue, 0.5),
+      );
+    });
+
+    test('warn/allow：不经过守卫，用户选色原样渲染', () {
+      final OverlayPalette rendered = OverlayTheme.dark
+          .resolve(<String, int>{'body': nearBlack})
+          .toPalette();
+      expect(rendered.body, const Color(nearBlack));
+    });
+
+    test('合规的取值在 adjust 下保持不变（守卫是幂等的）', () {
+      final OverlayTheme base = OverlayTheme.dark.resolve(<String, int>{
+        'body': 0xFFFFFFFF,
+      });
+      expect(identical(base.enforceTextContrast(4.5), base), isTrue);
+    });
+  });
+}

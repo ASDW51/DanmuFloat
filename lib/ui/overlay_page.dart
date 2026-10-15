@@ -337,12 +337,26 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 角色级颜色覆盖：空表表示完全跟随主题。
   Map<String, int> _colorOverrides = const <String, int>{};
 
+  /// 当前对比度策略：只有 adjust 会校正文字色，warn/allow 保留用户原色。
+  String _contrastPolicy = overlayStyleAdjustPolicy;
+
   /// widget 唯一可读的调色板：主题解析 + 角色级覆盖合并。
   ///
   /// 默认配置下这里产出的取值与原 OverlayPalette.of(lightTheme) 逐字段相同
   /// （由 test/overlay_theme_test.dart 钉住），因此默认外观零变化。
-  OverlayPalette get _palette =>
-      OverlayTheme.preset(_themeId).resolve(_colorOverrides).toPalette();
+  /// adjust 策略下先按 maskColor 校正文字色；warn/allow 原样渲染用户的选色。
+  ///
+  /// 近似口径：参照底色是 maskColor 本身，未乘用户设置的窗口 opacity、也未与直播
+  /// 画面真实合成——后者在纯 Dart 侧无法获知。
+  OverlayPalette get _palette {
+    final OverlayTheme base = OverlayTheme.preset(
+      _themeId,
+    ).resolve(_colorOverrides);
+    final OverlayTheme themed = _contrastPolicy == overlayStyleAdjustPolicy
+        ? base.enforceTextContrast(4.5)
+        : base;
+    return themed.toPalette();
+  }
 
   /// 把当前调色板发布给根 widget。
   ///
@@ -477,6 +491,7 @@ class _OverlayPageState extends State<OverlayPage> {
         _themeId = style.themeId ??
             (_lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId);
         _colorOverrides = style.colorOverrides;
+        _contrastPolicy = style.contrastPolicy;
         _publishPalette();
         _showTitleBar = style.showTitleBar;
         _focusBehavior = style.focusBehavior;

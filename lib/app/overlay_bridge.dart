@@ -629,6 +629,21 @@ Map<String, int> parseColorOverrides(Object? raw) {
   return result;
 }
 
+/// 对比度策略取值。常量定义在桥接层而不是偏好层：桥接不能依赖存储层（存储层反过来
+/// 要用桥接的 OverlayPrefsPatch 与 parseColorOverrides），因此白名单以这里为唯一实现，
+/// 存储层只做转发。
+const String overlayStyleAdjustPolicy = 'adjust';
+const String overlayStyleWarnPolicy = 'warn';
+const String overlayStyleAllowPolicy = 'allow';
+
+/// 钳制对比度策略；未知值回落到 adjust（可读性优先）。
+String clampOverlayStyleContrastPolicy(Object? raw) =>
+    raw == overlayStyleAdjustPolicy ||
+        raw == overlayStyleWarnPolicy ||
+        raw == overlayStyleAllowPolicy
+    ? raw! as String
+    : overlayStyleAdjustPolicy;
+
 /// 解析主题标识：没有 themeId 的老 payload 由 lightTheme 推导，语义与旧版一致。
 String _parseStyleThemeId(Map<dynamic, dynamic> raw) {
   final Object? id = raw['themeId'];
@@ -643,6 +658,7 @@ class OverlayStyle {
     required this.opacity,
     this.themeId,
     this.colorOverrides = const <String, int>{},
+    this.contrastPolicy = overlayStyleAdjustPolicy,
     this.fontSize = defaultDanmuFontSize,
     this.scrollSpeed = defaultDanmuScrollSpeed,
     this.paneStyles = const <String, PaneStyle>{},
@@ -688,6 +704,9 @@ class OverlayStyle {
   /// 角色级颜色覆盖：角色名 → 不透明 ARGB。
   final Map<String, int> colorOverrides;
 
+  /// 对比度策略：adjust 校正到可读 / warn 提示但不改 / allow 原样渲染。
+  final String contrastPolicy;
+
   Map<String, Object?> toJson() => <String, Object?>{
     'type': overlayStyleType,
     'opacity': clampOverlayOpacity(opacity),
@@ -698,6 +717,7 @@ class OverlayStyle {
     // 新字段照旧写出来：旧版悬浮窗进程读到不认识的键会忽略，不会因此解析失败。
     'themeId': themeId ?? (lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId),
     'colorOverrides': colorOverrides,
+    'contrastPolicy': contrastPolicy,
     'showTitleBar': showTitleBar,
     'focusBehavior': clampFocusBehavior(focusBehavior),
     'dragLocked': dragLocked,
@@ -727,6 +747,7 @@ class OverlayStyle {
       lightTheme: raw['lightTheme'] == true,
       themeId: _parseStyleThemeId(raw),
       colorOverrides: parseColorOverrides(raw['colorOverrides']),
+      contrastPolicy: clampOverlayStyleContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
       dragLocked: raw['dragLocked'] == true,
