@@ -81,9 +81,8 @@ Future<void> _pumpOverlay(
   WidgetTester tester,
   Map<String, Object?> configJson,
 ) async {
-  // 插件桥接流是非广播单例，中继状态跨用例残留：先重置再挂载，
-  // 每个用例都拿到全新的插件订阅（PM-003 攻坚）。
-  resetOverlayBridgeForTest();
+  // 桥接中继是进程级单例（对插件单例流只订阅一次），5 个用例共享；
+  // 各用例只挂载自己的页面实例订阅广播流，无需重置。
   _mockMessengerEcho(tester);
   _mockControlChannel(tester);
   await tester.pumpWidget(

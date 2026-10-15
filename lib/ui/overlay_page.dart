@@ -168,13 +168,6 @@ class OverlayApp extends StatelessWidget {
 /// 页面可反复订阅 / 重建。
 StreamController<dynamic>? _bridgeController;
 
-/// 仅供测试重置中继状态（widget 测试之间进程不退出，静态单例会跨用例残留）。
-@visibleForTesting
-void resetOverlayBridgeForTest() {
-  _bridgeController?.close();
-  _bridgeController = null;
-}
-
 Stream<dynamic> get overlayBridgeStream =>
     (_bridgeController ??= _relayBridgeMessages()).stream;
 
