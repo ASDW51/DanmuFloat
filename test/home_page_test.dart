@@ -323,9 +323,16 @@ void main() {
     await tester.tap(find.text('移除主播'));
     await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('移除'));
-    // 移除流程里 await 的真实落盘（_store.save）与随后的重排调用都需要真实
-    // 事件循环排空：轮询等到「主播甲从列表消失」再断言插件调用。
-    await _pumpUntil(tester, () => find.text('主播甲').evaluate().isEmpty);
+    // 移除的 setState（列表项消失）发生在 await _store.save 之前，而重排 / 关窗
+    // 在真实落盘完成之后才会执行：必须轮询等到插件调用真正出现，不能只等 UI。
+    // （等待上限同样来自 _pumpUntil 的轮询预算，超时即按断言失败报告。）
+    await _pumpUntil(
+      tester,
+      () => _sizeCalls.any(
+        (MethodCall call) =>
+            call.method == 'resizeOverlay' || call.method == 'closeOverlay',
+      ),
+    );
 
     expect(find.text('主播甲'), findsNothing, reason: '主播甲应从列表移除');
 
@@ -378,10 +385,10 @@ void main() {
     await tester.tap(find.text('移除主播'));
     await tester.pump(const Duration(milliseconds: 500));
     await tester.tap(find.text('移除'));
-    // 最后一栏的移除走关窗：等真实落盘完成、关窗调用发出（关闭入口消失）。
+    // 同上：等真实落盘完成、关窗调用真正发出（不能只等 UI 状态变化）。
     await _pumpUntil(
       tester,
-      () => find.byTooltip('关闭悬浮窗').evaluate().isEmpty,
+      () => _sizeCalls.any((MethodCall call) => call.method == 'closeOverlay'),
     );
 
     // 没有剩余栏位可下发：走关窗，而不是下发空绑定的 config。
