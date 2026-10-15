@@ -470,6 +470,8 @@ void main() {
       expect(roomClient.calls, hasLength(2), reason: '重试要重新拉一次房间信息');
       expect(socketArgs, hasLength(1), reason: '重试后应重新建立弹幕连接');
       expect(session.stage, LiveSessionStage.connecting);
+      // 阶段是广播流，事件经微任务投递：先让出一轮，再断言监听端收到了什么。
+      await _tick();
       expect(
         stages.last,
         LiveSessionStage.connecting,
