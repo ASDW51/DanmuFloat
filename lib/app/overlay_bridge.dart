@@ -853,6 +853,8 @@ class OverlayPrefsPatch {
     this.dragLocked,
     this.ballCorner,
     this.clickThrough,
+    this.themeId,
+    this.colorOverrides,
     this.windowX,
     this.windowY,
   });
@@ -864,6 +866,13 @@ class OverlayPrefsPatch {
   final bool? dragLocked;
   final int? ballCorner;
   final bool? clickThrough;
+
+  /// 主题标识与角色级颜色覆盖（窗内配色入口回报）。
+  ///
+  /// 可空表示「这次不改」：null 不能兼作「清空覆盖」，否则窗内每做一次别的操作都会
+  /// 把用户在主 App 里设好的自定义色冲掉——要清空请传空 map。
+  final String? themeId;
+  final Map<String, int>? colorOverrides;
 
   /// 窗口在屏幕上的位置（dp），拖动 / 吸附收敛后由原生上报。
   final double? windowX;
@@ -877,6 +886,8 @@ class OverlayPrefsPatch {
       dragLocked == null &&
       ballCorner == null &&
       clickThrough == null &&
+      themeId == null &&
+      colorOverrides == null &&
       windowX == null &&
       windowY == null;
 
@@ -888,6 +899,8 @@ class OverlayPrefsPatch {
     if (dragLocked != null) 'dragLocked': dragLocked,
     if (ballCorner != null) 'ballCorner': clampBallCorner(ballCorner!),
     if (clickThrough != null) 'clickThrough': clickThrough,
+    if (themeId != null) 'themeId': themeId,
+    if (colorOverrides != null) 'colorOverrides': colorOverrides,
     if (windowX != null) 'windowX': windowX,
     if (windowY != null) 'windowY': windowY,
   };
@@ -905,6 +918,14 @@ class OverlayPrefsPatch {
     final Object? windowX = raw['windowX'];
     final Object? windowY = raw['windowY'];
     final OverlayPrefsPatch patch = OverlayPrefsPatch(
+      themeId: raw['themeId'] is String &&
+              (raw['themeId']! as String).isNotEmpty
+          ? raw['themeId']! as String
+          : null,
+      // 用 containsKey 区分「没这个键」与「显式传了空表」：前者不动，后者是清空。
+      colorOverrides: raw.containsKey('colorOverrides')
+          ? parseColorOverrides(raw['colorOverrides'])
+          : null,
       opacity: opacity is num ? clampOverlayOpacity(opacity.toDouble()) : null,
       fontSize: fontSize is num
           ? clampDanmuFontSize(fontSize.toDouble())
