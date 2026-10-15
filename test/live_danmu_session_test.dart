@@ -294,6 +294,35 @@ void main() {
       await session.stop();
     });
 
+    test('复检预算用尽时补发一次 offline，界面才能放出重试入口（UX-08）', () async {
+      final SequenceRoomInfoClient client = SequenceRoomInfoClient(<RoomInfo>[
+        const RoomInfo.offline(webRid: '12345', api: RoomInfoApi.web),
+      ]);
+      final LiveDanmuSession session = build(
+        client: client,
+        offlineRecheckInterval: const Duration(milliseconds: 5),
+        maxOfflineRechecks: 2,
+      );
+      final List<LiveSessionStage> stages = <LiveSessionStage>[];
+      session.stages.listen(stages.add);
+
+      await session.start();
+      await _waitFor(() => !session.autoRechecking);
+      // 补发的事件经微任务投递到监听端，先让出一轮再断言。
+      await _tick();
+
+      expect(session.stage, LiveSessionStage.offline);
+      expect(
+        stages
+            .where((LiveSessionStage stage) => stage == LiveSessionStage.offline)
+            .length,
+        greaterThanOrEqualTo(2),
+        reason: '预算用尽要再发一次 offline：阶段没变但 autoRechecking 变了，'
+            '不补发界面就永远停在「复检中…」且没有重试入口',
+      );
+      await session.stop();
+    });
+
     test('stop() 取消复检定时器，会话结束后不再请求房间信息（UX-01）', () async {
       final SequenceRoomInfoClient client = SequenceRoomInfoClient(<RoomInfo>[
         const RoomInfo.offline(webRid: '12345', api: RoomInfoApi.web),

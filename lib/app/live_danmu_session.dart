@@ -338,7 +338,13 @@ class LiveDanmuSession {
   /// 次数到顶就不再安排：界面上的手动重试是此时的唯一出口（UX-02）。
   void _scheduleOfflineRecheck() {
     if (_stopped) return;
-    if (_offlineRecheckCount >= maxOfflineRechecks) return;
+    if (_offlineRecheckCount >= maxOfflineRechecks) {
+      // 预算用尽时补发一次 offline：阶段没变，但 autoRechecking 由 true 变 false，
+      // 界面要据此把「复检中…」换成「未开播」并放出重试入口。此时该栏不会有弹幕事件
+      // 触发重建，不补发这一条，界面就永远停在「复检中…」（UX-08）。
+      _setStage(LiveSessionStage.offline);
+      return;
+    }
     _offlineRecheckTimer?.cancel();
     _offlineRecheckTimer = Timer(offlineRecheckInterval, () {
       _offlineRecheckTimer = null;

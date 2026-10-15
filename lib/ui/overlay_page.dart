@@ -13,6 +13,7 @@ import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/danmu/auto_scroll.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
+import 'package:danmu_float/room/room_info_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 
@@ -21,6 +22,24 @@ const int _displayLimit = 500;
 
 /// 长按上下滑动调透明度的行程（dp）：滑过约一屏高即走完 0.2~0.8 的全程。
 const double _gestureOpacityTravel = 240;
+
+/// 栏位状态的**短**文案（UX-07）：标题栏与悬浮球菜单共用同一份。
+///
+/// 5 栏起网格变 3 列，`defaultOverlayWidth` 下单栏只有约 133dp，标题栏里还有状态点 /
+/// 换绑 / 焦点 / 暂停等固定子项，长文案（旧版「连接失败 · 点此重试」）会把这一行撑出
+/// 溢出条——溢出只在 debug 可见、`flutter analyze` 也不报，只能靠短文案从源头避免。
+/// 完整原因与下一步放在标题栏 Tooltip 与悬浮球菜单的「栏位状态」里。
+String paneStageText(LiveSessionStage stage, {bool autoRechecking = false}) =>
+    switch (stage) {
+      LiveSessionStage.idle => '未连接',
+      LiveSessionStage.resolvingRoom => '解析房间…',
+      LiveSessionStage.signing => '签名中…',
+      LiveSessionStage.connecting => '连接中…',
+      LiveSessionStage.live => '已连接',
+      // 复检中要跟「已停止复检」区分开：前者用户只需等，后者必须手动重试。
+      LiveSessionStage.offline => autoRechecking ? '复检中…' : '未开播',
+      LiveSessionStage.error => '失败',
+    };
 
 /// 悬浮窗配色（prd F20 样式预设）：深色为默认，浅色用于亮色直播画面。
 ///
@@ -160,7 +179,12 @@ class OverlayApp extends StatelessWidget {
 }
 
 class OverlayPage extends StatefulWidget {
-  const OverlayPage({super.key});
+  const OverlayPage({super.key, this.roomInfoClient});
+
+  /// 房间信息客户端可注入（默认走真实接口）：单测用它确定性地制造失败态，
+  /// 不必依赖真实网络与 flutter_test 的 mock HttpClient 的失败时机。
+  @visibleForTesting
+  final RoomInfoClient? roomInfoClient;
 
   @override
   State<OverlayPage> createState() => _OverlayPageState();
@@ -173,12 +197,19 @@ class _PaneReport {
     required this.stage,
     required this.received,
     this.error,
+    this.retryable = false,
   });
 
   final String webRid;
   final LiveSessionStage stage;
   final int received;
   final String? error;
+
+  /// 该栏当前是否给出可点的重试出口（UX-08）。
+  ///
+  /// 悬浮球菜单据此显示「重试」：标识行关掉后，菜单是窗内唯一能重连的地方，
+  /// 而是否值得给出口的判定必须与标识行同一口径（`shouldOfferRetry`）。
+  final bool retryable;
 }
 
 /// 悬浮窗内的轻提示（悬浮窗没有 Scaffold，用弹窗代替 SnackBar）。
@@ -291,6 +322,9 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 栏位 key 含 webRid，重选同一个主播时 key 不变、栏位不会重建，用户会以为
   /// 重选一次就能重连（UX-02）；计数一变 key 就变，本栏连同会话一起重建。
   final Map<int, int> _paneRebuildTokens = <int, int>{};
+
+  /// 各栏「在菜单里点重试」触发的计数，由栏位自己消费（见 `_retryPane`）。
+  final Map<int, int> _retryTokens = <int, int>{};
 
   Timer? _reportTimer;
 
@@ -709,6 +743,16 @@ class _OverlayPageState extends State<OverlayPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
+            if (_shouldShowPaneStatus) ...<Widget>[
+              Text(
+                '栏位状态',
+                style: TextStyle(color: palette.chrome, fontSize: label),
+              ),
+              const SizedBox(height: 2),
+              for (int index = 0; index < _webRids.length; index++)
+                _buildPaneStatusRow(palette, label, index),
+              const SizedBox(height: 6),
+            ],
             Row(
               children: <Widget>[
                 Expanded(
@@ -833,6 +877,66 @@ class _OverlayPageState extends State<OverlayPage> {
         ),
       ),
     );
+  }
+
+  /// 是否在悬浮球菜单里显示「栏位状态」区块（UX-08）。
+  ///
+  /// 多栏时每栏一行，让关掉栏目标识行的用户也能看出哪一栏出了问题；单栏时只在确实
+  /// 需要重试时才显示——那可能是窗内唯一的重试出口，不能为了菜单短就省掉。
+  bool get _shouldShowPaneStatus =>
+      _webRids.length > 1 ||
+      _reports.values.any((_PaneReport report) => report.retryable);
+
+  /// 菜单里的一行栏位状态：「第 N 栏 · 主播名 · 状态」，需要重试时附带按钮。
+  Widget _buildPaneStatusRow(
+    OverlayPalette palette,
+    double fontSize,
+    int index,
+  ) {
+    final _PaneReport? report = _reports[index];
+    final String name = _roomNameOf(_webRids[index]);
+    final String stage = report == null
+        ? '等待中'
+        : paneStageText(report.stage);
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            '第 ${index + 1} 栏 · $name · $stage',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: palette.secondary, fontSize: fontSize),
+          ),
+        ),
+        if (report?.retryable ?? false)
+          TextButton(
+            onPressed: () => _retryPane(index),
+            style: TextButton.styleFrom(
+              foregroundColor: palette.activeColor,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text('重试', style: TextStyle(fontSize: fontSize)),
+          ),
+      ],
+    );
+  }
+
+  /// 主播名：有备注用备注，否则退回直播间号（与栏目标识行同一口径）。
+  String _roomNameOf(String webRid) {
+    for (final RoomOption option in _roomOptions) {
+      if (option.webRid == webRid && option.name.isNotEmpty) return option.name;
+    }
+    return webRid;
+  }
+
+  /// 请求第 [index] 栏重建会话：只改重试计数，由该栏的 `didUpdateWidget` 落地。
+  ///
+  /// 各栏是私有 widget，页面拿不到它的 State，因此用「下发计数」而不是直接调用——
+  /// 与失败态重选同一主播时的重建机制一致（见 `_paneRebuildTokens`）。
+  void _retryPane(int index) {
+    setState(() => _retryTokens[index] = (_retryTokens[index] ?? 0) + 1);
   }
 
   /// 菜单里的小按钮；[onPressed] 为 null 时禁用。
@@ -1321,6 +1425,9 @@ class _OverlayPageState extends State<OverlayPage> {
       ),
       index: index,
       webRid: webRid,
+      // 菜单里点「重试」时计数变化，由本栏 didUpdateWidget 发起重建（UX-08）。
+      retryToken: _retryTokens[index] ?? 0,
+      roomInfoClient: widget.roomInfoClient,
       fontSize: paneFontSize(style?.fontSize ?? _fontSize, _webRids.length),
       opacity: _gestureOpacity[index] ?? style?.opacity ?? _opacity,
       textColor: style?.textColor,
@@ -1347,6 +1454,7 @@ class _OverlayPane extends StatefulWidget {
     super.key,
     required this.index,
     required this.webRid,
+    required this.retryToken,
     required this.fontSize,
     required this.opacity,
     required this.scrollSpeed,
@@ -1360,6 +1468,7 @@ class _OverlayPane extends StatefulWidget {
     required this.onSwitchRoom,
     required this.onFilterChanged,
     required this.onReport,
+    this.roomInfoClient,
     this.textColor,
     this.onToggleFocus,
   });
@@ -1368,6 +1477,12 @@ class _OverlayPane extends StatefulWidget {
 
   /// 本栏绑定的直播间号，空串表示未绑定房间。
   final String webRid;
+
+  /// 悬浮球菜单点「重试」时递增；变化即表示本栏要重建会话（UX-08）。
+  final int retryToken;
+
+  /// 房间信息客户端注入点（仅单测使用，见 [OverlayPage.roomInfoClient]）。
+  final RoomInfoClient? roomInfoClient;
 
   /// 本栏实际使用的正文字号（dp）：基准字号（含单栏覆盖）已按栏数缩小过。
   final double fontSize;
@@ -1471,10 +1586,13 @@ class _OverlayPaneState extends State<_OverlayPane> {
       );
 
   /// 重建本栏会话（重新走「解析房间 → 签名 → 建连」），不关窗、不动其它栏。
+  ///
+  /// 刻意不清空 `_error`：清掉之后若重连仍失败（或停在未开播），用户就再也看不到
+  /// 上次的失败原因，只能看到「暂无弹幕」（UX-08）。失败原因由阶段流在成功建连时
+  /// 覆盖，见 `_start()` 里的阶段监听。
   Future<void> _retry() async {
     final LiveDanmuSession? session = _session;
     if (session == null) return;
-    setState(() => _error = null);
     await session.restart();
   }
 
@@ -1629,10 +1747,15 @@ class _OverlayPaneState extends State<_OverlayPane> {
   ///
   /// 过滤偏好变化时内存里的 [FilterPrefs] 会经 setState 重建本栏 widget，
   /// 可见列表在 build 时按新口径派生，无需在此重算。
+  ///
+  /// 悬浮球菜单点「重试」只递增 `retryToken`（UX-08）：不复用 key 重建，那会连弹幕
+  /// 缓存一起丢掉，而已有历史的栏位只是连接失败，重连后用户还指望能接着看
+  /// （`restart()` 只换连接、不换列表）。
   @override
   void didUpdateWidget(_OverlayPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     _autoScroller.speed = widget.scrollSpeed;
+    if (widget.retryToken != oldWidget.retryToken) unawaited(_retry());
   }
 
   Future<void> _start() async {
@@ -1640,13 +1763,22 @@ class _OverlayPaneState extends State<_OverlayPane> {
       webRid: widget.webRid,
       // 主 App 已下发「主播 → 凭证」绑定；本栏指定了凭证就用它，否则匿名自动获取。
       credentialCookies: roomCookiesFor(widget.webRid),
+      // 单测注入的假客户端（生产为 null，走真实接口）。
+      roomInfoClient: widget.roomInfoClient,
     );
     _session = session;
     _stageSubscription = session.stages.listen((LiveSessionStage stage) {
       if (!mounted) return;
       setState(() {
         _stage = stage;
-        _error = session.errorMessage;
+        // 失败原因只覆盖、不随阶段清空：重试后若停在未开播，用户仍要能看到上次的原因
+        // （UX-08）。真正连上（live）才算翻篇。
+        final String? message = session.errorMessage;
+        if (message != null) {
+          _error = message;
+        } else if (stage == LiveSessionStage.live) {
+          _error = null;
+        }
       });
       _report();
     });
@@ -1719,6 +1851,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
         stage: _stage,
         received: _received,
         error: _error,
+        retryable: _retryable,
       ),
     );
   }
@@ -1780,6 +1913,13 @@ class _OverlayPaneState extends State<_OverlayPane> {
       color: palette.chrome,
       fontSize: smallerFontSize(widget.fontSize, 2),
     );
+    // 状态文案必须短（UX-07）：多栏窄窗里长句会把标识行撑出溢出条，而溢出只在
+    // debug 可见。重试入口统一收在悬浮球菜单的「栏位状态」里。
+    final Widget statusLabel = Text(
+      // 已连上且有在线数据时右上是人数；否则退回连接状态，保证能看出当前所处阶段。
+      _online > 0 ? '在线 ${formatOnlineCount(_online)}' : _stageText(_stage),
+      style: labelStyle,
+    );
     final Widget bar = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       child: Row(
@@ -1812,39 +1952,12 @@ class _OverlayPaneState extends State<_OverlayPane> {
               padding: const EdgeInsets.only(right: 2),
               child: Icon(Icons.swap_horiz, size: 13, color: palette.secondary),
             ),
-          // 失败 / 停止复检后给可点入口（UX-02）：窗内没有别的地方能重连，用户只能
-          // 关窗重开——那会重建全部栏位、把其它正常栏位的连接一并断掉。
+          // 需要重试时挂 Tooltip 给出完整原因与去处（UX-07 / UX-08）：短词看不出
+          // 为什么失败，长按即可看到，点击重试则去悬浮球菜单。
           if (_retryable)
-            Tooltip(
-              message: _stage == LiveSessionStage.error
-                  ? (_error ?? '连接失败，点此重试')
-                  : '已停止自动复检，点此重新检查',
-              child: InkWell(
-                onTap: _retry,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 2,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Icon(Icons.refresh, size: 13, color: palette.activeColor),
-                      const SizedBox(width: 2),
-                      Text(_stageText(_stage), style: labelStyle),
-                    ],
-                  ),
-                ),
-              ),
-            )
+            Tooltip(message: _stageTooltip, child: statusLabel)
           else
-            Text(
-              // 已连上且有在线数据时右上是人数；否则退回连接状态，保证能看出当前所处阶段。
-              _online > 0
-                  ? '在线 ${formatOnlineCount(_online)}'
-                  : _stageText(_stage),
-              style: labelStyle,
-            ),
+            statusLabel,
           // 焦点模式（prd F7）：放大本栏 / 还原；单栏布局下没有其它栏可让位，不显示。
           if (widget.onToggleFocus != null)
             InkWell(
@@ -1896,21 +2009,23 @@ class _OverlayPaneState extends State<_OverlayPane> {
 
   /// 连接状态的短文本（prd F6：栏目标识需含连接状态）。
   ///
-  /// 未开播但仍在自动复检时补一句「自动复检中」：挂机看多栏时用户需要知道这一栏是
-  /// 在等开播，而不是已经死掉；复检次数用尽后不再显示该后缀，避免给出假承诺。
-  ///
-  /// 异常态直接写成「点此重试」：该文案只出现在可点的重试入口上（见标题栏），
-  /// 光写「异常」用户不知道该栏还能不能救。
-  String _stageText(LiveSessionStage stage) => switch (stage) {
-    LiveSessionStage.idle => _bound ? '未连接' : '未绑定',
-    LiveSessionStage.resolvingRoom => '解析房间…',
-    LiveSessionStage.signing => '签名中…',
-    LiveSessionStage.connecting => '连接中…',
-    LiveSessionStage.live => '已连接',
-    LiveSessionStage.offline =>
-      (_session?.autoRechecking ?? false) ? '未开播 · 自动复检中' : '未开播 · 点此重试',
-    LiveSessionStage.error => '连接失败 · 点此重试',
-  };
+  /// 未绑定房间时统一写「未绑定」：此时根本没有会话，写阶段名没有意义。
+  String _stageText(LiveSessionStage stage) => _bound
+      ? paneStageText(stage, autoRechecking: _session?.autoRechecking ?? false)
+      : '未绑定';
+
+  /// 状态短词的完整说明（Tooltip）：短词只够看状态，原因与下一步放在这里。
+  String get _stageTooltip {
+    if (_stage == LiveSessionStage.error) {
+      final String reason = _error ?? '连接失败';
+      return '$reason；可在悬浮球菜单的「栏位状态」里重试';
+    }
+    if (_stage == LiveSessionStage.offline &&
+        !(_session?.autoRechecking ?? false)) {
+      return '已停止自动复检；可在悬浮球菜单的「栏位状态」里重新检查';
+    }
+    return _stageText(_stage);
+  }
 
   Widget _buildEventList() {
     final OverlayPalette palette = _palette;
