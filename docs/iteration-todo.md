@@ -603,3 +603,18 @@ git checkout main && git pull --ff-only
 | G | UX-34 高对比/护眼预设内容 | `lib/ui/overlay_theme.dart` | 两套预设对比度断言 | 可并入 A 或 E |
 
 **明确不做**：渐变/图片/纹理背景（需自绘 painter，与「蒙版不透明度」语义冲突）；动画或随时间变化的配色（无法静态校验对比度）；栏级多角色覆盖（本轮多角色只做全局，栏级仅保留既有 `textColor`=`body` 覆盖）；引入配色类 pub 依赖（三滑杆自研约 60 行即可，且色环手势会与「位移 >5px 搬窗口」冲突）；系统/壁纸取色（需原生通道与权限）；开放 `typeColor()` 与 `highlightStyle`；改 `third_party` 原生侧（CI 无原生门禁，且本方案不需要）；悬浮窗自动跟随系统深浅色（需新增下发字段与生命周期联动）。
+
+### 第 6 轮 PM 优先级裁决（本轮执行口径，2026-10-16）
+
+**执行顺序**：A ✅ #49 → B → E → C → { H → I（同文件串行）∥ D（`settings_page.dart` 可并行）} → F；**G 已并入 A**（随 #49 交付）。
+
+**插队两项（PM 判定本轮必做）**
+
+- **H 弹窗未跟随主题**：`OverlayApp` 未挂 `theme`/`darkTheme`，深色皮肤下弹窗仍是白底——这是今天唯一用户可见的缺陷，且不修则本轮「多元素配色」在弹窗层是假的。**不能排在 A 之前**：`_lightTheme` 位于 `_OverlayPageState`，改根 widget 的爆炸半径覆盖 `overlay_page_test` / `overlay_pane_*` / `overlay_touch_target` / `overlay_minwindow_dialog` 四个测试文件；等 A/B/C 就位后按 `themeId` 映射 ThemeData 才是数据驱动且可测的。验收：widget 断言「深色皮肤下弹窗 surface 为深色」+ 既有 `overlay_*` 用例零回归。
+- **I 状态点两套口径**：把 `overlay_page.dart` 的 `_stageColor()` 改为委托 `OverlayTheme`。**不并入 H**：统一后取值会变（浅色 live 由 `0xFF2E7D32` 变为 `danmu_text_colors.dart` 的 `0xFF1B5E20`），属可见外观变更，必须自带对比度断言与独立 diff。验收：状态点在 4 套预设下取自主题且 ≥4.5:1（复用 E 的口径函数）。
+
+**范围调整**：`recentColors` 字段仍留在 B（迁移成本近零），但 UI 与去重测试推到第 7 轮——D 只做「预设 chips + 每元素跟随/自定义 + 十六进制输入 + 恢复默认」；E 先落唯一口径的 `contrastRatio(fg, bg)`（显式把 fg 的 alpha 展平到 bg 上）与断言，再落 `adjust` 明度校正（色相偏移 <15°）；B 不拆（`lightTheme` 降级为 getter 正是迁移机制本身）；C 不动。
+
+**浅色预设 `secondary` 的裁决**：PM 复算 `Colors.black54`（`0x8A000000`，alpha 0.5412）展平到白底约 **4.61:1**，**高于** 4.5——我在 PR #49 注释里写的 4.47:1 是错的，已改成直接断言且 CI 实测通过。本轮不改浅色外观（改了会破坏 A 的「零突变」钉子）；若该断言将来失败，第 7 轮把它换成 `danmu_text_colors.dart` 的 `0xFF49454F` 并统一两处口径。
+
+**由「缺口」改判为下一轮**：`chromeBg`（球 `white70`/`black54`、菜单 `white@0.94`/`black@0.9`、胶囊 `white70`/`black54` 三处 alpha 各不相同，**一个角色装不下**，须先定 1 个还是 2 个角色及各自在 4 套预设下的取值）；收益仅「允许用户改菜单底色」，优先级低于 H/I。
