@@ -14,6 +14,7 @@ import 'package:danmu_float/danmu/auto_scroll.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/room/room_info_client.dart';
+import 'package:danmu_float/ui/high_performance_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
 
@@ -797,7 +798,15 @@ class _OverlayPageState extends State<OverlayPage> {
               spacing: 4,
               runSpacing: 4,
               children: <Widget>[
-                _menuButton(palette, label, '添加栏位', _addPane),
+                // 到顶后直接禁用并写出上限，用户不用点进去才发现加不了（UX-05）。
+                _menuButton(
+                  palette,
+                  label,
+                  canAddPane(_webRids.length)
+                      ? '添加栏位'
+                      : '已达上限 $maxPaneCount 栏',
+                  canAddPane(_webRids.length) ? _addPane : null,
+                ),
                 _menuButton(
                   palette,
                   label,
@@ -1239,6 +1248,12 @@ class _OverlayPageState extends State<OverlayPage> {
 
   /// 悬浮球菜单里的「添加栏位」：从未绑定的主播里挑一个追加到末尾。
   Future<void> _addPane() async {
+    // 上限判定与首页同一口径（maxPaneCount）：这里是窗内唯一的加栏入口，
+    // 到顶后要说清楚为什么加不了，而不是让用户白选一次（UX-05）。
+    if (!canAddPane(_webRids.length)) {
+      await _showNotice('栏位已达上限', '最多同时显示 $maxPaneCount 栏；先减少一栏再添加。');
+      return;
+    }
     final Set<String> bound = _webRids.toSet();
     final List<RoomOption> candidates = <RoomOption>[
       for (final RoomOption option in _roomOptions)
@@ -1257,6 +1272,11 @@ class _OverlayPageState extends State<OverlayPage> {
       ),
     );
     if (picked == null || !mounted) return;
+    // 栏位变多会同时解码更多路弹幕，先确认用户知情（与首页同一弹窗与阈值）。
+    if (needsHighPerformanceConfirm(_webRids.length + 1)) {
+      final bool goOn = await confirmHighPerformance(context, _webRids.length + 1);
+      if (!goOn || !mounted) return;
+    }
     setState(() {
       _webRids = <String>[..._webRids, picked];
       _reports.clear();
@@ -2386,9 +2406,14 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
 
   Future<void> _add() async {
     final List<RoomOption> candidates = _unbound;
-    if (candidates.isEmpty) return;
+    // 上限口径与首页、悬浮球菜单一致；按钮此时已禁用，这里只作兜底（UX-05）。
+    if (candidates.isEmpty || !canAddPane(_webRids.length)) return;
     final String? picked = await _pickRoom(candidates: candidates, current: '');
     if (picked == null || !mounted) return;
+    if (needsHighPerformanceConfirm(_webRids.length + 1)) {
+      final bool goOn = await confirmHighPerformance(context, _webRids.length + 1);
+      if (!goOn || !mounted) return;
+    }
     setState(() => _webRids.add(picked));
   }
 
@@ -2410,7 +2435,8 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              '当前 ${_webRids.length} 栏；栏位过多时单格会变小，可配合「适配尺寸」调大窗口。',
+              '当前 ${_webRids.length} 栏（上限 $maxPaneCount 栏）；栏位过多时单格会变小，'
+              '可配合「适配尺寸」调大窗口。',
               style: TextStyle(fontSize: subSize, color: Colors.grey),
             ),
             const SizedBox(height: 4),
@@ -2467,10 +2493,15 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                onPressed: _unbound.isEmpty ? null : _add,
+                onPressed: _unbound.isEmpty || !canAddPane(_webRids.length)
+                    ? null
+                    : _add,
                 icon: const Icon(Icons.add, size: 18),
                 label: Text(
-                  _unbound.isEmpty ? '已无未添加的主播' : '添加栏位',
+                  // 三种「加不了」的原因分开写：用户得知道是没主播可选，还是到顶了（UX-05）。
+                  !canAddPane(_webRids.length)
+                      ? '已达上限 $maxPaneCount 栏'
+                      : (_unbound.isEmpty ? '已无未添加的主播' : '添加栏位'),
                   style: TextStyle(fontSize: titleSize),
                 ),
               ),
