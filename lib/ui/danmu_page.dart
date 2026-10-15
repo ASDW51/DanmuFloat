@@ -15,7 +15,7 @@ import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/danmu/sign/danmu_signature.dart';
 import 'package:danmu_float/room/room_info.dart';
 import 'package:danmu_float/room/managed_room.dart';
-import 'package:danmu_float/room/room_store.dart';
+import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:flutter/material.dart';
