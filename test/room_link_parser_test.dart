@@ -1,4 +1,6 @@
 // 房间 ID 解析：本地抽取各形态输入，短链走联网跳转。
+import 'dart:async';
+
 import 'package:danmu_float/net/http_transport.dart';
 import 'package:danmu_float/room/room_link_parser.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -107,6 +109,21 @@ void main() {
       final RoomLinkResolver resolver = RoomLinkResolver(transport: transport);
 
       expect(await resolver.resolve('https://v.douyin.com/iABC123/'), isNull);
+    });
+
+    test('短链联网超时按解析失败处理，不挂住表单（UX-03）', () async {
+      // 永不返回的传输层：模拟弱网 / DNS 挂起。
+      final Completer<HttpResponseData> pending = Completer<HttpResponseData>();
+      final FakeTransport transport = FakeTransport(
+        (Uri uri, Map<String, String> headers) => pending.future,
+      );
+      final RoomLinkResolver resolver = RoomLinkResolver(
+        transport: transport,
+        resolveTimeout: const Duration(milliseconds: 20),
+      );
+
+      expect(await resolver.resolve('https://v.douyin.com/iABC123/'), isNull);
+      expect(transport.requests, hasLength(1), reason: '确实尝试过联网解析');
     });
 
     test('既不是数字也不是抖音链接时直接失败且不联网', () async {

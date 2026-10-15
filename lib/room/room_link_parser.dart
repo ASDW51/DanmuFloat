@@ -41,18 +41,30 @@ Uri? firstHttpUri(String input) {
 final RegExp _httpUriPattern =
     RegExp(r'''https?://[^\s，。！？"'）】]+''');
 
+/// 短链联网跟随跳转的超时阈值。
+///
+/// 超过即按解析失败处理（调用方退化成「按原文保存」）：弱网或 DNS 挂起时
+/// `HttpTransport.get` 可能长期不返回，用户会被锁在一个只会转圈的表单里。
+const Duration defaultResolveTimeout = Duration(seconds: 8);
+
 /// 短链解析器：本地解析失败时联网跟随跳转。
 class RoomLinkResolver {
-  RoomLinkResolver({HttpTransport? transport, this.userAgent = defaultDesktopUserAgent})
-      : _transport = transport ?? IoHttpTransport();
+  RoomLinkResolver({
+    HttpTransport? transport,
+    this.userAgent = defaultDesktopUserAgent,
+    this.resolveTimeout = defaultResolveTimeout,
+  }) : _transport = transport ?? IoHttpTransport();
 
   final HttpTransport _transport;
   final String userAgent;
 
+  /// 联网跟随跳转的超时阈值（测试注入更短的值）。
+  final Duration resolveTimeout;
+
   /// 解析输入为 webRid；解析不到返回 null。
   ///
   /// 解析失败不是错误：调用方（添加主播表单）会退化成「按原文保存标识」，
-  /// 所以这里网络异常也按 null 处理，不向上抛。
+  /// 所以这里网络异常与超时都按 null 处理，不向上抛。
   Future<String?> resolve(String input) async {
     final String? local = extractWebRid(input);
     if (local != null) return local;
@@ -60,10 +72,9 @@ class RoomLinkResolver {
     final Uri? uri = firstHttpUri(input);
     if (uri == null) return null;
     try {
-      final HttpResponseData response = await _transport.get(
-        uri,
-        headers: <String, String>{'User-Agent': userAgent},
-      );
+      final HttpResponseData response = await _transport
+          .get(uri, headers: <String, String>{'User-Agent': userAgent})
+          .timeout(resolveTimeout);
       // http 层默认跟随 3xx，落地页里带有直播间接跳信息。
       return extractWebRid(response.body);
     } on Object {
