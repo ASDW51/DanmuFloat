@@ -3,7 +3,6 @@
 //
 // 不依赖任何原生通道：本地存储用临时目录解析器注入、凭证用内存后端，插件窗口
 // 查询通道用 mock 应答。悬浮窗上行状态经消息通道 handler 直接驱动首页监听分支。
-import 'dart:async';
 import 'dart:io';
 
 import 'package:danmu_float/app/live_danmu_session.dart';
