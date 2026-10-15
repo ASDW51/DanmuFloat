@@ -14,6 +14,7 @@ import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/storage/data_transfer.dart';
 import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
+import 'package:danmu_float/ui/overlay_color_section.dart';
 import 'package:danmu_float/storage/theme_store.dart';
 import 'package:danmu_float/ui/disclaimer_page.dart';
 import 'package:danmu_float/ui/filter_page.dart';
@@ -258,19 +259,26 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ),
           ),
-          ListTile(
-            leading: const Icon(Icons.contrast_outlined),
-            title: const Text('悬浮窗浅色皮肤'),
-            subtitle: const Text(
-              '深色直播画面上建议关闭；浅色画面下开启更清晰',
-              style: TextStyle(fontSize: 12),
-            ),
-            trailing: Switch(
-              value: _prefs.lightTheme,
-              onChanged: (bool value) =>
-                  _apply(_prefs.copyWith(lightTheme: value), persist: true),
+          const _SectionTitle('悬浮窗配色'),
+          // 主题是一组角色取值的整体，因此用预设 chips 取代原来的「浅色皮肤」单开关：
+          // lightTheme 现在是派生值（themeId == 'light'），再留一个开关就是两处真相。
+          OverlayColorSection(
+            themeId: _prefs.themeId,
+            overrides: _prefs.colorOverrides,
+            onThemeChanged: (String id) =>
+                _apply(_prefs.copyWith(themeId: id), persist: true),
+            onOverrideChanged: (String role, int? argb) => _apply(
+              _prefs.copyWith(
+                colorOverrides: withColorOverride(
+                  _prefs.colorOverrides,
+                  role,
+                  argb,
+                ),
+              ),
+              persist: true,
             ),
           ),
+          const Divider(height: 1),
           const Divider(height: 1),
           const _SectionTitle('屏蔽与高亮'),
           ListTile(
