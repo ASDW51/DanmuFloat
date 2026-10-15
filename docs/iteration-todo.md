@@ -9,7 +9,7 @@
 
 | 项 | 状态 | 位置 |
 | --- | --- | --- |
-| 迭代基线 | 已就位 | `main` @ 1550b2a（PR #42 合并点；第 5 轮缺陷类已交付，余 UX-22b / UX-23b / UX-24 ~ UX-27） |
+| 迭代基线 | 已就位 | `main` @ 本轮 loop 末次合并点（第 5 轮确定性缺陷全部交付 #35 ~ #46；余 UX-22b 尾项 / UX-23b / UX-24 ~ UX-27） |
 | CR-01 代码审查修复 | ✅ 已合入 | PR #11 / PR #12 → `main` |
 | PM-001 | ✅ 已合入 | PR #7 → `main` |
 | PM-002 | ✅ 已合入 | PR #8 → `main` |
@@ -531,3 +531,32 @@ git checkout main && git pull --ff-only
 
 1. `find.widgetWithText(TextButton, '文案')` 抓不到 `TextButton.icon`——它的运行时类型是私有子类 `_TextButtonWithIcon`，而 `find.byType` 是**精确类型**匹配。改用 `ValueKey` 或 `find.text('文案')`；同时注意同一页可能有多个同名按钮（过滤页三个编辑器各一个「添加」），要 `.first` 或按 key 精确定位。
 2. `gh pr create --body "..."` 里出现行内反引号会被 shell 当命令替换、把正文吃坏（本轮与 PR #30 各中一次）。**PR 正文一律用 `--body-file`**。
+
+### 第 5 轮收尾记录（截至本轮 loop 结束）
+
+本轮 loop 共合入 14 个 PR（`#33` ~ `#46`），第 5 轮 UI/交互体检里**所有确定性缺陷**已清空。
+
+| 条目 | 状态 | 交付 |
+| --- | --- | --- |
+| UX-17 状态栏溢出 | ✅ #35 | 抽 `lib/ui/danmu_status_bar.dart`；CI 额外逮到 2× 字号下「状态点 + 状态词」整组溢出（外层 `Wrap` 救不了内层 `Row`），已一并修 |
+| UX-18 首页操作可见入口 | ✅ #36 | `trailing` 补「更多操作」，复用同一份 `_showRoomActions`，长按保留 |
+| UX-19 深色模式对比度 | ✅ #38 | 新增 `lib/ui/danmu_text_colors.dart`；单测用 `computeLuminance()` 直算 ≥4.5:1 |
+| UX-20 最小窗弹窗溢出 | ✅ #40 | 三处 `AlertDialog` 统一 `insetPadding: 8` + `scrollable: true`；**属性断言**而非像素位置 |
+| UX-21 悬浮球 / 菜单命中区 | ✅ #39 | 球外套 34×34 命中区；菜单按钮与栏位「重试」行高 17 → ≥28dp |
+| UX-22a 术语（屏蔽词） | ✅ #42 | 「屏蔽关键词」→「屏蔽词」，诊断副标题与实际内容对齐 |
+| UX-22b 术语（栏位）+ 灰色文字 | ✅ #44 #45 #46 | 过滤页 / 首页 / 首启 / 免责页的 12px 灰色正文统一走取色表；悬浮窗「N 栏」→「N 个栏位」 |
+| UX-23a 过滤页添加反馈 | ✅ #41 | 重复 / 空输入给出 `errorText` 且不再清空输入框 |
+
+**剩余（未动工，按建议顺序）**
+
+1. **UX-24（唯一 P1）**：穿透态通知栏补「关闭悬浮窗」。改动落在 `third_party/flutter_screen_overlay` 的 Android 侧（新增一个通知 action），**仓库 CI 只跑 Dart 的 analyze/test，原生改动拿不到自动化门禁**，必须人工验收：开穿透 → 通知栏点「关闭悬浮窗」→ 窗口消失、前台服务停止、主 App 的开关状态由既有探测路径纠正。合入前请按 AGENTS §3 只做最小必要修改并留说明注释。
+2. **UX-23b**：弹幕页「清空」二次确认。需先给 `DanmuPage` 加 `@visibleForTesting RoomInfoClient? roomInfoClient` 注入口（与 `_OverlayPane` 同款），否则「已连接时清空」这条路径在测试里不可达。
+3. **UX-22b 尾项**：「主播 / 直播间号 / 房间」三种叫法统一为「直播间」（列表标题保留「主播管理」）；`filter_page.dart:304` 的 `muted ? Colors.grey[700]` 属选中态，需单独判断是否跟随主题。
+4. **UX-25 / 26 / 27**：栏位提醒（`x-slayer/overlay_notify`）、屏幕常亮（`MainActivity.kt` + `KeepScreenOnScope`）、网络感知（`connectivity_plus`）。三条都要求先做「悬浮窗引擎能否拿到通道 / 插件注册」的冒烟验证，**验证通过前不要写业务代码**。
+
+**本轮 loop 累计踩坑清单（新接手的人先看这里）**
+
+1. `find.widgetWithText(TextButton, '文案')` 抓不到 `TextButton.icon`（运行时类型是私有子类 `_TextButtonWithIcon`，`find.byType` 是精确类型匹配）；同一页还可能有多个同名按钮（过滤页三个编辑器各一个「添加」），需 `.first` 或 `ValueKey`。
+2. `gh pr create --body "..."` 里出现行内反引号会被 shell 当命令替换、把正文吃坏（两次）——**PR 正文一律 `--body-file`**。
+3. 把颜色改成 `secondaryTextColor(Theme.of(context).brightness)` 时，**外层不能是 `const` 子树**，否则 `flutter analyze` 报 `const_eval_method_invocation`（过滤页、首页各中一次）；去掉外层 `const` 的同时，要把原先靠常量传播隐式 const 的 `Text` / `SizedBox` / `EdgeInsets` 显式补上 `const`，否则 `prefer_const_constructors` 会让「No issues found」不成立。
+4. `OverlayPage` 在 `initState` 订阅静态单订阅流，**每个测试文件只能 mount 一次**；挂载用 `MaterialApp(home: OverlayPage(roomInfoClient: ...))` + 直接注入假客户端即可，无需 `OverlayApp`。
