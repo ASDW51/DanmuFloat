@@ -275,7 +275,7 @@ class _SettingsPageState extends State<SettingsPage> {
           const _SectionTitle('屏蔽与高亮'),
           ListTile(
             leading: const Icon(Icons.filter_alt_outlined),
-            title: const Text('屏蔽关键词 / 屏蔽用户 / 高亮词'),
+            title: const Text('屏蔽词 / 屏蔽用户 / 高亮词'),
             subtitle: Text(
               _filterSummary(),
               style: const TextStyle(fontSize: 12),
@@ -469,7 +469,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ListTile(
             leading: const Icon(Icons.content_copy_outlined),
             title: const Text('复制诊断信息'),
-            subtitle: const Text('当前样式与凭证来源摘要，反馈问题时一并提供'),
+            subtitle: const Text('当前样式、凭证来源与悬浮窗状态摘要，反馈问题时一并提供'),
             onTap: _copyDiagnostics,
           ),
           const Divider(height: 1),

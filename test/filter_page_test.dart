@@ -20,16 +20,19 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('屏蔽关键词 / 屏蔽用户 / 高亮词'), findsOneWidget);
+    expect(find.text('屏蔽词 / 屏蔽用户 / 高亮词'), findsOneWidget);
     // 入口行摘要显示当前规模，便于不进页面就知道有没有配置过。
     expect(find.text('屏蔽 0 词 / 0 用户 · 高亮 0 词 · 类型 3 种'), findsOneWidget);
 
-    await tester.tap(find.text('屏蔽关键词 / 屏蔽用户 / 高亮词'));
+    await tester.tap(find.text('屏蔽词 / 屏蔽用户 / 高亮词'));
     await tester.pumpAndSettle();
 
     expect(find.text('使用正则表达式'), findsOneWidget);
     expect(find.text('使用教程'), findsOneWidget);
     expect(find.text('列表显示的类型'), findsOneWidget);
+    // 术语统一（UX-22）：用户在设置里看到的是「屏蔽词」，进到二级页 / 菜单里也必须
+    // 是同一个词，否则会以为是两份不同的名单。
+    expect(find.textContaining('屏蔽关键词'), findsNothing);
   });
 
   testWidgets('重复词点「添加」给出提示，且保留输入而不清空（UX-23）',
