@@ -2,6 +2,7 @@
 //
 // 不依赖任何原生通道：本地存储用临时目录解析器注入、凭证用内存后端，插件窗口
 // 查询通道用 mock 应答。悬浮窗上报经 overlay_launcher 的测试辅助直接驱动首页监听分支。
+import 'dart:async';
 import 'dart:io';
 
 import 'package:danmu_float/app/live_danmu_session.dart';
@@ -40,6 +41,40 @@ final List<Object?> _sentMessages = <Object?>[];
 const BasicMessageChannel<dynamic> _messengerChannel =
     BasicMessageChannel<dynamic>('x-slayer/overlay_messenger',
         JSONMessageCodec());
+
+/// 计数用的主播列表存储：断言「整批刷完只落盘一次」（UX-11）。
+class _CountingRoomStore extends RoomStore {
+  _CountingRoomStore({required super.directoryResolver});
+
+  int saves = 0;
+
+  @override
+  Future<void> save(List<ManagedRoom> rooms) async {
+    saves++;
+    await super.save(rooms);
+  }
+}
+
+/// 可挂起的假客户端：请求会停在 [gate] 上不返回，用来制造「在飞」窗口（UX-13）。
+class _SuspendingRoomInfoClient extends _FakeRoomInfoClient {
+  /// 记录真正发起过的请求；[_FakeRoomInfoClient.calls] 要等请求放行后才记，
+  /// 这里要的是「飞行中」的计数。
+  final List<String> started = <String>[];
+
+  /// 非空时所有请求都挂在这里，直到测试放行。
+  Completer<void>? gate;
+
+  @override
+  Future<RoomInfo> fetchByWebRid(
+    String webRid, {
+    String? credentialCookies,
+  }) async {
+    started.add(webRid);
+    final Completer<void>? pending = gate;
+    if (pending != null) await pending.future;
+    return super.fetchByWebRid(webRid, credentialCookies: credentialCookies);
+  }
+}
 
 /// 给消息通道挂一个「立即应答」的 handler（PM-002 用）。
 ///
@@ -218,6 +253,19 @@ Future<void> _pumpUntil(
     );
     await tester.pump(const Duration(milliseconds: 100));
   }
+}
+
+/// 模拟前后台切换：框架从 `flutter/lifecycle` 渠道接收状态，测试里发同一条消息即可。
+///
+/// 刻意先发 inactive 再发 resumed：测试进程初始就是 resumed，同状态可能被框架视为
+/// 无变化而忽略。
+Future<void> _lifecycle(WidgetTester tester, String state) async {
+  await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+    SystemChannels.lifecycle.name,
+    const StringCodec().encodeMessage('AppLifecycleState.$state'),
+    (ByteData? _) {},
+  );
+  await tester.pump();
 }
 
 /// 把首页挂到指定目录上：与 _pumpHome 同样的注入口径，只是目录换成预置好的。
@@ -524,6 +572,61 @@ void main() {
     });
   });
 
+  group('isRoomStale', () {
+    const int now = 1700000000000;
+
+    test('从没刷过（null / 非正数）算过期', () {
+      expect(isRoomStale(null, now: now), isTrue);
+      expect(isRoomStale(0, now: now), isTrue);
+      expect(isRoomStale(-1, now: now), isTrue);
+    });
+
+    test('阈值内不算过期：回前台不该重复请求刚刷过的主播（UX-10）', () {
+      expect(isRoomStale(now - 60 * 1000, now: now), isFalse);
+      expect(
+        isRoomStale(now - staleRoomRefreshAfter.inMilliseconds, now: now),
+        isFalse,
+        reason: '刚好等于阈值仍算新鲜，边界取「超过」而不是「达到」',
+      );
+      expect(
+        isRoomStale(now - staleRoomRefreshAfter.inMilliseconds - 1, now: now),
+        isTrue,
+      );
+    });
+
+    test('时钟回拨（时间戳比现在新）不触发补刷', () {
+      expect(isRoomStale(now + 5000, now: now), isFalse);
+    });
+
+    test('失败路径也要节流：距上次「尝试」超过阈值才允许再试（UX-13）', () {
+      expect(
+        shouldAttemptStaleRefresh(null, now: now),
+        isTrue,
+        reason: '从没试过就允许试',
+      );
+      expect(
+        shouldAttemptStaleRefresh(now - 60 * 1000, now: now),
+        isFalse,
+        reason: '刚试过（哪怕失败了）不该再打一遍接口',
+      );
+      expect(
+        shouldAttemptStaleRefresh(
+          now - staleRoomRefreshAfter.inMilliseconds,
+          now: now,
+        ),
+        isFalse,
+        reason: '刚好等于窗口仍算「刚试过」',
+      );
+      expect(
+        shouldAttemptStaleRefresh(
+          now - staleRoomRefreshAfter.inMilliseconds - 1,
+          now: now,
+        ),
+        isTrue,
+      );
+    });
+  });
+
   testWidgets('「刷新全部」串行刷新每个主播，并把刷新时间落盘（UX-04）',
       (WidgetTester tester) async {
     final Directory dir = await _seedRooms(
@@ -538,12 +641,16 @@ void main() {
     _mockOverlayChannels(tester, active: false);
     _mockMessengerReplies(tester);
 
+    final _CountingRoomStore store = _CountingRoomStore(
+      directoryResolver: () async => dir,
+    );
     final _FakeRoomInfoClient client = _FakeRoomInfoClient();
     await tester.pumpWidget(MaterialApp(
       home: HomePage(
         directoryResolver: () async => dir,
         credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
         roomInfoClient: client,
+        store: store,
       ),
     ));
     await _pumpUntil(tester, () => find.text('主播甲').evaluate().isNotEmpty);
@@ -559,6 +666,11 @@ void main() {
     );
 
     expect(client.calls, <String>['735', '736'], reason: '串行按列表顺序各刷一次');
+    expect(
+      store.saves,
+      1,
+      reason: '整批刷完只落盘一次：逐条写会把 rooms.json 写 N 次（UX-11）',
+    );
     expect(find.textContaining('直播中'), findsNWidgets(2));
     expect(find.text('已刷新 刚刚'), findsNWidgets(2));
 
@@ -577,6 +689,157 @@ void main() {
 
     // 排掉 SnackBar 的自动消失定时器与退场动画，避免用例结束时残留 pending timer。
     await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('回前台只补刷过期房间：阈值内不重复、整批只落盘一次（UX-10 / UX-11 / UX-13）',
+      (WidgetTester tester) async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '735',
+          name: '主播甲',
+          addedAt: 1700000000,
+          // 过期：距上次成功刷新已超过阈值。
+          lastRefreshedAt: now - staleRoomRefreshAfter.inMilliseconds - 60000,
+        ),
+        ManagedRoom(
+          webRid: '736',
+          name: '主播乙',
+          addedAt: 1700000000,
+          // 刚刷过：阈值内，回前台不该再打一次接口。
+          lastRefreshedAt: now,
+        ),
+        ManagedRoom(
+          webRid: '737',
+          name: '主播丙',
+          addedAt: 1700000000,
+          // 从没刷过：也算过期。
+          lastRefreshedAt: 0,
+        ),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: false);
+    _mockMessengerReplies(tester);
+
+    final _CountingRoomStore store = _CountingRoomStore(
+      directoryResolver: () async => dir,
+    );
+    final _FakeRoomInfoClient client = _FakeRoomInfoClient();
+    await tester.pumpWidget(MaterialApp(
+      home: HomePage(
+        directoryResolver: () async => dir,
+        credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
+        roomInfoClient: client,
+        store: store,
+      ),
+    ));
+    await _pumpUntil(tester, () => find.text('主播甲').evaluate().isNotEmpty);
+    // 排掉 initState 里的悬浮窗存活探测延时常量（1s）。
+    await tester.pump(const Duration(seconds: 2));
+    client.calls.clear();
+    _sentMessages.clear();
+
+    // 进后台再回前台：首页据此静默补刷过期房间。
+    await _lifecycle(tester, 'inactive');
+    await _lifecycle(tester, 'resumed');
+    await _pumpUntil(
+      tester,
+      () => find.text('已刷新 刚刚').evaluate().length == 3,
+    );
+
+    expect(
+      client.calls,
+      <String>['735', '737'],
+      reason: '只补刷过期的两栏；阈值内的 736 不该被重复请求',
+    );
+
+    // 落盘发生在各条刷新之后，等它真正发生再断言：UI 更新早于 save，抢时序会读到 0。
+    await _pumpUntil(tester, () => store.saves >= 1);
+    expect(
+      store.saves,
+      1,
+      reason: '补刷整批只落盘一次（UX-11）',
+    );
+    // 悬浮窗没开时 `_syncOverlayRooms` 直接返回、一条都不推：这里锁的是「不逐条推」，
+    // 所以上限是 1 而不是恰好 1（开窗场景由 UX-04 用例覆盖）。
+    expect(
+      _sentMessages
+          .where(
+            (Object? message) => message is Map && message['type'] == 'rooms',
+          )
+          .length,
+      lessThanOrEqualTo(1),
+      reason: '每批最多推送一次悬浮窗候选（UX-13）',
+    );
+
+    // 同一节流窗口内再回前台不重复补刷：失败路径不写 lastRefreshedAt，
+    // 只按它判断的话弱网下每次回前台都会把整列表重打一遍（UX-13）。
+    await _lifecycle(tester, 'inactive');
+    await _lifecycle(tester, 'resumed');
+    await tester.pump(const Duration(seconds: 2));
+    expect(client.calls, <String>['735', '737'], reason: '窗口内不重复补刷');
+
+    // 排掉 SnackBar 与存活探测定时器，避免用例结束时残留 pending timer。
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('补刷在飞时不再发第二条同主播请求（UX-13）', (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        // 从没刷过 → 回前台必定补刷。
+        ManagedRoom(webRid: '735', name: '主播甲', addedAt: 1700000000),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: false);
+    _mockMessengerReplies(tester);
+
+    final _SuspendingRoomInfoClient client = _SuspendingRoomInfoClient();
+    await tester.pumpWidget(MaterialApp(
+      home: HomePage(
+        directoryResolver: () async => dir,
+        credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
+        roomInfoClient: client,
+      ),
+    ));
+    await _pumpUntil(tester, () => find.text('主播甲').evaluate().isNotEmpty);
+    await tester.pump(const Duration(seconds: 2));
+
+    // 挂住补刷的那条请求：该主播此刻正有一路在飞。
+    client.gate = Completer<void>();
+    await _lifecycle(tester, 'inactive');
+    await _lifecycle(tester, 'resumed');
+    await _pumpUntil(tester, () => client.started.isNotEmpty);
+    expect(client.started, <String>['735']);
+
+    // 行内刷新入口在补刷期间禁用：同一主播两路在飞会把风控风险翻倍。
+    expect(
+      tester
+          .widget<TextButton>(find.widgetWithText(TextButton, '刷新'))
+          .onPressed,
+      isNull,
+      reason: '补刷在飞时行内入口不该再发一条',
+    );
+
+    // 批量刷新同样跳过正在补刷的主播。
+    await tester.tap(find.byTooltip('刷新全部'));
+    await tester.pump(const Duration(seconds: 1));
+    expect(client.started, <String>['735'], reason: '批量刷新跳过在飞的主播');
+
+    // 放行挂住的请求，别在用例结束时留下没跑完的 Future。
+    client.gate!.complete();
+    client.gate = null;
+    await tester.pump(const Duration(seconds: 2));
     await tester.pump(const Duration(seconds: 10));
     await tester.pump(const Duration(seconds: 1));
   });
