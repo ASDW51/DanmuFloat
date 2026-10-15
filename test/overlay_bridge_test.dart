@@ -1002,4 +1002,20 @@ void main() {
       );
     });
   });
+
+  group('栏位硬上限与高性能确认判定（UX-05）', () {
+    test('上限 9 栏：8 栏还能加，9 栏起不能再加', () {
+      expect(maxPaneCount, 9);
+      expect(canAddPane(0), isTrue);
+      expect(canAddPane(8), isTrue);
+      expect(canAddPane(9), isFalse);
+      expect(canAddPane(10), isFalse);
+    });
+
+    test('超过 4 栏需要强制确认，4 栏及以下不需要', () {
+      expect(needsHighPerformanceConfirm(4), isFalse);
+      expect(needsHighPerformanceConfirm(5), isTrue);
+      expect(needsHighPerformanceConfirm(9), isTrue);
+    });
+  });
 }
