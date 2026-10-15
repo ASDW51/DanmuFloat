@@ -288,7 +288,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (stale.isEmpty) return;
     // 先记尝试时间再发请求：中途失败也要算这一次，否则失败就会变成「每次都试」。
     _lastStaleRefreshAttemptAt = now;
-    _autoRefreshing.addAll(stale);
+    // 走 setState：行内刷新按钮要跟着置灰，否则用户点了没反应会以为按钮坏了。
+    setState(() => _autoRefreshing.addAll(stale));
     try {
       for (final String webRid in stale) {
         final String? error = await _refreshRoomQuiet(webRid, persist: false);
@@ -298,7 +299,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         if (!mounted) return;
       }
     } finally {
-      _autoRefreshing.removeAll(stale);
+      // 页面已销毁时不能 setState，但仍要清掉在飞标记（只为不留悬空状态）。
+      if (mounted) {
+        setState(() => _autoRefreshing.removeAll(stale));
+      } else {
+        _autoRefreshing.removeAll(stale);
+      }
     }
     await _store.save(_rooms);
     if (!mounted) return;
