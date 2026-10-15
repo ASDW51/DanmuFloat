@@ -178,7 +178,6 @@ class OverlayColorSection extends StatelessWidget {
             ),
           ),
         ),
-      children: <Widget>[
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Wrap(

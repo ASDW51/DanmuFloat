@@ -81,6 +81,8 @@ void main() {
         home: Scaffold(
           body: SingleChildScrollView(
             child: OverlayColorSection(
+              contrastPolicy: 'adjust',
+              onContrastPolicyChanged: (String _) {},
               themeId: themeId,
               overrides: overrides,
               onThemeChanged: onThemeChanged ?? (_) {},
