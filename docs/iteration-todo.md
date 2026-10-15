@@ -700,3 +700,31 @@ git checkout main && git pull --ff-only
 **④ 剔除本轮（转 backlog）**：见上面的纠错；去掉错误前提后剩下的是「`typeColor()` 未数据化」，属观感打磨，改动面 7×4 个取值、收益低，验收口径留待下一轮。
 
 **约束复核**：五项裁决全部落在纯 Dart，无新依赖、无权限、无后台机制、无原生通道。
+
+#### ① 底色角色实施要点（已勘定，行号以 `85d017b` 为准）
+
+角色集从 11 扩到 **13**：新增 `chromeBg`（球 + 胶囊，不承载文字）与 `menuBg`（菜单面板，唯一承载文字）。两者进 `colorKeys`、**不进** `textColorKeys`——后者是会被对比度守卫校正的文字角色，底色不参与。
+
+取值要求：
+
+- `dark`：`chromeBg = Colors.white70`、`menuBg = Colors.white.withValues(alpha: 0.94)`；
+- `light`：`chromeBg = Colors.black54`、`menuBg = Colors.black.withValues(alpha: 0.9)`。这两组必须与现行字面量**逐位相等**（零外观突变），单测直接断言；
+- `contrast`：两者取**不透明** `maskColor`（最大化面板内文字对比）；
+- `sepia`：与 `maskColor` 同色相（暖暗 `0xE6` 级黑）；
+- 统一约束：面板不透明度 ≥0.9、球对 `maskColor` ≥3:1。
+
+| 文件 | 位置 | 改法 |
+| --- | --- | --- |
+| `lib/ui/overlay_theme.dart` | 构造参数与字段 | 增 2 个 `final Color` 与对应构造参数 |
+| 同上 | `colorKeys` `:76` | 追加两个角色名 |
+| 同上 | `_pick` `:233` 的 switch | 增 2 个 case |
+| 同上 | `copyWithColors` `:214` | 增 2 个参数并透传 |
+| 同上 | `toPalette()` `:250` | 把两个角色传给 `OverlayPalette` |
+| 同上 | 四个预设 `:91`(dark) `:113`(light) `:136`(contrast) `:159`(sepia) | 各补 2 个值 |
+| `lib/ui/overlay_page.dart` | `OverlayPalette` `:66` | 增 2 个 `required` 字段 |
+| 同上 | `darkPalette` / `lightPalette` 两个 const | 各补 2 个值（与预设逐位相等） |
+| 同上 | 站点 `:820`（球）、`:866-867`（菜单）、`:2312`（胶囊·回溯）、`:2342`（胶囊·透明度 HUD） | 字面量换成 `palette.chromeBg` / `palette.menuBg` |
+
+**无需迁移**：覆盖按角色名索引，老配置缺键即跟随主题。`schemaVersion` 可升 3，仅诊断用，**不得据此分支**。
+
+**验收**：两个新角色的 dark/light **逐位相等**断言；4 个站点不再出现底色字面量；`contrast` 两角色为不透明；老 JSON 解析后两角色跟随主题；两角色**不进**对比度守卫角色集。
