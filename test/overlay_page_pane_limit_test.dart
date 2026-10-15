@@ -33,16 +33,13 @@ const MethodChannel _controlChannel = MethodChannel('x-slayer/overlay_channel');
 void _mockControlChannel(WidgetTester tester) {
   final TestDefaultBinaryMessenger messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-  messenger.setMockMethodCallHandler(_controlChannel.name, (
-    MethodCall call,
-  ) async {
+  messenger.setMockMethodCallHandler(_controlChannel, (MethodCall call) async {
     if (call.method == 'isPermissionGranted') return true;
     return null;
   });
   addTearDown(
-    () => messenger.setMockMethodCallHandler(_controlChannel.name, null),
-  );
-}
+    () => messenger.setMockMethodCallHandler(_controlChannel, null),
+  );}
 
 /// 上报方向（框架 → 平台）挂 echo 应答，避免 shareData 等待回复挂死。
 void _mockMessengerEcho(WidgetTester tester) {
