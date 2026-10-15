@@ -196,6 +196,21 @@ double overlayHeightLimit(double screenHeight) =>
 /// 无需二次确认的最大栏数（prd F4）：超过 4 栏属于高性能模式，切换前强制确认。
 const int maxStandardPaneCount = 4;
 
+/// 栏位硬上限（prd F2 的「1~9 栏」）：单次最多 9 栏。
+///
+/// 与 [recommendedOverlaySize] 的 `<= 9` 档对齐：每一栏都是一条独立 WebSocket 与
+/// 独立签名 / 解码链路，再多就没有对应的窗口尺寸档位，低端机会直接卡死。
+const int maxPaneCount = 9;
+
+/// 当前 [currentCount] 栏时还能不能再加一栏。
+///
+/// 悬浮窗内两个加栏入口与首页多选共用同一判定，避免出现「某处能加到 12 栏」的口径分裂。
+bool canAddPane(int currentCount) => currentCount < maxPaneCount;
+
+/// [paneCount] 栏是否需要高性能模式强制确认（prd F4）。
+bool needsHighPerformanceConfirm(int paneCount) =>
+    paneCount > maxStandardPaneCount;
+
 /// 悬浮窗分栏网格：不再限制栏位上限，列数按栏位数推导、行数向上取整。
 ///
 /// 布局完全由栏位数推导，没有额外选项，故不占用协议字段单独传递。
