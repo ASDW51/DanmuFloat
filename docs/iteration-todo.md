@@ -9,7 +9,7 @@
 
 | 项 | 状态 | 位置 |
 | --- | --- | --- |
-| 迭代基线 | 已就位 | `main` @ bc704b3（PR #21 合并点） |
+| 迭代基线 | 已就位 | `main` @ 74c842e（PR #25 合并点） |
 | CR-01 代码审查修复 | ✅ 已合入 | PR #11 / PR #12 → `main` |
 | PM-001 | ✅ 已合入 | PR #7 → `main` |
 | PM-002 | ✅ 已合入 | PR #8 → `main` |
@@ -17,8 +17,8 @@
 | UX-02 手动重试入口 | ✅ 已合入 | PR #16 → `main` |
 | UX-03 短链解析超时 + 可取消 | ✅ 已合入 | PR #15 → `main` |
 | UX-04 刷新全部 + 陈旧可见 | ✅ 已合入 | PR #17 → `main` |
-| UX-05 加栏确认 + 硬上限 | ⬜ 首页侧待合 + 悬浮窗侧待做 | 首页侧在 `feat/pane-add-guard`；悬浮窗侧从新 `main` 另起分支 |
-| UX-06 引导手动步骤视觉/文案 | ⬜ 未开始 | 见待办清单 |
+| UX-05 加栏确认 + 硬上限 | ✅ 已合入 | 首页侧 PR #23、悬浮窗侧 PR #24 → `main` |
+| UX-06 引导手动步骤视觉/文案 | ✅ 已合入 | PR #25 → `main` |
 | UX-07 标识行短文案 + 重试收进菜单 | ✅ 已合入 | PR #19 → `main` |
 | UX-08 隐藏标识行后仍可重试 | ✅ 已合入 | PR #19 → `main` |
 | UX-09 连接状态中文化 + 诊断扩充 | ✅ 已合入 | PR #20 → `main` |
@@ -106,7 +106,11 @@
 - **建议测试**：`test/home_page_test.dart`（已有 `_pumpUntil` / 双通道 mock / 注入目录等基建）。相对时间文案用可注入时钟或断言「含『前』字」，避免时间抖动导致 flaky。
 - **风险/依赖**：需要给 `ManagedRoom` 增加「最近刷新时间」字段并落盘（`lib/room/managed_room.dart`），会**改动 `rooms.json` 结构**——必须保持向后兼容（`tryParse` 缺字段按 null 处理，旧备份可读）。这是本清单里唯一动持久化结构的一条；若认为风险偏高，可先只做「刷新全部 + 进度」，把相对时间拆到后续条目。
 
-### 🚧 UX-05　悬浮窗内加栏位补高性能确认与硬上限（P2 · 进行中）
+### ✅ UX-05　悬浮窗内加栏位补高性能确认与硬上限（P2 · 已合入 PR #23 / PR #24）
+
+> 交付拆分：PR #23 = 首页侧 + 公共确认弹窗（`lib/ui/high_performance_dialog.dart`、`maxPaneCount` / `canAddPane` / `needsHighPerformanceConfirm`）；PR #24 = 悬浮窗侧（两个加栏入口的确认与到顶禁用）。
+>
+> 已知缺口：「4 栏 → 加第 5 栏时弹确认、取消不加 / 确认 +1」的完整点击链路未覆盖（同属 `OverlayPage`、与到顶用例无法同文件 mount），当前由共用弹窗用例与阈值边界用例兜住；计划与 UX-12 的窄窗用例一并补。
 
 - **进展**：首页侧已完成（PR 待开）——`overlay_bridge.dart` 新增 `maxPaneCount = 9` 与纯判定 `canAddPane` / `needsHighPerformanceConfirm`，两处入口共用新建的 `lib/ui/high_performance_dialog.dart`，首页多选在勾满 9 栏后锁定未勾选行并给出上限提示。
 - **待做**：悬浮窗内「添加栏位」（`_addPane`）与「栏位管理」里的加栏在栏数将 > 4 时弹同一确认、栏数达 9 时两个入口禁用并提示「已达上限 9 栏」、栏位管理弹窗说明文案补上当前上限。
@@ -121,7 +125,7 @@
 - **建议测试**：`test/overlay_page_test.dart` 扩展（候选房间需经 `OverlayRooms` / `OverlayConfig` 消息下发，可参考 `test/overlay_bridge_test.dart` 的构造方式）；上限常量的边界（9 / 10）用纯函数或 `OverlayGrid` 级别用例覆盖更稳。
 - **风险/依赖**：确认弹窗是异步 `await showDialog`，`_addPane` 的 `setState` 需在 `mounted` 检查之后；注意与 UX-02 同时改 `overlay_page.dart` 时的合并顺序。
 
-### ⬜ UX-06　首启引导手动类步骤：视觉区分度 + 明确「可不处理」（P2）
+### ✅ UX-06　首启引导手动类步骤：视觉区分度 + 明确「可不处理」（P2 · 已合入 PR #25）
 
 - **现状与问题**：引导第 4 步写死 `done: false, manual: true`（`lib/ui/onboarding_page.dart:166-174`），`_StepTile` 对 `manual` 使用 `Icons.info_outline` + `Colors.blueGrey`（`onboarding_page.dart:249-251`）——**图标本身已是中性色，不是橙色警示**（旧 PM-006 的描述与当前代码不符）。但仍有真实问题：`manual` 分支与「已完成」的绿色 `check_circle` 视觉差异小，且 subtitle 只写「厂商设置项各不相同，需在系统设置里手动开启」，**没有说明「可以不做」**；在「按顺序完成以下准备」的强暗示下，用户会以为不点完这步就不算配置完成。
 - **期望行为**：
