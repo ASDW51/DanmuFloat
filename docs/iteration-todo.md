@@ -9,7 +9,7 @@
 
 | 项 | 状态 | 位置 |
 | --- | --- | --- |
-| 迭代基线 | 已就位 | `main` @ e91eeac |
+| 迭代基线 | 已就位 | `main` @ 77c3d5e（PR #20 合并点；PR #21 合并后顺延） |
 | CR-01 代码审查修复 | ✅ 已合入 | PR #11 / PR #12 → `main` |
 | PM-001 | ✅ 已合入 | PR #7 → `main` |
 | PM-002 | ✅ 已合入 | PR #8 → `main` |
@@ -17,11 +17,22 @@
 | UX-02 手动重试入口 | ✅ 已合入 | PR #16 → `main` |
 | UX-03 短链解析超时 + 可取消 | ✅ 已合入 | PR #15 → `main` |
 | UX-04 刷新全部 + 陈旧可见 | ✅ 已合入 | PR #17 → `main` |
-| UX-05 加栏确认 + 硬上限 | 🚧 进行中 | 分支 `feat/pane-add-guard`（首页侧已完成；悬浮窗侧等 UX-07 / UX-08 合入后再动同一文件） |
+| UX-05 加栏确认 + 硬上限 | ⬜ 首页侧待合 + 悬浮窗侧待做 | 首页侧在 `feat/pane-add-guard`；悬浮窗侧从新 `main` 另起分支 |
 | UX-06 引导手动步骤视觉/文案 | ⬜ 未开始 | 见待办清单 |
-| UX-07 ~ UX-11 | ⬜ 未开始 | 见待办清单（PM 第二轮新增；UX-07 为 P0） |
+| UX-07 标识行短文案 + 重试收进菜单 | ✅ 已合入 | PR #19 → `main` |
+| UX-08 隐藏标识行后仍可重试 | ✅ 已合入 | PR #19 → `main` |
+| UX-09 连接状态中文化 + 诊断扩充 | ✅ 已合入 | PR #20 → `main` |
+| UX-10 回前台补刷过期房间 | ✅ 已合入 | PR #21 → `main` |
+| UX-11 批量刷新只落盘一次 | ✅ 已合入 | PR #21 → `main` |
+| UX-12 最小窗宽标识行溢出 | ⬜ 未开始 | 第三轮新增（P1），与 UX-05 悬浮窗侧串行 |
+| UX-13 补刷失败节流 + 同主播互斥 | ✅ 已合入 | PR #21 → `main`（第三轮新增，与 UX-10 同批收口） |
+| UX-14 弹幕页失败原因口径对齐 | ⬜ 未开始 | 第三轮新增（P2） |
+| UX-15 菜单未绑定栏位文案 | ⬜ 未开始 | 第三轮新增（P2），与 UX-12 同区域需串行 |
+| UX-16 权限 banner 补「去系统设置」 | ⬜ 未开始 | 第三轮新增（P2） |
 
 > 待办清单已按 PM 子代理 2026-10-15 的第一版审查**整版重写**：旧编号 PM-003 ~ PM-006 作废（保留项重新编号为 UX-01 ~ UX-06；其中旧 PM-006 的问题描述与现状不符，已改写为 UX-06）。
+>
+> 第三轮（2026-10-16 复核 UX-07 ~ UX-11 落地代码后）新增 UX-12 ~ UX-16；UX-10 的两处收口（失败路径也要节流、同一 webRid 单飞）并入 PR #21 落地，见表内 UX-13。第三轮决策见 [PM 第三轮决策](#pm-第三轮决策已批准实现时照此执行)。
 
 ### PM 对当前体验的总体判断
 
@@ -121,7 +132,7 @@
 - **建议测试**：`test/onboarding_page_test.dart` 断言 manual 步骤的图标与文案，用 `find.byIcon` / `find.textContaining`。
 - **风险/依赖**：纯文案与视觉，零风险。注意 AGENTS.md 要求「权限申请入口任意时刻可达」——本页是设置页「权限申请引导」的落地页，**不得删除任何步骤或按钮**，只调视觉与文案。
 
-### ⬜ UX-07　多栏 / 窄窗下栏目标识行被重试入口撑溢出，重试反而点不到（P0）
+### ✅ UX-07　多栏 / 窄窗下栏目标识行被重试入口撑溢出，重试反而点不到（P0 · 已合入 PR #19）
 
 - **现状与问题**：`_buildTitleBar` 是单行 `Row`，固定宽度子项已有状态点 / 换绑箭头 / 焦点 / 暂停（`lib/ui/overlay_page.dart` 标题栏区域），UX-02 又插入 `Icons.refresh` + 「点此重试」文案。5 栏起 `OverlayGrid` 变 3 列，`defaultOverlayWidth = 400` 时单栏仅约 133dp，扣掉栏内边距只剩约 110~120dp，而固定子项 + 重试按钮最小宽度已超出；`_stageText` 在 error / offline 态又更长。真机结果：栏目标识行右侧出现黄黑溢出条，**重试按钮被挤出可视区**——救活入口在最需要它的多栏场景下点不到。
 - **期望行为**：
@@ -132,20 +143,28 @@
 - **建议测试**：新开独立文件（`OverlayPage` 的静态单订阅流每文件只能 mount 一次），用 `tester.view.physicalSize` 固定 3 栏窄窗尺寸断言无溢出且重试可点。
 - **风险/依赖**：纯布局，零依赖。**溢出条只在 debug 构建可见，`flutter analyze` 不会报错**，必须靠这条 Widget 断言把回归锁住。与 UX-08 都改标题行 / 悬浮球菜单，**合并为一个 PR**（PM 决策 1）。
 
-### ⬜ UX-08　隐藏栏目标识行后失败栏位既看不见也点不到；重试后失败原因还会消失（P1）
+### ✅ UX-08　隐藏栏目标识行后失败栏位既看不见也点不到；重试后失败原因还会消失（P1 · 已合入 PR #19）
 
 - **现状与问题**：
   1. 栏目标识行由 `_prefs.showTitleBar` 控制（设置页有开关），关掉后阶段文案、状态点、**重试入口**全部不渲染；窗内唯一入口悬浮球菜单里没有任何栏位连接状态或重试入口，用户只看到「有几栏一直没弹幕」，分不清未开播 / 连接失败 / 已静音。
   2. `_retry()` 先 `setState(() => _error = null)` 再 `restart()`，而 `_error` 只在 `_report()` 里由 `session.errorMessage` 回填；重试后若停在 `offline`（不再是 error），`_error` 永远为 null，空列表只剩「暂无弹幕」，用户失去唯一可查的原因。
 - **期望行为**：
-  1. 悬浮球菜单新增「栏位状态」区块：逐栏一行「第 N 栏 · 主播名 · 状态」，**仅对 `shouldOfferRetry(...)` 为真的栏位**显示「重试」按钮（复用既有判定，不新增口径）；栏位 ≤ 1 时可省略，避免单栏菜单变长；
+  1. 悬浮球菜单新增「栏位状态」区块：逐栏一行「第 N 栏 · 主播名 · 状态」，**仅对 `shouldOfferRetry(...)` 为真的栏位**显示「重试」按钮（复用既有判定，不新增口径）。显示条件（第三轮改写，取代旧的「栏位 ≤ 1 时可省略」）：
+
+     | 场景 | 期望 |
+     | --- | --- |
+     | 单栏 + 健康（live / connecting / 复检中） | 菜单不显示该区块 |
+     | 单栏 + error，或 offline 且复检已停 | 显示，且「重试」可点、点击触发重建 |
+     | ≥ 2 栏 | 恒显示；非 retryable 行只给「第 N 栏 · 名称 · 状态」，无按钮 |
+
+     该区块**不按 `showTitleBar` 门控**：标识行对重试只是「展示」（短状态词 + Tooltip），唯一可点入口本来就在菜单里；按 `showTitleBar` 门控只会多一条分支、多一组用例，对用户零收益。「`showTitleBar: true` 时行为不变」应理解为**不出现第二个可点重试入口**。
   2. 该区块与 `showTitleBar` 无关，标识行关掉后仍是统一兜底入口；
   3. `_retry()` 不再无条件清空 `_error`：保留到下一次成功建连或用户主动清空。
 - **验收标准**：`showTitleBar: false` + 一栏失败态下，菜单里能看到该栏状态与可点「重试」，点击触发重建；`showTitleBar: true` 时行为不变（无重复入口）；重试后再次失败，失败原因在空态文案里仍可见。
 - **建议测试**：独立文件单次 mount；断言菜单中失败栏位「重试」存在、点击后 `restart` 生效（假 `RoomInfoClient` 计数）、二次失败后 `_error` 仍出现在空态文案。
 - **风险/依赖**：`_reports` 里现成的逐栏 `_Report` 直接复用，无需新增状态。与 UX-07 严格串行 / 同 PR。
 
-### ⬜ UX-09　弹幕页把内部枚举名直接显示给用户，失败原因不进诊断信息（P1）
+### ✅ UX-09　弹幕页把内部枚举名直接显示给用户，失败原因不进诊断信息（P1 · 已合入 PR #20）
 
 - **现状与问题**：弹幕页状态栏渲染 `'连接: ${_session!.connectionState.name}'`，`DanmuConnectionState` 的 `.name` 是英文枚举名（`idle / connecting / connected / reconnecting / failed / closed`），真机出现「连接: reconnecting」这类内部术语，同行其它元素已是中文；「复制诊断信息」只含样式 / 凭证 / 悬浮窗开关，**不含连接状态与失败原因**，悬浮窗侧诊断完全缺失，用户报障时维护者无法区分签名降级 / 接口风控 / WS 握手被拒。
 - **期望行为**：
@@ -155,25 +174,67 @@
 - **建议测试**：枚举映射纯单测；诊断文本用 `settings_page_test.dart` 断言包含关键字，并**新增一条「诊断文本不含凭证值」的断言**把合规底线锁死。
 - **风险/依赖**：零依赖。合规提醒：新增诊断字段不得带 cookie / ttwid / 凭证。
 
-### ⬜ UX-10　回前台后开播状态可能永久陈旧；从没刷新过的房间显示成「未开播」（P1）
+### ✅ UX-10　回前台后开播状态可能永久陈旧；从没刷新过的房间显示成「未开播」（P1 · 已合入 PR #21）
 
 - **现状与问题**：
   1. `didChangeAppLifecycleState` 回前台只收敛悬浮窗权限与开关，**不刷新任何房间信息**；挂后台一夜回前台，行内仍是昨晚的「直播中」，只有「已刷新 12 小时前」这行灰色小字暗示是旧值，判断成本全转嫁给用户。
   2. `living == null`（从未刷新成功）与 `living == false`（已下播）文案完全相同都是「未开播」；弱网 / 风控导致自动刷新失败后，用户会以为主播没播，实际是数据压根没拿到。
+     - **落地说明**：「未刷新」文案代码里**已存在**（`_livingLabel(null) => '未刷新'`，`lib/ui/home_page.dart`），本条只需保证补刷路径不改掉它。
 - **期望行为**：
   1. 回前台时若存在 `lastRefreshedAt` 早于阈值（**30 分钟**，PM 决策 3）或为 null 的房间，自动触发一次静默刷新（复用 `_refreshRoomQuiet` 串行路径，不弹 SnackBar、不推悬浮窗配置）；
   2. `living == null` 的文案改为「未刷新」（PM 决策 4），`living == false` 才叫「未开播」。
 - **验收标准**：假时钟 + 假 `RoomInfoClient`，`lastRefreshedAt` 为 1 小时前时触发 `AppLifecycleState.resumed` 会刷新；为 1 分钟前时**不**刷新；`living == null` 的行显示「未刷新」。
-- **建议测试**：`test/home_page_test.dart`（基建齐备），生命周期用 `tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed)` 驱动。
+- **第三轮补的验收（已随 PR #21 落地）**：
+  1. **失败路径也要节流**：`lastRefreshedAt` 只在成功时写，只按它判断会让弱网 / 被风控时每次回前台都重打整列表；因此另记「上次尝试时间」（纯内存、不落盘），同一 30 分钟窗口内不再自动补刷。断言：补刷失败后 1 分钟内再 `resumed` 不发请求；超过 30 分钟才允许再试。
+  2. **同一 webRid 单飞**：补刷在飞时行内「刷新」与「刷新全部」必须跳过该主播，否则同一主播两路在飞，抵消 UX-04 刻意串行的风控考虑。断言：用可挂起的假 `RoomInfoClient` 制造重叠窗口，该 webRid 仍只收到 1 次请求。
+  3. **每批至多推送一次悬浮窗候选**：补刷不是逐条推 `rooms`，一批 ≤ 1 条（否则像刷屏一样连发配置）。
+- **建议测试**：`test/home_page_test.dart`（基建齐备）。生命周期**不要**用 `tester.binding.handleAppLifecycleStateChanged`（`WidgetsBinding` 上该成员带 `@protected`，在 App 测试里调用会被 `invalid_use_of_protected_member` 拦下），改为向 `flutter/lifecycle` 渠道发一条消息：`messenger.handlePlatformMessage(SystemChannels.lifecycle.name, const StringCodec().encodeMessage('AppLifecycleState.resumed'), (_) {})`；先发 `inactive` 再发 `resumed`，避免与测试进程初始的 `resumed` 同态被忽略。
 - **风险/依赖**：**节流是硬要求**（30 分钟内不重复打接口），必须在测试里锁住，否则切前台频繁请求会被风控。不引入任何新依赖 / 权限 / 后台机制。
 
-### ⬜ UX-11　批量刷新期间每个主播各落盘一次，N 个主播 = N 次全量写盘（P2）
+### ✅ UX-11　批量刷新期间每个主播各落盘一次，N 个主播 = N 次全量写盘（P2 · 已合入 PR #21）
 
 - **现状与问题**：`_refreshRoomQuiet` 每次成功都 `await _store.save(next)`，`_refreshAll` 串行调用 N 次 → 写 N 次全量 `rooms.json`；PR #17 只做到了「只同步一次悬浮窗配置」，写盘次数没变。列表长时刷新全程伴随持续磁盘 I/O，进度条更易卡顿。
 - **期望行为**：批量路径下内存状态逐条更新、**落盘合并为一次**（循环结束后统一 `save`）；单条刷新保持现状（点一次写一次）。中途失败仍要把已成功的部分落盘。
 - **验收标准**：`_refreshAll` 完成时 `RoomStore.save` 只被调用 1 次且最终内容含全部更新；最后一条失败不丢前面的结果。
 - **建议测试**：`test/home_page_test.dart` + `test/room_store_test.dart`。`_refreshRoomQuiet` 被两条路径共用，抽参数时不得改变单条路径语义（否则 UX-04 既有用例会挂）。
 - **风险/依赖**：低。与 UX-10 都改 `_refreshRoomQuiet` / `_refreshAll` 一带，建议 UX-10 先合再动本条。
+
+### ⬜ UX-12　最小窗宽下 2 栏起标识行仍会溢出（P1 · 第三轮新增）
+
+- **现状与问题**：标题行固定子项 ≈ 状态点 8 + 间隔 5 + 换绑箭头 15 + 焦点 22 + 暂停 22 ≈ **72dp**（`lib/ui/overlay_page.dart` 标识行）；窗口可手动拖到 `minOverlayWidth = 200`（`lib/app/overlay_bridge.dart`）且宽度会落盘。2 栏（2 列）时单栏内容宽 ≈ 200/2 − 12 = 88dp，「已连接」≈ 27dp → ≈99dp **已溢出**；5 栏以上（3 列）单栏内容仅 ≈55dp，**必然溢出**；显示在线人数时文案 6~7 字（「在线 1.2万」），400dp / 5 栏这一档也逼近临界。溢出条只在 debug 构建可见，release 表现为内容被裁切 / 压到相邻栏。
+- **期望行为**：标识行永不溢出——状态词用 `Flexible` + 省略号兜底；极窄时折叠换绑箭头与焦点图标（换绑 / 焦点在悬浮球菜单「栏位管理」已有入口，暂停还有双击），**不得删功能**。
+- **验收标准**：新增独立文件 `test/overlay_pane_minwidth_test.dart`（受静态单订阅流限制，不能复用 narrow 文件）：2 栏 + 宽 200dp、9 栏 + 宽 200dp 两组，分别渲染「失败」态与「在线 …」态，`tester.takeException()` 为 null；并断言暂停（双击）与换绑入口仍可触达。
+- **风险/依赖**：与 UX-05 悬浮窗侧都改标题行 / 菜单区，**必须串行，本条排在 UX-05 之后**。
+
+### ✅ UX-13　补刷失败没有节流，且同一主播可能并发两条请求（P1 · 已合入 PR #21）
+
+- **现状与问题**：
+  1. `isRoomStale` 只看 `lastRefreshedAt`，而它**只在成功时写**；弱网 / 被风控时每次回前台都会把整列表重打一遍——30 分钟节流对「失败」完全不生效，恰好放过了它该防的场景。
+  2. 回前台补刷只在入口看 `_refreshAllRunning`，循环里不登记在飞集合；补刷可持续数秒，期间行内「刷新」仍可点、`_refreshAll` 也能启动 → 同一 webRid 两路在飞，抵消 UX-04 刻意串行的风控考虑。
+- **期望行为**：同一 webRid 任意时刻只有一路在飞；补刷额外受「距上次尝试」的 30 分钟窗口约束（纯内存、不落盘）；补刷不制造额外视觉噪音（不弹提示），但行内入口在该主播在飞时置灰。
+- **验收标准**：补刷失败后 1 分钟内再 `resumed` 不发请求；超过 30 分钟才允许再试；可挂起假客户端下，同一 webRid 在飞时行内入口禁用、批量刷新跳过它，仍只有 1 次请求；每批至多推送一次悬浮窗候选。
+- **风险/依赖**：无新依赖 / 权限；`_lastStaleRefreshAttemptAt` 只在内存，进程重启即重置（可接受：重启本身就会走一次首刷）。
+
+### ⬜ UX-14　弹幕页失败原因仍会被清掉，与悬浮窗口径不一致（P2）
+
+- **现状与问题**：弹幕页 `_retry()` 先 `setState(() => _errorMessage = null)`，阶段监听又**无条件** `_errorMessage = session.errorMessage` → 任何阶段变化（解析中 / 未开播）都会抹掉原因，空列表退回「暂无弹幕」；悬浮窗侧 UX-08 已改为「只覆盖、live 才清」。
+- **期望行为**：与悬浮窗同口径；把「何时保留 / 清空原因」抽成纯函数（沿用 UX-09 的做法），页面只调用。
+- **验收标准**：纯函数单测覆盖 error → offline → live 迁移（无需新增 widget 注入口）。
+- **风险/依赖**：零依赖；`lib/ui/danmu_page.dart` 无其它待办竞争。
+
+### ⬜ UX-15　菜单「栏位状态」把未绑定栏位显示成「第 1 栏 ·  · 等待中」（P2）
+
+- **现状与问题**：`_buildPaneStatusRow` 用 `_roomNameOf(_webRids[index])`，未绑定栏 webRid 为空 → 名字空串；`_reports` 无条目时状态写死「等待中」→ 出现 `·  ·` 双空格且语义不符。
+- **期望行为**：显示「第 N 栏 · 未绑定」，与标题行「第 N 栏未绑定」同口径。
+- **验收标准**：多栏用例下发一个空 webRid 栏位，`find.textContaining('未绑定')` 命中且不出现 `·  ·`。
+- **风险/依赖**：与 UX-12 同区域（标识行 / 菜单），需串行或拆两个小 PR。
+
+### ⬜ UX-16　权限 banner 的「重试授权」在「拒绝且不再询问」后是死胡同（P2）
+
+- **现状与问题**：首页 banner 只有「重试授权」走 `ensureOverlayPermission()`；系统不再弹框时点了没有任何反馈，也没有「去系统设置」出口（该出口只在引导页第 4 步与设置页入口里）。AGENTS §5 要求权限入口任意时刻可达，这里是「可达但走不通」。
+- **期望行为**：重试返回 false 后 banner 给出「去系统设置」次级入口，复用 `systemPermissions.openAppSettings()`（无新权限 / 依赖）。
+- **验收标准**：用现有 seam `setSystemPermissionBackend`（`lib/system/system_permissions.dart`，测试尚未用过）注入返回 false 的假后端，断言 banner 出现「去系统设置」且点击调用一次 `openAppSettings`。
+- **风险/依赖**：改 `lib/ui/home_page.dart`，与 UX-05 首页侧同文件 → 排在 `feat/pane-add-guard` 之后合入。
 
 ---
 
@@ -187,6 +248,18 @@
 6. **UX-11 可做但排在 UX-10 之后**；若本轮 PR 预算只够 3 条，先砍 UX-11（纯性能、用户感知弱）。
 7. **本轮 PR 预算 3~4 个**：① UX-07 + UX-08 ② UX-09 ③ UX-10 ④ UX-05（顺延项）。UX-06 与 UX-11 视 CI 情况再排。
 8. **本清单不触碰硬边界**：5 条全部是纯 UI / 纯函数 / 复用既有 `WidgetsBindingObserver`，无新依赖、无新权限、无后台机制；纯查看器、免责声明不可绕过、清除数据三步走均未被改动。
+
+---
+
+## PM 第三轮决策（已批准，实现时照此执行）
+
+1. **「栏位状态」显示条件按 UX-08 的三行矩阵**（多栏恒显示 / 单栏仅 unhealthy 显示），**不按 `showTitleBar` 门控**：标识行对重试只是展示，唯一可点入口本来就在菜单。
+2. **复检预算用尽时补发一条 `offline` 是正确解法**：不新增独立信号流、不把 `LiveDanmuSession._stages` 改成 `sync: true`、不追加 `distinct()`——「非 sync 的 broadcast」正是「监听回调执行时 `autoRechecking` 已复位」的前提。单测锁「恰好补发一条」+「该事件到达时 `shouldOfferRetry(...)` 为 true」。
+3. **UX-10 与 UX-11 并为一个 PR**（同一段刷新 / 落盘代码）；UX-11 的「只落盘一次」是**硬验收**，用 `@visibleForTesting RoomStore? store` 注入口断言 `save` 次数，不能只靠注释约定。
+4. **UX-10 补两条硬验收**：① 失败路径同样受 30 分钟窗口节流（纯内存的「上次尝试时间」）；② 同一 webRid 任意时刻只允许一路在飞。`_syncOverlayRooms()` 保留，但口径改为「每批 ≤ 1 条，不逐条推送」。
+5. **UX-05 拆两步**：先合 `feat/pane-add-guard`（首页侧 + 公共确认弹窗），再从新 `main` 做悬浮窗侧。
+6. **本轮 PR 预算 3~4 个**：① #21 收口（UX-10 / UX-11 / UX-13）② docs 台账 ③ `feat/pane-add-guard` ④ UX-05 悬浮窗侧；UX-12 与 UX-06 进下一批（若允许第 5 个，UX-12 优先于 UX-06——它是用户可见的正确性兜底）。
+7. **本批仍不触碰硬边界**：全部是纯 UI / 纯函数 / 复用既有 `WidgetsBindingObserver` 与注入点，无新依赖、无新权限、无后台机制。
 
 ---
 
@@ -246,6 +319,7 @@
 - 任何「不再提示」类记忆开关（AGENTS.md 要求高性能模式强制确认）
 - 给 `overlay_page.dart` 做顺手重构（AGENTS.md 要求 PR 单一目的）
 - 任何需要新增本地环境、新依赖或新权限的方案（本轮约束）
+- 为会话阶段流新增独立信号流，或把 `LiveDanmuSession._stages` 的 `broadcast()` 改成 `sync: true` / 追加 `distinct()`（会让「复检预算用尽 → 放出重试入口」退回永久「复检中…」，见 PM 第三轮决策 2）
 
 ---
 
@@ -278,3 +352,8 @@ git checkout main && git pull --ff-only
 - 悬浮窗尺寸单位：`showOverlay` 收物理像素，`resizeOverlay` 收 dp，不可混用。
 - 时间戳单位：AGENTS.md 第 5 节要求**毫秒**；`ManagedRoom.addedAt` 是历史遗留的秒（为兼容已落盘数据保持原样），新字段一律毫秒（如 `lastRefreshedAt`）。
 - 同时改 `lib/app/live_danmu_session.dart` / `lib/ui/overlay_page.dart` 的条目（UX-01 / UX-02 / UX-05 / UX-07 / UX-08）**串行合入**；UX-07 与 UX-08 合并为一个 PR，UX-05 排在其后。
+- **同一分支不得叠加两个条目**：`feat/resume-stale-refresh` 上曾混入 UX-05 悬浮窗侧改动（还依赖未合并的 `feat/pane-add-guard`），一提交 CI 必红。提交前先 `git status` 确认改动只属于本条。
+- **引用公共文件 / 常量前先确认它已在 `main`**：`lib/ui/high_performance_dialog.dart` 与 `canAddPane` / `maxPaneCount` / `needsHighPerformanceConfirm` 目前只存在于 `feat/pane-add-guard`，主线分支引用它们会直接编译不过。
+- `lib/ui/overlay_page.dart` 的 UX-05（悬浮窗侧）、UX-12、UX-15 三处同区域，**必须串行合入**（顺序 UX-05 → UX-12 → UX-15）。
+- 断言「落盘 / 推送次数」这类副作用时，要**等它真正发生**再断言（例如等 `rooms` 推送出现）；UI 更新早于 `save`，抢时序会随机读到旧值（PR #21 首轮 CI 两次栽在这里）。
+- 影响按钮可用性的可变状态变更必须走 `setState`：`_autoRefreshing` 最初直接 `add`，行内按钮不变灰（PR #21 CI 抓到）。
