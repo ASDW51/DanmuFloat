@@ -71,6 +71,20 @@ String buildDanmuDiagnostics({
   return buffer.toString().trimRight();
 }
 
+/// 阶段变化后该保留哪条失败原因（UX-14，与悬浮窗 UX-08 同口径）。
+///
+/// 抽成纯函数是为了不依赖 widget 注入口就能覆盖 error → offline → live 的迁移：
+/// 只有真正连上（live）才算翻篇，其余阶段一律「有原因就覆盖、没原因就留着」，
+/// 否则「解析中 / 未开播」会把用户唯一能看到的失败原因抹掉，空列表退回「暂无弹幕」。
+String? nextErrorReason(
+  String? current, {
+  required LiveSessionStage stage,
+  String? message,
+}) {
+  if (message != null && message.isNotEmpty) return message;
+  return stage == LiveSessionStage.live ? null : current;
+}
+
 class DanmuPage extends StatefulWidget {
   const DanmuPage({super.key, required this.webRid, this.title});
 
@@ -257,7 +271,8 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   Future<void> _retry() async {
     final LiveDanmuSession? session = _session;
     if (session == null) return;
-    setState(() => _errorMessage = null);
+    // 不在这里清空原因：与悬浮窗同口径，重试后若仍失败 / 停在未开播，
+    // 上一次的原因要留到真正连上（live）为止（UX-14）。
     await session.restart();
   }
 
@@ -272,7 +287,12 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {
         _stage = stage;
-        _errorMessage = session.errorMessage;
+        // 失败原因只覆盖、不随阶段清空：重试后若停在未开播，用户仍要能看到原因（UX-14）。
+        _errorMessage = nextErrorReason(
+          _errorMessage,
+          stage: stage,
+          message: session.errorMessage,
+        );
       });
     });
     // 房间统计只用来更新在线人数、进场只进底部单行，过滤时都不能挡掉。
