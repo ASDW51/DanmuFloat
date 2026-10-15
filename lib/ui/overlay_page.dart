@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
+import 'package:danmu_float/ui/overlay_theme.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/danmu/auto_scroll.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
@@ -281,6 +282,19 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 是否浅色皮肤（prd F20）。
   bool _lightTheme = false;
 
+  /// 当前主题标识：随 style / config 消息到达，老消息由 lightTheme 推导。
+  String _themeId = overlayStyleDarkThemeId;
+
+  /// 角色级颜色覆盖：空表表示完全跟随主题。
+  Map<String, int> _colorOverrides = const <String, int>{};
+
+  /// widget 唯一可读的调色板：主题解析 + 角色级覆盖合并。
+  ///
+  /// 默认配置下这里产出的取值与原 OverlayPalette.of(lightTheme) 逐字段相同
+  /// （由 test/overlay_theme_test.dart 钉住），因此默认外观零变化。
+  OverlayPalette get _palette =>
+      OverlayTheme.preset(_themeId).resolve(_colorOverrides).toPalette();
+
   /// 是否显示栏目标识行（prd F6）。
   bool _showTitleBar = true;
 
@@ -401,6 +415,9 @@ class _OverlayPageState extends State<OverlayPage> {
         _scrollSpeed = style.scrollSpeed;
         _paneStyles = style.paneStyles;
         _lightTheme = style.lightTheme;
+        _themeId = style.themeId ??
+            (_lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId);
+        _colorOverrides = style.colorOverrides;
         _showTitleBar = style.showTitleBar;
         _focusBehavior = style.focusBehavior;
         _dragLocked = style.dragLocked;
@@ -463,6 +480,7 @@ class _OverlayPageState extends State<OverlayPage> {
       _paneStyles = config.paneStyles;
       _roomOptions = config.roomOptions;
       _lightTheme = config.lightTheme;
+      _themeId = _lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId;
       _showTitleBar = config.showTitleBar;
       _focusBehavior = config.focusBehavior;
       _dragLocked = config.dragLocked;
@@ -640,7 +658,7 @@ class _OverlayPageState extends State<OverlayPage> {
 
   @override
   Widget build(BuildContext context) {
-    final OverlayPalette palette = OverlayPalette.of(_lightTheme);
+    final OverlayPalette palette = _palette;
     return Material(
       color: Colors.transparent,
       child: Container(
@@ -1046,7 +1064,7 @@ class _OverlayPageState extends State<OverlayPage> {
     child: Text(
       '等待配置',
       style: TextStyle(
-        color: OverlayPalette.of(_lightTheme).secondary,
+        color: _palette.secondary,
         fontSize: 12,
       ),
     ),
@@ -1405,7 +1423,7 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 焦点模式（prd F7）下按行 / 列加权：缩小让位给 3:1，隐藏则用 100:1
   /// 把非焦点栏压到近似零尺寸（仍保留 state，连接不会断）。
   Widget _buildPanes() {
-    final OverlayPalette palette = OverlayPalette.of(_lightTheme);
+    final OverlayPalette palette = _palette;
     if (_grid.isSingle) {
       return _buildPane(index: 0, webRid: _webRids.first, palette: palette);
     }
