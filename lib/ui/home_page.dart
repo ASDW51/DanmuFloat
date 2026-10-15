@@ -6,6 +6,7 @@
 // - 点击整行或行内「连接弹幕」= 单栏连接，进入 App 内弹幕页（页内可再开悬浮窗）
 // - 右上角多栏按钮 = 勾选主播后开多栏悬浮窗（栏位不限，按栏数推导网格）
 import 'dart:async';
+import 'dart:io';
 
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
@@ -25,22 +26,43 @@ import 'package:danmu_float/ui/danmu_page.dart';
 import 'package:danmu_float/ui/settings_page.dart';
 import 'package:flutter/material.dart';
 
+/// 冷启动 / 回前台时探测悬浮窗是否存活前的延后时长（PM-001）。
+///
+/// 主 App 启动时前台服务可能还在恢复窗口，立刻查 `isActive` 会拿到「未激活」
+/// 的中间态；延后再查一次，把偶发的中间态避过去，避免漏掉关闭入口。
+const Duration _overlayAliveProbeDelay = Duration(seconds: 1);
+
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, this.onResetAll});
+  const HomePage({
+    super.key,
+    this.onResetAll,
+    this.directoryResolver,
+    this.credentialStore,
+  });
 
   /// 「清除所有本地数据」完成后回调外层，把入口切回免责声明页（prd F26）。
   final VoidCallback? onResetAll;
+
+  /// 各 store 的目录解析器可注入，便于单测用临时目录隔离、不依赖 path_provider
+  /// 插件通道（默认走应用私有目录）。
+  final Future<Directory> Function()? directoryResolver;
+
+  /// 凭证存储可整体注入（默认用加密落盘后端）；单测传内存后端以避开
+  /// flutter_secure_storage 的原生通道。
+  final CredentialStore? credentialStore;
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
-  final RoomStore _store = RoomStore();
-  final OverlayPrefsStore _prefsStore = OverlayPrefsStore();
+  /// 各 store 用注入的目录解析器构造时可隔离到临时目录（单测用）；
+  /// 默认走应用私有目录。字段在 [initState] 按 [widget.directoryResolver] 初始化。
+  late final RoomStore _store;
+  late final OverlayPrefsStore _prefsStore;
 
   /// 凭证存储：用户配置的多份凭证加密落盘，启动时读回；主播可分别指定使用哪份。
-  late final CredentialStore _credentialStore = CredentialStore();
+  late final CredentialStore _credentialStore;
 
   /// 已配置的凭证列表，用于长按菜单里的「使用凭证」选择与行内展示。
   List<CredentialProfile> _credentials = const <CredentialProfile>[];
@@ -90,6 +112,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // 单测可注入临时目录解析器，把本地存储隔离到临时目录、不依赖 path_provider
+    // 插件通道（见 HomePage.directoryResolver）。默认仍走应用私有目录。
+    final Future<Directory> Function()? resolver = widget.directoryResolver;
+    _store = RoomStore(directoryResolver: resolver);
+    _prefsStore = OverlayPrefsStore(directoryResolver: resolver);
+    _credentialStore = widget.credentialStore ?? CredentialStore();
     WidgetsBinding.instance.addObserver(this);
     _overlaySubscription = overlayStatusStream.listen((OverlayStatus status) {
       if (!mounted) return;
@@ -99,6 +127,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _overlayPermissionDenied = true;
         });
         return;
+      }
+      // 悬浮窗有活跃栏位绑定 = 窗口真实存在（PM-001）：弹幕页开的单栏窗也会持续
+      // 上报，这里据此把本页状态补成「已开启」，让首页出现关闭入口。
+      // webRids 为空的上报（如权限自查中的空窗上报）不动本页状态。
+      if (status.webRids.isNotEmpty && !_overlayVisible) {
+        setState(() => _overlayVisible = true);
       }
       // 悬浮窗内切换了某栏绑定的房间，或经悬浮球菜单改了偏好（prd F8 / F15 / F21）：
       // 把最新绑定与偏好落盘。
@@ -114,6 +148,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // 凭证要先于任何连接读回：刷新房间信息与弹幕连接都按同一份取值。
     unawaited(_loadCredentials());
     unawaited(_refreshOverlayPermission());
+    // 悬浮窗可能是在弹幕页开的、或进程重启后前台服务仍带着窗口活着（PM-001）：
+    // 本页的开关状态只认「窗口真实是否存在」，进首页时先对齐一次，否则用户
+    // 会面对一个关不掉的悬浮窗——首页上没有任何关闭入口。
+    unawaited(_reconcileOverlayVisible());
   }
 
   @override
@@ -132,7 +170,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       unawaited(_checkOverlayAlive());
       // 用户可能刚从系统设置里改了悬浮窗权限，回来重新对一次。
       unawaited(_refreshOverlayPermission());
+      // 悬浮窗可能在后台期间被用户从通知栏 / 悬浮球关掉，或由弹幕页新开：
+      // 每次回前台都重新收敛一次开关状态（PM-001）。
+      unawaited(_reconcileOverlayVisible());
     }
+  }
+
+  /// 悬浮窗真实存在但本页不知道时，补上「已开启」状态（PM-001）。
+  ///
+  /// 只补正、不纠错：误判「已开」的情形由 [_checkOverlayAlive]（本页以为开着时）
+  /// 与权限撤回上报兜住，两边口径合起来覆盖开 / 关两个方向。
+  ///
+  /// 冷启动时前台服务恢复窗口需要时间，立刻查询会拿到「未激活」的中间态；
+  /// 短暂延后再查，把偶发的中间态避过去（延时常量见文件顶部）。
+  Future<void> _reconcileOverlayVisible() async {
+    if (_overlayVisible) return;
+    await Future<void>.delayed(_overlayAliveProbeDelay);
+    if (!mounted || _overlayVisible) return;
+    if (!await isOverlayActive()) return;
+    setState(() => _overlayVisible = true);
   }
 
   Future<void> _checkOverlayAlive() async {

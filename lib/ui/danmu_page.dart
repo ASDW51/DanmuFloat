@@ -14,6 +14,8 @@ import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/danmu/sign/danmu_signature.dart';
 import 'package:danmu_float/room/room_info.dart';
+import 'package:danmu_float/room/managed_room.dart';
+import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:flutter/material.dart';
@@ -174,7 +176,24 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   /// 回到前台时核对一次悬浮窗是否仍然有效（不做系统回调，见 overlay_launcher）。
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) unawaited(_checkOverlayAlive());
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_checkOverlayAlive());
+      // 窗口可能在后台期间由别的页面（首页多栏）关掉，本页不知道（PM-001）：
+      // 只读探测一次，把按钮状态与真实窗口对齐，否则本页的「关闭悬浮窗」
+      // 会关在一个已经不存在的窗口上（close 是幂等的，但按钮状态是错的）。
+      unawaited(_reconcileOverlayVisible());
+    }
+  }
+
+  /// 悬浮窗已不存在但本页仍以为开着时，纠正按钮状态（PM-001）。
+  ///
+  /// 只纠错、不补正：窗口存在与否以首页 / 弹幕页里真正执行开窗动作的页面为准，
+  /// 这里只为「别处关了窗」的场景兜底，避免状态错位越积越多。
+  Future<void> _reconcileOverlayVisible() async {
+    if (!_overlayVisible) return;
+    if (await isOverlayActive()) return;
+    if (!mounted) return;
+    setState(() => _overlayVisible = false);
   }
 
   Future<void> _checkOverlayAlive() async {
@@ -278,8 +297,16 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       _snack('未授予悬浮窗权限，无法开启');
       return;
     }
+    // 候选房间随 config 一起下发（PM-001）：没有候选时栏标题不可点、加栏按钮
+    // 会误报「请先在主 App 添加主播」，用户会以为功能坏了。本页不持有主播列表，
+    // 从本地存储现读一次（本页只读，不维护列表状态）。
+    final List<RoomOption> roomOptions = await _loadRoomOptions();
     await openOverlay(
-      _prefs.toConfig(<String>[widget.webRid], filter: _filter),
+      _prefs.toConfig(
+        <String>[widget.webRid],
+        filter: _filter,
+        roomOptions: roomOptions,
+      ),
       devicePixelRatio: dpr,
       // 窗口不能大于屏幕，否则会溢出。
       size: fitOverlaySize(
@@ -291,6 +318,9 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     );
     if (!mounted) return;
     setState(() => _overlayVisible = true);
+    // 建窗期间首页可能也在同步候选（如首页开着且刚增删主播），后到者覆盖：
+    // 这里在 config 之后补推一次，保证本窗的候选以最新主播列表为准。
+    if (roomOptions.isNotEmpty) unawaited(shareOverlayRooms(roomOptions));
     // 补推屏幕尺寸与锁定状态：悬浮窗引擎拿不到屏幕尺寸，横竖屏换算与尺寸收敛
     // 都要靠这里下发的值。
     unawaited(
@@ -308,6 +338,27 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
         screenHeight: screen.height,
       ),
     );
+  }
+
+  /// 从本地主播列表构建悬浮窗候选房间（PM-001）。
+  ///
+  /// 口径与首页一致（备注优先，其次主播名，最后直播间号）；读取失败按空列表
+  /// 处理——候选缺失只影响「栏内切换 / 加栏」的可用性，不该阻断开窗。
+  Future<List<RoomOption>> _loadRoomOptions() async {
+    try {
+      final List<ManagedRoom> rooms = await RoomStore().load();
+      return <RoomOption>[
+        for (final ManagedRoom room in rooms)
+          RoomOption(
+            webRid: room.webRid,
+            name: room.displayName,
+            group: room.group,
+          ),
+      ];
+    } on Object catch (exception) {
+      debugPrint('读取候选房间列表失败: $exception');
+      return const <RoomOption>[];
+    }
   }
 
   /// 汇总当前诊断信息，供用户一键复制反馈（真机问题排查用）。
