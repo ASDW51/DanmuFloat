@@ -1087,12 +1087,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           children: <Widget>[
             SizedBox(
               height: MediaQuery.sizeOf(context).height * 0.55,
-              child: const Center(
+              child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    Text('还没有主播'),
-                    SizedBox(height: 8),
+                    const Text('还没有主播'),
+                    const SizedBox(height: 8),
                     Text(
                       '点击右上角 + 添加直播间号 / 链接 / 抖音号',
                       style: TextStyle(
@@ -1475,8 +1475,8 @@ class _CredentialPickerDialog extends StatelessWidget {
             ),
           ),
         if (profiles.isEmpty)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
             child: Text(
               '还没有配置凭证，可在「设置 · 连接与凭证」里添加',
               style: TextStyle(
