@@ -187,12 +187,60 @@ class OverlayPalette {
 }
 
 /// 悬浮窗入口点对应的 App，由 `overlayMain()` 启动。
+/// 悬浮窗根 widget 的主题来源：页面解析出调色板后写入它，根 widget 据此切换皮肤。
+///
+/// 为什么要绕这一道：`OverlayApp` 是 const 无参 widget（由引擎侧直接挂载），拿不到
+/// 页面状态里的主题；而弹窗路由挂在 `MaterialApp` 的 Navigator 上、比页面高一层，
+/// 只在页面里包一层 `Theme` 是管不到弹窗的——深色皮肤下弹窗仍然是白底。
+final ValueNotifier<OverlayPalette> overlayPaletteNotifier =
+    ValueNotifier<OverlayPalette>(OverlayPalette.darkPalette);
+
+/// 由调色板派生悬浮窗的 `ThemeData`，让弹窗等 Material 组件跟随皮肤。
+ThemeData overlayThemeData(OverlayPalette palette) {
+  final Brightness brightness = palette.isLight
+      ? Brightness.light
+      : Brightness.dark;
+  // 弹窗底色由窗口蒙版色「抬起」一点点得到：纯用蒙版色会和弹窗阴影糊在一起，
+  // 直接写死深灰又会在护眼/高对比主题下跑偏。
+  final Color surface = palette.isLight
+      ? Color.alphaBlend(Colors.black.withValues(alpha: 0.04), palette.maskColor)
+      : Color.alphaBlend(Colors.white.withValues(alpha: 0.08), palette.maskColor);
+  // fromSeed 只用来补齐 M3 需要的全部槽位；真正要紧的几个槽位随后逐个覆盖成调色板的
+  // 取值，否则弹窗配色与悬浮窗蒙版对不上（种子派生出来的中间色跟本主题无关）。
+  final ColorScheme base = ColorScheme.fromSeed(
+    seedColor: palette.userAccent,
+    brightness: brightness,
+  );
+  return ThemeData(
+    colorScheme: base.copyWith(
+      primary: palette.userAccent,
+      onPrimary: OverlayTheme.ensureContrast(
+        palette.isLight ? Colors.white : Colors.black,
+        palette.userAccent,
+      ),
+      surface: surface,
+      surfaceContainerHigh: surface,
+      onSurface: OverlayTheme.ensureContrast(palette.body, surface),
+      onSurfaceVariant: OverlayTheme.ensureContrast(palette.secondary, surface),
+      secondary: palette.activeColor,
+    ),
+  );
+}
+
 class OverlayApp extends StatelessWidget {
   const OverlayApp({super.key});
 
   @override
-  Widget build(BuildContext context) =>
-      MaterialApp(debugShowCheckedModeBanner: false, home: const OverlayPage());
+  Widget build(BuildContext context) => ValueListenableBuilder<OverlayPalette>(
+    valueListenable: overlayPaletteNotifier,
+    builder: (BuildContext context, OverlayPalette palette, Widget? child) =>
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: overlayThemeData(palette),
+          home: child,
+        ),
+    child: const OverlayPage(),
+  );
 }
 
 class OverlayPage extends StatefulWidget {
@@ -294,6 +342,16 @@ class _OverlayPageState extends State<OverlayPage> {
   /// （由 test/overlay_theme_test.dart 钉住），因此默认外观零变化。
   OverlayPalette get _palette =>
       OverlayTheme.preset(_themeId).resolve(_colorOverrides).toPalette();
+
+  /// 把当前调色板发布给根 widget。
+  ///
+  /// 弹窗路由挂在 MaterialApp 的 Navigator 上、比页面高一层，只有根 widget 的 theme
+  /// 能管到它们；因此解析结果必须往上抛一次，而不是在页面里包 Theme。
+  void _publishPalette() {
+    if (!mounted) return;
+    overlayPaletteNotifier.value = _palette;
+  }
+
 
   /// 是否显示栏目标识行（prd F6）。
   bool _showTitleBar = true;
@@ -418,6 +476,7 @@ class _OverlayPageState extends State<OverlayPage> {
         _themeId = style.themeId ??
             (_lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId);
         _colorOverrides = style.colorOverrides;
+        _publishPalette();
         _showTitleBar = style.showTitleBar;
         _focusBehavior = style.focusBehavior;
         _dragLocked = style.dragLocked;
@@ -481,6 +540,7 @@ class _OverlayPageState extends State<OverlayPage> {
       _roomOptions = config.roomOptions;
       _lightTheme = config.lightTheme;
       _themeId = _lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId;
+      _publishPalette();
       _showTitleBar = config.showTitleBar;
       _focusBehavior = config.focusBehavior;
       _dragLocked = config.dragLocked;
