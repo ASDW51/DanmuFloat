@@ -18,9 +18,9 @@ void main() {
     'social': 5,
     'roomRank': 6,
   };
-  const List<String> darkRef = <String>[
-    'orangeAccent', 'lightGreenAccent', 'pinkAccent', 'tealAccent',
-    'redAccent', 'lightBlueAccent', 'amberAccent',
+  const List<Color> darkRef = <Color>[
+    Colors.orangeAccent, Colors.lightGreenAccent, Colors.pinkAccent, Colors.tealAccent,
+    Colors.redAccent, Colors.lightBlueAccent, Colors.amberAccent,
   ];
   const List<int> lightRef = <int>[
     0xFFE65100, 0xFF2E7D32, 0xFFC2185B, 0xFF00695C, 0xFFC62828, 0xFF1565C0, 0xFF8D6E00,
@@ -33,7 +33,7 @@ void main() {
   test('dark：与原来的取值表逐位相等', () {
     final List<Color?> got = colorsOf(OverlayPalette.darkPalette);
     for (int i = 0; i < got.length; i++) {
-      expect(got[i]!.toARGB32(), Colors.orangeAccent.toARGB32(), reason: '第 $i 个');
+      expect(got[i]!.toARGB32(), darkRef[i].toARGB32(), reason: '第 $i 个');
     }
     // 直接与主题字段对齐，防「常量对了但没接进 toPalette」。
     expect(
