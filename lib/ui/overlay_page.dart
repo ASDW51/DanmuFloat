@@ -238,6 +238,12 @@ Future<void> showOverlayNotice(
   await showDialog<void>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
+      // 最小窗只有 200×150（minOverlayHeight = 150）：默认 24dp 的 insetPadding 再
+      // 加上标题 / 内容 / 按钮行，内容区只剩约 102dp，纵向一挤按钮就可能出屏（UX-20）。
+      // 收窄边距并让整块可滚（三处内容分别是 Text / shrinkWrap ListView / min Column，
+      // 都能被 SingleChildScrollView 安全包住），横向由 actions 的 OverflowBar 自动兜住。
+      insetPadding: const EdgeInsets.all(8),
+      scrollable: true,
       title: Text(title),
       content: Text(message),
       actions: <Widget>[
@@ -2371,6 +2377,12 @@ class _RoomPickerDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final List<String> groups = _groups;
     return AlertDialog(
+      // 最小窗只有 200×150（minOverlayHeight = 150）：默认 24dp 的 insetPadding 再
+      // 加上标题 / 内容 / 按钮行，内容区只剩约 102dp，纵向一挤按钮就可能出屏（UX-20）。
+      // 收窄边距并让整块可滚（三处内容分别是 Text / shrinkWrap ListView / min Column，
+      // 都能被 SingleChildScrollView 安全包住），横向由 actions 的 OverflowBar 自动兜住。
+      insetPadding: const EdgeInsets.all(8),
+      scrollable: true,
       title: const Text('切换房间'),
       content: SizedBox(
         width: double.maxFinite,
@@ -2514,6 +2526,12 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
     final double titleSize = smallerFontSize(widget.fontSize, 1);
     final double subSize = smallerFontSize(widget.fontSize, 3);
     return AlertDialog(
+      // 最小窗只有 200×150（minOverlayHeight = 150）：默认 24dp 的 insetPadding 再
+      // 加上标题 / 内容 / 按钮行，内容区只剩约 102dp，纵向一挤按钮就可能出屏（UX-20）。
+      // 收窄边距并让整块可滚（三处内容分别是 Text / shrinkWrap ListView / min Column，
+      // 都能被 SingleChildScrollView 安全包住），横向由 actions 的 OverflowBar 自动兜住。
+      insetPadding: const EdgeInsets.all(8),
+      scrollable: true,
       title: const Text('栏位管理'),
       content: SizedBox(
         width: double.maxFinite,
