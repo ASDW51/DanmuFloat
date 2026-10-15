@@ -703,25 +703,37 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 悬浮球：未展开时是「调节」图标，展开后变成关闭图标。
   ///
   /// 闲置时半透明，避免一个小圆钮一直压在弹幕上；展开或按下时加深到接近不透明。
-  Widget _buildBall(OverlayPalette palette) => Opacity(
-    opacity: _menuOpen ? 0.95 : 0.4,
-    child: Material(
-      color: palette.isLight ? Colors.white70 : Colors.black54,
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: () => setState(() {
-          _menuOpen = !_menuOpen;
-          // 展开时按当前实际窗口尺寸初始化滑杆取值。
-          if (_menuOpen) _windowSize = MediaQuery.sizeOf(context);
-        }),
-        child: SizedBox(
-          width: 24,
-          height: 24,
-          child: Icon(
-            _menuOpen ? Icons.close : Icons.tune,
-            size: 15,
-            color: palette.chrome,
+  ///
+  /// 命中区放大到 34×34（UX-21）：球是窗内**唯一**能打开功能菜单的入口
+  /// （尺寸 / 透明度 / 加栏 / 关窗），旧版只有 24dp、闲置 40% 透明，压在视频上
+  /// 很难点中；这里视觉直径仍是 24dp，只是外面多一圈可点区域。代价是占用角落
+  /// 34×34 的弹幕手势区——那块本来就被球压着，可以接受。
+  Widget _buildBall(OverlayPalette palette) => SizedBox(
+    key: const ValueKey<String>('overlayBall'),
+    width: 34,
+    height: 34,
+    child: Center(
+      child: Opacity(
+        opacity: _menuOpen ? 0.95 : 0.55,
+        child: Material(
+          color: palette.isLight ? Colors.white70 : Colors.black54,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () => setState(() {
+              _menuOpen = !_menuOpen;
+              // 展开时按当前实际窗口尺寸初始化滑杆取值。
+              if (_menuOpen) _windowSize = MediaQuery.sizeOf(context);
+            }),
+            child: SizedBox(
+              width: 24,
+              height: 24,
+              child: Icon(
+                _menuOpen ? Icons.close : Icons.tune,
+                size: 15,
+                color: palette.chrome,
+              ),
+            ),
           ),
         ),
       ),
@@ -935,13 +947,15 @@ class _OverlayPageState extends State<OverlayPage> {
             style: TextStyle(color: palette.secondary, fontSize: fontSize),
           ),
         ),
+        // 行高下限 28dp（UX-21）：UX-08 的整个承诺是「标识行关掉后，菜单是窗内
+        // 唯一能重连的地方」，而这个唯一出口旧版只有 ≈17dp 高。
         if (report?.retryable ?? false)
           TextButton(
             onPressed: () => _retryPane(index),
             style: TextButton.styleFrom(
               foregroundColor: palette.activeColor,
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              minimumSize: Size.zero,
+              minimumSize: const Size(0, 28),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             child: Text('重试', style: TextStyle(fontSize: fontSize)),
@@ -967,6 +981,10 @@ class _OverlayPageState extends State<OverlayPage> {
   }
 
   /// 菜单里的小按钮；[onPressed] 为 null 时禁用。
+  ///
+  /// 行高下限 28dp（UX-21）：旧版 `padding.vertical: 2` 配 `minimumSize: Size.zero`
+  /// 让单栏字号只有 11dp 时行高 ≈17dp，菜单里每一条都点不准。宽度仍按内容自适应，
+  /// 命中区不做 48dp——悬浮窗最小只有 200×150，48dp 一行会把菜单撑爆。
   Widget _menuButton(
     OverlayPalette palette,
     double fontSize,
@@ -977,7 +995,7 @@ class _OverlayPageState extends State<OverlayPage> {
     style: TextButton.styleFrom(
       foregroundColor: palette.chrome,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      minimumSize: Size.zero,
+      minimumSize: const Size(0, 28),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     ),
     child: Text(text, style: TextStyle(fontSize: fontSize)),
