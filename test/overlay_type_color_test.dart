@@ -62,7 +62,7 @@ void main() {
   test('护眼：7 个类型色对自身 maskColor 均不低于 4.5:1', () {
     final OverlayTheme t = OverlayTheme.sepia;
     for (final Color? c in colorsOf(t.toPalette())) {
-      expect(contrastRatio(c!, t.maskColor), greaterThanOrEqualTo(4.5));
+      expect(OverlayTheme.contrastRatio(c!, t.maskColor), greaterThanOrEqualTo(4.5));
     }
   });
 
