@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
+import 'package:danmu_float/connection/connection_state.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/danmu/auto_scroll.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
@@ -29,14 +30,39 @@ const TextStyle _highlightStyle = TextStyle(
   backgroundColor: Color(0x66FFEB3B),
 );
 
+/// 弹幕连接状态的中文短名（R3）。
+///
+/// 状态栏与诊断信息原来直接拼枚举的 `name`（如 `reconnecting`），对用户不可读；
+/// 统一在这里翻译，两处口径保持一致。
+String connectionStateLabel(DanmuConnectionState? state) => switch (state) {
+  DanmuConnectionState.idle => '未连接',
+  DanmuConnectionState.connecting => '连接中',
+  DanmuConnectionState.connected => '已连接',
+  DanmuConnectionState.reconnecting => '重连中',
+  DanmuConnectionState.failed => '已停止（重连失败）',
+  DanmuConnectionState.closed => '已关闭',
+  null => '未连接',
+};
+
 class DanmuPage extends StatefulWidget {
-  const DanmuPage({super.key, required this.webRid, this.title});
+  const DanmuPage({
+    super.key,
+    required this.webRid,
+    this.title,
+    this.sessionFactory,
+  });
 
   /// 要连接的直播间号。
   final String webRid;
 
   /// 列表里的展示名（备注 / 主播名），仅作标题占位，连接成功后改用主播昵称。
   final String? title;
+
+  /// 会话工厂：单测注入假会话依赖，避免离线测试触网（R1 配套测试钩子）。
+  ///
+  /// 默认为 null，页面按现有逻辑自建会话（凭证绑定走全局映射）。
+  @visibleForTesting
+  final LiveDanmuSession Function(String webRid)? sessionFactory;
 
   @override
   State<DanmuPage> createState() => _DanmuPageState();
@@ -66,6 +92,9 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   LiveSessionStage _stage = LiveSessionStage.idle;
   String? _errorMessage;
   int _received = 0;
+
+  /// 重试请求进行中：按钮转圈并防抖（R1）。
+  bool _retrying = false;
 
   /// 是否已暂停跟随（prd F9）：暂停时不自动滚动，但新弹幕仍写入缓存。
   bool _paused = false;
@@ -186,11 +215,13 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   }
 
   Future<void> _connect() async {
-    final LiveDanmuSession session = LiveDanmuSession(
-      webRid: widget.webRid,
-      // 首页已建立「主播 → 凭证」绑定；本主播指定了凭证就用它，否则匿名自动获取。
-      credentialCookies: roomCookiesFor(widget.webRid),
-    );
+    final LiveDanmuSession session = widget.sessionFactory != null
+        ? widget.sessionFactory!(widget.webRid)
+        : LiveDanmuSession(
+            webRid: widget.webRid,
+            // 首页已建立「主播 → 凭证」绑定；本主播指定了凭证就用它，否则匿名自动获取。
+            credentialCookies: roomCookiesFor(widget.webRid),
+          );
     _session = session;
     _stageSubscription = session.stages.listen((LiveSessionStage stage) {
       if (!mounted) return;
@@ -318,7 +349,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       ..writeln('阶段: ${_stageLabel(_stage)}')
       ..writeln('webRid: ${widget.webRid}')
       ..writeln('已收条数: $_received')
-      ..writeln('连接状态: ${_session?.connectionState.name ?? '未连接'}');
+      ..writeln('连接状态: ${connectionStateLabel(_session?.connectionState)}');
     if (room != null) {
       buffer
         ..writeln('主播: ${room.owner}')
@@ -476,6 +507,9 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       LiveSessionStage.idle => Colors.grey,
       _ => Colors.blue,
     };
+    // 失败（含重连次数耗尽）或未开播时给出重试入口（R1）：
+    // 断网恢复、主播刚开播都是「再试一次就能好」的场景，不该逼用户退出重进。
+    final bool canRetry = _session?.canRetry ?? false;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Column(
@@ -498,7 +532,22 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
               ],
               if (_session != null) ...<Widget>[
                 const SizedBox(width: 12),
-                Text('连接: ${_session!.connectionState.name}'),
+                // 连接状态用中文展示（R3）：原始枚举名是英文，对用户不可读。
+                Text('连接: ${connectionStateLabel(_session!.connectionState)}'),
+              ],
+              if (canRetry) ...<Widget>[
+                const SizedBox(width: 12),
+                TextButton.icon(
+                  onPressed: _retrying ? null : _retry,
+                  icon: _retrying
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh, size: 18),
+                  label: const Text('重试'),
+                ),
               ],
             ],
           ),
@@ -508,7 +557,28 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
           ],
           if (_errorMessage != null) ...<Widget>[
             const SizedBox(height: 6),
-            Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+            // 错误摘要可点开看全文（R3）：解析失败等原因可能很长，一行塞不下。
+            InkWell(
+              onTap: _showErrorDetails,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        _errorMessage!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, size: 16, color: Colors.red),
+                  ],
+                ),
+              ),
+            ),
           ],
           if (_overlayState != null) ...<Widget>[
             const SizedBox(height: 6),
@@ -533,6 +603,54 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     LiveSessionStage.offline => '主播未开播',
     LiveSessionStage.error => '异常',
   };
+
+  /// 失败 / 未开播后的重试（R1）：沿用同一会话重新走一遍建连链路。
+  ///
+  /// 会话内部有重入保护，连接中的重复点击会被忽略；重试不清空已收到的弹幕。
+  Future<void> _retry() async {
+    final LiveDanmuSession? session = _session;
+    if (session == null || _retrying) return;
+    setState(() {
+      _retrying = true;
+      _errorMessage = null; // 立刻清掉旧错误，避免重试期间错误文案与「连接中」并存。
+    });
+    await session.start();
+    if (!mounted) return;
+    setState(() {
+      _retrying = false;
+      _errorMessage = session.errorMessage ?? session.signatureWarning;
+    });
+  }
+
+  /// 弹出完整错误详情（R3）：状态栏里只放一行摘要，长文案在这里看全。
+  void _showErrorDetails() {
+    final String? message = _errorMessage;
+    if (message == null) return;
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('错误详情'),
+        content: SingleChildScrollView(
+          child: SelectionArea(
+            child: Text(message, style: const TextStyle(fontSize: 13)),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              unawaited(_copyDiagnostics());
+            },
+            child: const Text('复制诊断信息'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildEventList() {
     final List<DanmakuEvent> visible = _visible;

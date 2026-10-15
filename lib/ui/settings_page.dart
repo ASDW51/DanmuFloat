@@ -35,6 +35,7 @@ class SettingsPage extends StatefulWidget {
     this.themeStore,
     this.dataTransfer,
     this.onDataImported,
+    this.roomNames = const <String, String>{},
   });
 
   /// 进入页面时的偏好快照。
@@ -70,6 +71,10 @@ class SettingsPage extends StatefulWidget {
 
   /// 导入完成后的回调：调用方负责重新读回本地数据并同步给悬浮窗引擎。
   final Future<void> Function()? onDataImported;
+
+  /// webRid → 主播展示名（R3）：「按栏独立配置」原来直接列一串直播间号，
+  /// 用户对不上哪栏是哪个主播；把首页的备注 / 昵称带过来做行标题。
+  final Map<String, String> roomNames;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -223,7 +228,8 @@ class _SettingsPageState extends State<SettingsPage> {
           const _SectionTitle('弹幕滚动速度'),
           _SliderGroup(
             title: '滚动速度　${_prefs.scrollSpeed.toStringAsFixed(2)}x',
-            hint: '越小滚得越慢、越好读；突发大量弹幕时列表按此速度平滑滚动，不再一帧跳到底。',
+            hint: '越小滚得越慢、越好读；突发大量弹幕时列表按此速度平滑滚动，'
+                '不再一帧跳到底。看不清可先试 0.75x，追求实时可调 1.5x 以上。',
             value: _prefs.scrollSpeed,
             min: minDanmuScrollSpeed,
             max: maxDanmuScrollSpeed,
@@ -343,6 +349,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _PaneStyleSection(
             webRids: _prefs.webRids,
             styles: _prefs.paneStyles,
+            roomNames: widget.roomNames,
             onChanged: (Map<String, PaneStyle> styles) =>
                 _apply(_prefs.copyWith(paneStyles: styles), persist: true),
           ),
@@ -1199,11 +1206,15 @@ class _PaneStyleSection extends StatelessWidget {
     required this.webRids,
     required this.styles,
     required this.onChanged,
+    this.roomNames = const <String, String>{},
   });
 
   final List<String> webRids;
   final Map<String, PaneStyle> styles;
   final ValueChanged<Map<String, PaneStyle>> onChanged;
+
+  /// webRid → 主播展示名；缺失时回退显示 webRid 本身。
+  final Map<String, String> roomNames;
 
   @override
   Widget build(BuildContext context) {
@@ -1221,9 +1232,10 @@ class _PaneStyleSection extends StatelessWidget {
         for (final String webRid in webRids)
           ListTile(
             dense: true,
-            title: Text(webRid),
+            // 标题优先用主播名（R3），裸直播间号退到摘要行，用户才能对上栏位。
+            title: Text(roomNames[webRid] ?? webRid),
             subtitle: Text(
-              _summary(styles[webRid]),
+              _summary(styles[webRid], webRid),
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
             trailing: TextButton(
@@ -1235,13 +1247,22 @@ class _PaneStyleSection extends StatelessWidget {
     );
   }
 
-  String _summary(PaneStyle? style) {
-    if (style == null || style.isEmpty) return '跟随全局';
-    return <String>[
-      if (style.fontSize != null) '字号 ${style.fontSize!.toStringAsFixed(0)}',
-      if (style.opacity != null) '透明度 ${style.opacity!.toStringAsFixed(2)}',
-      if (style.textColor != null) '自定义颜色',
-    ].join(' · ');
+  String _summary(PaneStyle? style, String webRid) {
+    final List<String> parts = <String>[
+      if (roomNames[webRid] != null) webRid,
+    ];
+    if (style == null || style.isEmpty) {
+      parts.add('跟随全局');
+    } else {
+      if (style.fontSize != null) {
+        parts.add('字号 ${style.fontSize!.toStringAsFixed(0)}');
+      }
+      if (style.opacity != null) {
+        parts.add('透明度 ${style.opacity!.toStringAsFixed(2)}');
+      }
+      if (style.textColor != null) parts.add('自定义颜色');
+    }
+    return parts.join(' · ');
   }
 
   Future<void> _edit(BuildContext context, String webRid) async {
@@ -1249,6 +1270,7 @@ class _PaneStyleSection extends StatelessWidget {
       context: context,
       builder: (BuildContext context) => _PaneStyleDialog(
         roomId: webRid,
+        roomName: roomNames[webRid],
         style: styles[webRid] ?? const PaneStyle(),
       ),
     );
@@ -1266,9 +1288,17 @@ class _PaneStyleSection extends StatelessWidget {
 
 /// 单栏样式调整弹窗：三个覆盖项各自可开关，关闭即跟随全局。
 class _PaneStyleDialog extends StatefulWidget {
-  const _PaneStyleDialog({required this.roomId, required this.style});
+  const _PaneStyleDialog({
+    required this.roomId,
+    required this.style,
+    this.roomName,
+  });
 
   final String roomId;
+
+  /// 主播展示名（R3）；有名字时标题显示「栏样式 · 名字」，直播间号进副标题。
+  final String? roomName;
+
   final PaneStyle style;
 
   @override
@@ -1290,13 +1320,24 @@ class _PaneStyleDialogState extends State<_PaneStyleDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final bool hasName = widget.roomName != null && widget.roomName!.isNotEmpty;
     return AlertDialog(
-      title: Text('栏样式 · ${widget.roomId}'),
+      title: Text(
+        hasName ? '栏样式 · ${widget.roomName}' : '栏样式 · ${widget.roomId}',
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
+            if (hasName)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  widget.roomId,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ),
             _toggleRow(
               label: _useFontSize
                   ? '字号　${_fontSize.toStringAsFixed(0)}'

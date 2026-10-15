@@ -113,4 +113,35 @@ void main() {
     expect(result, isNull);
     expect(find.text('该主播已在列表中（123456）'), findsOneWidget);
   });
+
+  testWidgets('输入链接后即时回显识别出的直播间号（R4）', (WidgetTester tester) async {
+    await openDialog(tester, onResult: (ManagedRoom? room) {});
+
+    // 粘贴一段分享文案：本地同步解析，不需要网络。
+    await tester.enterText(
+      find.byType(TextField).first,
+      '快来围观 https://live.douyin.com/987654321',
+    );
+    await tester.pump();
+
+    expect(find.text('已识别直播间号：987654321'), findsOneWidget);
+
+    // 清空输入后回显消失。
+    await tester.enterText(find.byType(TextField).first, '');
+    await tester.pump();
+    expect(find.textContaining('已识别直播间号'), findsNothing);
+  });
+
+  testWidgets('识别不出的输入不显示回显，也不拦截提交（R4）', (WidgetTester tester) async {
+    ManagedRoom? result;
+    await openDialog(tester, onResult: (ManagedRoom? room) => result = room);
+
+    await tester.enterText(find.byType(TextField).first, 'moon_knight');
+    await tester.pump();
+    expect(find.textContaining('已识别直播间号'), findsNothing);
+
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+    expect(result!.webRid, 'moon_knight');
+  });
 }

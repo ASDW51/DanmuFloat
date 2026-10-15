@@ -345,6 +345,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           filterStore: _filterStore,
           onFilterChanged: _onFilterChanged,
           onDataImported: _reloadAfterImport,
+          // 「按栏独立配置」里显示主播名而不是裸直播间号（R3）。
+          roomNames: <String, String>{
+            for (final ManagedRoom room in _rooms)
+              room.webRid: room.displayName,
+          },
         ),
       ),
     );
@@ -583,22 +588,38 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (!goOn || !mounted) return;
     }
     // 点「开启悬浮窗」后直接连接：连接前的二次确认已按需求移除。
-    final OverlayConfig config = _prefs.toConfig(
+    final Size screen = MediaQuery.sizeOf(context);
+    // 栏数变多时按新栏数把窗口尺寸收敛到推荐值（R2）：勾了 5 栏还沿用单栏
+    // 的 240×320，每栏只剩 80dp 宽，弹幕根本没法读——默认带用户走到能看的尺寸，
+    // 具体大小仍可在设置页或悬浮球里继续调。
+    final int previousPaneCount = _prefs.webRids.length;
+    OverlayPrefs nextPrefs = _prefs.copyWith(webRids: webRids);
+    if (webRids.length > previousPaneCount &&
+        webRids.length > maxStandardPaneCount) {
+      final ({double width, double height}) recommended = fitOverlaySize(
+        recommendedOverlaySize(webRids.length),
+        screenWidth: screen.width,
+        screenHeight: screen.height,
+      );
+      nextPrefs = nextPrefs.copyWith(
+        windowWidth: recommended.width,
+        windowHeight: recommended.height,
+      );
+    }
+    final OverlayConfig config = nextPrefs.toConfig(
       webRids,
       filter: _filter,
       roomOptions: _roomOptions,
     );
-    final Size screen = MediaQuery.sizeOf(context);
     // 窗口不能大于屏幕，否则会溢出。
     final ({double width, double height}) size = fitOverlaySize(
-      _prefs.windowSize,
+      nextPrefs.windowSize,
       screenWidth: screen.width,
       screenHeight: screen.height,
     );
     final double dpr = MediaQuery.devicePixelRatioOf(context);
 
     // 记住本次栏位绑定，下次打开多栏弹窗直接带出。
-    final OverlayPrefs nextPrefs = _prefs.copyWith(webRids: webRids);
     setState(() => _prefs = nextPrefs);
     unawaited(_prefsStore.save(nextPrefs));
 
@@ -843,13 +864,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 12),
             ),
-          if (credentialName != null)
-            Text(
-              '凭证：$credentialName',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: Colors.orange),
+          // 连接口径谁都能看到（R3）：绑定了凭证的行显示凭证名，未绑定的行
+          // 也标明「匿名连接」，避免用户误以为列表里每行都用了自己的凭证。
+          Text(
+            credentialName == null ? '匿名连接' : '凭证：$credentialName',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              color: credentialName == null ? Colors.grey : Colors.orange,
             ),
+          ),
         ],
       ),
       trailing: Row(

@@ -100,6 +100,10 @@ class LiveDanmuSession {
   StreamSubscription<DanmuConnectionState>? _stateSubscription;
   bool _stopped = false;
 
+  /// start 进行中的重入锁：失败 / 未开播后界面重试会再次调用 [start]，
+  /// 并发跑两条建连链路会把 socket 与订阅互相冲掉，故同一时刻只允许一条。
+  bool _connecting = false;
+
   LiveSessionStage _stage = LiveSessionStage.idle;
   RoomInfo? _room;
   String? _errorMessage;
@@ -135,8 +139,24 @@ class LiveDanmuSession {
   List<DanmakuEvent> get buffer => _buffer.toList();
 
   /// 解析房间信息 → 签名 → 建立弹幕连接。失败只上报错误，不抛出。
+  ///
+  /// 失败 / 未开播后允许再次调用（界面上的「重试」入口，R1）：
+  /// 重试是**继续沿用本会话**，不是新建会话——弹幕页据此保证重试期间
+  /// 旧连接已被释放，不会残留一路仍在重连的后台连接。
   Future<void> start() async {
+    if (_stopped || _connecting) return;
+    _connecting = true;
+    try {
+      await _startInternal();
+    } finally {
+      _connecting = false;
+    }
+  }
+
+  Future<void> _startInternal() async {
     if (_stopped) return;
+    // 重试前先释放上一次的连接与订阅：失败场景下 socket 可能还在重连循环里。
+    await _teardownConnection();
     _setStage(LiveSessionStage.resolvingRoom);
     _errorMessage = null;
     _signatureDegraded = false;
@@ -205,16 +225,31 @@ class LiveDanmuSession {
     socket.start();
   }
 
-  /// 主动关闭：停止重连并释放网络资源。
-  Future<void> stop() async {
-    if (_stopped) return;
-    _stopped = true;
+  /// 释放当前连接与订阅（重试换新连接前、会话停止时都要走）。
+  ///
+  /// 只掐断网络链路，不动弹幕缓存与已建立的事件流：重试后界面上的历史弹幕
+  /// 仍然保留，符合「接着看」的预期。
+  Future<void> _teardownConnection() async {
     await _socket?.stop();
     _socket = null;
     await _eventSubscription?.cancel();
     _eventSubscription = null;
     await _stateSubscription?.cancel();
     _stateSubscription = null;
+  }
+
+  /// 当前是否可以重试（R1）：失败（含重连次数耗尽）或未开播时为真。
+  ///
+  /// 连接中的重复点击在 [start] 里被忽略，这里按阶段给出按钮可用性。
+  bool get canRetry =>
+      !_stopped &&
+      (_stage == LiveSessionStage.error || _stage == LiveSessionStage.offline);
+
+  /// 主动关闭：停止重连并释放网络资源。
+  Future<void> stop() async {
+    if (_stopped) return;
+    _stopped = true;
+    await _teardownConnection();
     _setStage(LiveSessionStage.idle);
     await _stages.close();
     await _danmu.close();

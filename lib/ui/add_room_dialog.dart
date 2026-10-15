@@ -4,9 +4,13 @@
 // 短链则联网跟随跳转后再抽取（design.md 11.9）。
 // 解析不出来不拦：输入原样存成主播标识，交给连接阶段报错，
 // 免得用户在添加这一步就被"必须是直播间号"挡住。
+//
+// 输入体验（R4）：解析出直播间号后即时回显在输入框下方，让用户在提交前
+// 就知道「粘贴的内容被识别成了什么」；纯数字输入走数字键盘减少误触。
 import 'package:danmu_float/room/managed_room.dart';
 import 'package:danmu_float/room/room_link_parser.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// 打开添加主播表单；取消返回 null。
 Future<ManagedRoom?> showAddRoomDialog(
@@ -49,13 +53,31 @@ class _AddRoomDialogState extends State<AddRoomDialog> {
   bool _resolving = false;
   String? _error;
 
+  /// 输入框实时解析出的 webRid（R4）：null 表示还没识别出来。
+  ///
+  /// 只做本地同步解析，不发网络请求：短链在提交时才联网跟随。
+  String? get _parsedPreview => extractWebRid(_inputController.text);
+
+  @override
+  void initState() {
+    super.initState();
+    _inputController.addListener(_onInputChanged);
+  }
+
   @override
   void dispose() {
+    _inputController.removeListener(_onInputChanged);
     _inputController.dispose();
     _nameController.dispose();
     // 注入的解析器由调用方负责释放。
     if (widget.resolver == null) _resolver.close();
     super.dispose();
+  }
+
+  void _onInputChanged() {
+    if (!mounted) return;
+    // 预览依赖输入内容，输入变化时刷新。
+    setState(() {});
   }
 
   Future<void> _submit() async {
@@ -93,6 +115,7 @@ class _AddRoomDialogState extends State<AddRoomDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final String? preview = _parsedPreview;
     return AlertDialog(
       title: const Text('添加主播'),
       content: Column(
@@ -105,11 +128,23 @@ class _AddRoomDialogState extends State<AddRoomDialog> {
             enabled: !_resolving,
             minLines: 1,
             maxLines: 3,
-            decoration: const InputDecoration(
+            // 纯数字时是直播间号，弹出数字键盘减少误触（R4）；
+            // 链接 / 抖音号含字母符号，保持默认键盘与全字符输入。
+            keyboardType: _isDigitsOnly(_inputController.text)
+                ? TextInputType.number
+                : TextInputType.url,
+            inputFormatters: _isDigitsOnly(_inputController.text)
+                ? const <TextInputFormatter>[
+                    FilteringTextInputFormatter.digitsOnly,
+                  ]
+                : null,
+            decoration: InputDecoration(
               labelText: '直播间号 / 链接 / 抖音号',
               hintText: '例如 7350000000000000001、直播间链接、抖音号',
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
               isDense: true,
+              // 识别结果即时回显（R4）：粘贴一段分享文案也能立刻看到解析出的号。
+              helperText: preview == null ? null : '已识别直播间号：$preview',
             ),
           ),
           const SizedBox(height: 12),
@@ -150,5 +185,14 @@ class _AddRoomDialogState extends State<AddRoomDialog> {
         ),
       ],
     );
+  }
+
+  /// 是否为纯数字输入：粘贴后判一次即可。
+  ///
+  /// 不用 `int.tryParse`：webRid 常见 19 位，超出 int64 会解析失败被误判成链接。
+  static bool _isDigitsOnly(String text) {
+    final String trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+    return RegExp(r'^\d+$').hasMatch(trimmed);
   }
 }
