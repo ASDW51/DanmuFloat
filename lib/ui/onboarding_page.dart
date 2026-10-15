@@ -122,7 +122,9 @@ class _OnboardingPageState extends State<OnboardingPage>
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               children: <Widget>[
                 const Text(
-                  '按顺序完成以下准备',
+                  // 不写「按顺序完成以下准备」：它会暗示「不点完就等于没配置好」，
+                  // 而本页所有步骤都能跳过（AGENTS.md 第 5 节只要求入口可达）。
+                  '以下准备可按需完成，随时可跳过',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
@@ -166,7 +168,9 @@ class _OnboardingPageState extends State<OnboardingPage>
                 _StepTile(
                   index: 4,
                   title: '自启动权限（各厂商 ROM）',
-                  subtitle: '厂商设置项各不相同，需在系统设置里手动开启',
+                  // 明确「可不处理」：不写的话，在「准备」语境下用户会以为不点完就没配置好。
+                  subtitle: '厂商设置项各不相同，需在系统设置里手动开启；'
+                      '可不处理：不开启仅影响后台存活率，不影响弹幕查看',
                   done: false,
                   manual: true,
                   actionLabel: '去设置',
@@ -247,7 +251,9 @@ class _StepTile extends StatelessWidget {
       icon = Icons.check_circle;
       color = Colors.green;
     } else if (manual) {
-      icon = Icons.info_outline;
+      // 手动步骤用「去系统设置调」的语义图标 + 中性色，且绝不用对勾：
+      // 用 info_outline 时它和「已完成」的绿色 check_circle 差别太小，用户会误判（UX-06）。
+      icon = Icons.tune;
       color = Colors.blueGrey;
     } else {
       icon = Icons.radio_button_unchecked;
