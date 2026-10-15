@@ -901,6 +901,8 @@ class OverlayPrefsPatch {
     if (dragLocked != null) 'dragLocked': dragLocked,
     if (ballCorner != null) 'ballCorner': clampBallCorner(ballCorner!),
     if (clickThrough != null) 'clickThrough': clickThrough,
+    if (themeId != null) 'themeId': themeId,
+    if (colorOverrides != null) 'colorOverrides': colorOverrides,
     if (windowX != null) 'windowX': windowX,
     if (windowY != null) 'windowY': windowY,
   };
