@@ -22,6 +22,8 @@ class OverlayTheme {
     required this.divider,
     required this.bannerBg,
     required this.maskColor,
+    required this.chromeBg,
+    required this.menuBg,
     required this.border,
     required this.userAccent,
     required this.levelColor,
@@ -73,6 +75,12 @@ class OverlayTheme {
   final TextStyle highlightStyle;
 
   /// 可被用户按角色覆盖的颜色键（顺序即设置页的展示顺序）。
+  /// 悬浮球与胶囊的底色。它们不承载文字，与菜单面板语义不同，因此是独立角色。
+  final Color chromeBg;
+
+  /// 菜单面板底色：窗内唯一承载文字的面板。
+  final Color menuBg;
+
   static const List<String> colorKeys = <String>[
     'body',
     'secondary',
@@ -85,6 +93,8 @@ class OverlayTheme {
     'border',
     'maskColor',
     'activeColor',
+    'chromeBg',
+    'menuBg',
   ];
 
   /// 深邃（默认）：逐字段等于原有 `darkPalette`。
@@ -97,6 +107,8 @@ class OverlayTheme {
     divider: Colors.white24,
     bannerBg: Colors.white10,
     maskColor: Colors.black,
+    chromeBg: Colors.white70,
+    menuBg: Colors.white.withValues(alpha: 0.94),
     border: Colors.white24,
     userAccent: Colors.lightBlueAccent,
     levelColor: Colors.amber,
@@ -119,6 +131,8 @@ class OverlayTheme {
     divider: Colors.black26,
     bannerBg: Colors.black12,
     maskColor: Colors.white,
+    chromeBg: Colors.black54,
+    menuBg: Colors.black.withValues(alpha: 0.9),
     border: Colors.black26,
     userAccent: Color(0xFF1565C0),
     levelColor: Color(0xFF8D6E00),
@@ -142,6 +156,8 @@ class OverlayTheme {
     divider: Color(0x66FFFFFF),
     bannerBg: Color(0x1FFFFFFF),
     maskColor: Colors.black,
+    chromeBg: Colors.black,
+    menuBg: Colors.black,
     border: Color(0x8AFFFFFF),
     userAccent: Color(0xFF8FD3FF),
     levelColor: Color(0xFFFFD54F),
@@ -165,6 +181,8 @@ class OverlayTheme {
     divider: Color(0x33FFE9C4),
     bannerBg: Color(0x14FFE9C4),
     maskColor: Color(0xFF1A1713),
+    chromeBg: Color(0xE61A1713),
+    menuBg: Color(0xFF1A1713),
     border: Color(0x40FFE9C4),
     userAccent: Color(0xFFA8C7E8),
     levelColor: Color(0xFFE2C070),
@@ -225,6 +243,8 @@ class OverlayTheme {
     levelColor: colors['levelColor'] ?? levelColor,
     fanLevelColor: colors['fanLevelColor'] ?? fanLevelColor,
     activeColor: colors['activeColor'] ?? activeColor,
+    chromeBg: colors['chromeBg'] ?? chromeBg,
+    menuBg: colors['menuBg'] ?? menuBg,
     highlightStyle: highlightStyle,
   );
 
@@ -243,6 +263,8 @@ class OverlayTheme {
     'border' => border,
     'maskColor' => maskColor,
     'activeColor' => activeColor,
+    'chromeBg' => chromeBg,
+    'menuBg' => menuBg,
     _ => body,
   };
 
@@ -260,6 +282,8 @@ class OverlayTheme {
     levelColor: levelColor,
     fanLevelColor: fanLevelColor,
     activeColor: activeColor,
+    chromeBg: chromeBg,
+    menuBg: menuBg,
     highlightStyle: highlightStyle,
   );
 

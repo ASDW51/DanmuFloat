@@ -77,8 +77,16 @@ class OverlayPalette {
     required this.levelColor,
     required this.fanLevelColor,
     required this.activeColor,
+    required this.chromeBg,
+    required this.menuBg,
     required this.highlightStyle,
   });
+
+  /// 悬浮球与胶囊的底色（不承载文字）。
+  final Color chromeBg;
+
+  /// 菜单面板底色（窗内唯一承载文字的面板）。
+  final Color menuBg;
 
   /// 是否为浅色皮肤。
   final bool isLight;
@@ -127,6 +135,8 @@ class OverlayPalette {
     divider: Colors.white24,
     bannerBg: Colors.white10,
     maskColor: Colors.black,
+    chromeBg: Colors.white70,
+    menuBg: Colors.white.withValues(alpha: 0.94),
     border: Colors.white24,
     userAccent: Colors.lightBlueAccent,
     levelColor: Colors.amber,
@@ -147,6 +157,8 @@ class OverlayPalette {
     divider: Colors.black26,
     bannerBg: Colors.black12,
     maskColor: Colors.white,
+    chromeBg: Colors.black54,
+    menuBg: Colors.black.withValues(alpha: 0.9),
     border: Colors.black26,
     userAccent: Color(0xFF1565C0),
     levelColor: Color(0xFF8D6E00),
@@ -817,7 +829,7 @@ class _OverlayPageState extends State<OverlayPage> {
       child: Opacity(
         opacity: _menuOpen ? 0.95 : 0.55,
         child: Material(
-          color: palette.isLight ? Colors.white70 : Colors.black54,
+          color: palette.chromeBg,
           shape: const CircleBorder(),
           child: InkWell(
             customBorder: const CircleBorder(),
@@ -863,9 +875,7 @@ class _OverlayPageState extends State<OverlayPage> {
 
     return Material(
       color: palette.isLight
-          ? Colors.white.withValues(alpha: 0.94)
-          : Colors.black.withValues(alpha: 0.9),
-      borderRadius: BorderRadius.circular(8),
+          color: palette.menuBg,
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
         child: Column(
@@ -2309,7 +2319,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
             bottom: 4,
             child: Center(
               child: Material(
-                color: palette.isLight ? Colors.white70 : Colors.black54,
+                color: palette.chromeBg,
                 borderRadius: BorderRadius.circular(12),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
@@ -2339,7 +2349,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
   Widget _buildOpacityHud() => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
     decoration: BoxDecoration(
-      color: _palette.isLight ? Colors.white70 : Colors.black54,
+      color: _palette.chromeBg,
       borderRadius: BorderRadius.circular(12),
     ),
     child: Text(
