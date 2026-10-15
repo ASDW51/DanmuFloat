@@ -569,7 +569,16 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
             tooltip: '清空',
             icon: const Icon(Icons.delete_outline),
             onPressed: () => setState(() {
-              _raw.clear();
+              // UX-23b：清空会丢掉当前会话全部弹幕且不可撤销，先确认。
+              // 用 .then 而非 await，避免 await 之后再碰 context（零告警门禁）。
+              unawaited(
+                showClearDanmakuConfirmDialog(context).then((bool? ok) {
+                  if (!shouldClearDanmakuOnConfirm(ok)) return;
+                  setState(() {
+                    _raw.clear();
+                  });
+                }),
+              );
               _received = 0;
             }),
           ),
@@ -803,4 +812,37 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       ),
     );
   }
+}
+
+/// 「清空」是否需要真正执行：只有明确确认（true）才清空。
+///
+/// 点遮罩、按返回键、点「取消」都拿到 null，一律视为不清空——清空会丢掉当前会话的
+/// 全部弹幕且不可撤销（UX-23b），所以默认答案必须是「不动」而不是「照做」。
+bool shouldClearDanmakuOnConfirm(bool? confirmed) => confirmed ?? false;
+
+/// 弹出「清空」确认框，返回用户选择；null 表示取消 / 点遮罩 / 返回键。
+///
+/// 与页面状态解耦，便于纯函数单测；调用方用 `.then(...)` 接结果，不在 await 之后再碰
+/// context——`use_build_context_synchronously` 是警告级，而本仓库门禁要求零告警。
+Future<bool?> showClearDanmakuConfirmDialog(BuildContext context) {
+  return showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      key: const ValueKey<String>('clearDanmakuConfirmDialog'),
+      title: const Text('清空弹幕'),
+      content: const Text('将清空当前会话已收到的全部弹幕，且不可恢复。'),
+      actions: <Widget>[
+        TextButton(
+          key: const ValueKey<String>('clearDanmakuCancel'),
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          key: const ValueKey<String>('clearDanmakuConfirm'),
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('清空'),
+        ),
+      ],
+    ),
+  );
 }
