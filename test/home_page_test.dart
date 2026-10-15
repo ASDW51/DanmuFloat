@@ -14,6 +14,7 @@ import 'package:danmu_float/room/room_info.dart';
 import 'package:danmu_float/room/room_info_client.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/room_store.dart';
+import 'package:danmu_float/system/system_permissions.dart';
 import 'package:danmu_float/ui/home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -203,6 +204,32 @@ void _mockOverlayChannels(WidgetTester tester, {required bool active}) {
   );
 }
 
+/// 悬浮窗权限被「拒绝且不再询问」的假后端（UX-16）：请求也不再弹框，只能去系统设置。
+class _DeniedOverlayPermissionBackend implements SystemPermissionBackend {
+  int settingsOpens = 0;
+
+  @override
+  Future<bool> hasOverlayPermission() async => false;
+
+  @override
+  Future<bool> requestOverlayPermission() async => false;
+
+  @override
+  Future<bool> hasNotificationPermission() async => true;
+
+  @override
+  Future<bool> requestNotificationPermission() async => true;
+
+  @override
+  Future<bool> isBatteryOptimizationIgnored() async => true;
+
+  @override
+  Future<void> requestIgnoreBatteryOptimizations() async {}
+
+  @override
+  Future<void> openAppSettings() async => settingsOpens++;
+}
+
 Future<void> _pumpHome(WidgetTester tester) async {
   await tester.pumpWidget(MaterialApp(
     home: HomePage(
@@ -303,6 +330,41 @@ Future<void> _withTallViewport(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('「重试授权」仍被拒后 banner 补「去系统设置」出口（UX-16）',
+      (WidgetTester tester) async {
+    // 系统在「拒绝且不再询问」后不再弹框：只留「重试授权」就是一条走不通的路。
+    final _DeniedOverlayPermissionBackend backend =
+        _DeniedOverlayPermissionBackend();
+    setSystemPermissionBackend(backend);
+    addTearDown(
+      () => setSystemPermissionBackend(const PlatformSystemPermissionBackend()),
+    );
+
+    await _pumpHome(tester);
+    expect(
+      find.text('悬浮窗权限未授予，当前仅能在 App 内查看'),
+      findsOneWidget,
+      reason: '权限被拒时 banner 是常驻的',
+    );
+    expect(
+      find.text('去系统设置'),
+      findsNothing,
+      reason: '还没重试过，不必先给次级出口',
+    );
+
+    await tester.tap(find.widgetWithText(TextButton, '重试授权'));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(
+      find.text('去系统设置'),
+      findsOneWidget,
+      reason: '重试仍被拒时要给出真能走通的入口（AGENTS.md 第 5 节）',
+    );
+    await tester.tap(find.widgetWithText(TextButton, '去系统设置'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(backend.settingsOpens, 1, reason: '点一次要真的跳一次系统设置');
+  });
+
   testWidgets('悬浮窗由弹幕页开启（本页没开过）时，首页仍显示关闭入口（PM-001）',
       (WidgetTester tester) async {
     _mockOverlayChannels(tester, active: true);

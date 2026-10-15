@@ -21,6 +21,7 @@ import 'package:danmu_float/storage/local_data_reset.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/storage/theme_store.dart';
+import 'package:danmu_float/system/system_permissions.dart';
 import 'package:danmu_float/ui/add_room_dialog.dart';
 import 'package:danmu_float/ui/danmu_page.dart';
 import 'package:danmu_float/ui/high_performance_dialog.dart';
@@ -174,6 +175,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 悬浮窗权限是否被拒（prd 4.10 权限拒绝降级）：为真时首页顶部常驻提示，
   /// 并给一个「重试授权」按钮，不阻断 App 内查看弹幕。
   bool _overlayPermissionDenied = false;
+
+  /// 「重试授权」仍被拒后置位：此时 banner 要补一条真能走通的出口（UX-16）。
+  ///
+  /// 系统在「拒绝且不再询问」后不再弹框，再点「重试授权」没有任何反馈，
+  /// 属于「入口可达但走不通」。
+  bool _overlayRetryFailed = false;
 
   /// 监听悬浮窗上报：权限被撤销时悬浮窗会自行断开，这里同步按钮状态。
   StreamSubscription<OverlayStatus>? _overlaySubscription;
@@ -351,9 +358,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await ensureOverlayPermission();
     await _refreshOverlayPermission();
     if (!mounted) return;
+    // 仍被拒时补「去系统设置」出口：系统不再弹框的情况下，只留「重试授权」是死胡同（UX-16）。
+    setState(() => _overlayRetryFailed = _overlayPermissionDenied);
     _snack(
-      _overlayPermissionDenied ? '未授予悬浮窗权限，当前仅能在 App 内查看' : '已授予悬浮窗权限，可开启悬浮窗了',
+      _overlayPermissionDenied ? '未授予悬浮窗权限，当前仅能在 App 内查看；可去系统设置里手动打开' : '已授予悬浮窗权限，可开启悬浮窗了',
     );
+  }
+
+  /// banner 上的「去系统设置」：跳系统设置手动开权限。
+  ///
+  /// AGENTS.md 第 5 节要求权限入口任意时刻可达；系统在「拒绝且不再询问」后不再弹框，
+  /// 此时只有系统设置里能真正打开它（UX-16）。
+  Future<void> _openSystemSettings() async {
+    await systemPermissions.openAppSettings();
   }
 
   // ---------- 本地列表 ----------
@@ -1048,6 +1065,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 onPressed: _retryOverlayPermission,
                 child: const Text('重试授权'),
               ),
+              // 重试仍被拒（系统不再弹框）时给一条真能走通的出口（UX-16）。
+              if (_overlayRetryFailed)
+                TextButton(
+                  onPressed: () => unawaited(_openSystemSettings()),
+                  child: const Text('去系统设置'),
+                ),
             ],
           ),
         ),
