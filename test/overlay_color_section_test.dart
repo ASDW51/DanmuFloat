@@ -62,6 +62,13 @@ void main() {
   });
 
   group('OverlayColorSection', () {
+    /// 角色行在展开区里、可能落在视口之外：先滚到可见再点，避免 tap 打空。
+    Future<void> tapVisible(WidgetTester tester, Finder finder) async {
+      await tester.ensureVisible(finder);
+      await tester.pumpAndSettle();
+      await tester.tap(finder);
+      await tester.pumpAndSettle();
+    }
     Future<void> pump(
       WidgetTester tester, {
       String themeId = 'dark',
@@ -135,7 +142,8 @@ void main() {
         onOverrideChanged: (String role, int? argb) => calls.add((role, argb)),
       );
 
-      await tester.tap(
+      await tapVisible(
+        tester,
         find.byKey(const ValueKey<String>('overlayRoleFollow_body')),
       );
       expect(calls.single.$1, 'body');
@@ -152,7 +160,8 @@ void main() {
         onOverrideChanged: (String role, int? argb) => calls.add((role, argb)),
       );
       expect(find.text('#123456'), findsOneWidget);
-      await tester.tap(
+      await tapVisible(
+        tester,
         find.byKey(const ValueKey<String>('overlayRoleFollow_body')),
       );
       expect(calls.single, ('body', null));
@@ -165,12 +174,16 @@ void main() {
         onOverrideChanged: (String role, int? argb) => calls.add((role, argb)),
       );
 
-      await tester.tap(
+      await tapVisible(
+        tester,
         find.byKey(const ValueKey<String>('overlayRolePick_userAccent')),
       );
       await tester.pumpAndSettle();
       expect(find.text('选择颜色'), findsNothing); // 只是 tooltip，弹窗标题是角色名
-      expect(find.text('用户昵称'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey<String>('overlayColorHexField')),
+        findsOneWidget,
+      );
 
       final int target = overlayColorSwatches[1];
       await tester.tap(find.byKey(ValueKey<String>('overlaySwatch_$target')));
@@ -185,7 +198,8 @@ void main() {
         onOverrideChanged: (String role, int? argb) => calls.add((role, argb)),
       );
 
-      await tester.tap(
+      await tapVisible(
+        tester,
         find.byKey(const ValueKey<String>('overlayRolePick_border')),
       );
       await tester.pumpAndSettle();
@@ -216,7 +230,8 @@ void main() {
         onOverrideChanged: (String role, int? argb) => calls.add((role, argb)),
       );
 
-      await tester.tap(
+      await tapVisible(
+        tester,
         find.byKey(const ValueKey<String>('overlayRolePick_divider')),
       );
       await tester.pumpAndSettle();
@@ -231,7 +246,8 @@ void main() {
         tester,
         onOverrideChanged: (String role, int? argb) => calls.add((role, argb)),
       );
-      await tester.tap(
+      await tapVisible(
+        tester,
         find.byKey(const ValueKey<String>('overlayRolePick_maskColor')),
       );
       await tester.pumpAndSettle();
