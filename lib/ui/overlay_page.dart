@@ -2030,19 +2030,14 @@ class _OverlayPaneState extends State<_OverlayPane> {
   }
 
   /// 连接状态灯的颜色：浅色皮肤下换深色系，否则亮色在浅底上看不见。
-  Color _stageColor(LiveSessionStage stage) {
-    final bool light = _palette.isLight;
-    return switch (stage) {
-      LiveSessionStage.live =>
-        light ? const Color(0xFF2E7D32) : Colors.greenAccent,
-      LiveSessionStage.offline =>
-        light ? const Color(0xFFE65100) : Colors.orangeAccent,
-      LiveSessionStage.error =>
-        light ? const Color(0xFFC62828) : Colors.redAccent,
-      LiveSessionStage.idle => light ? const Color(0xFF757575) : Colors.grey,
-      _ => light ? const Color(0xFF1565C0) : Colors.lightBlueAccent,
-    };
-  }
+  /// 状态色统一走 [stageTextColor]（带对比度断言的那一份实现）。
+  ///
+  /// 这里原先自带一套 light/dark 取值，与弹幕页各走各的：同一个连接状态在两处会是
+  /// 两种颜色（浅色 live 此处 0xFF2E7D32、弹幕页 0xFF1B5E20），改一处另一处不同步。
+  Color _stageColor(LiveSessionStage stage) => stageTextColor(
+    stage,
+    _palette.isLight ? Brightness.light : Brightness.dark,
+  );
 
   /// 栏目标识行（prd F6）：主播名 + 连接状态 / 在线人数。
   ///
