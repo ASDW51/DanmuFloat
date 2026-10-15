@@ -146,6 +146,23 @@ Future<Directory> _seedRooms(
   return dir;
 }
 
+/// 等待 [condition] 成立：在 runAsync 排空真实事件循环（让 widget 内部 await 的
+/// 真实文件 I/O 走完）后 pump 一帧处理 setState，直到条件满足或超时。
+///
+/// 固定 sleep 一次在 CI 冷 I/O 下不可靠（首轮 CI 200ms 后列表仍未渲染出来），
+/// 改为轮询：每次排空 50ms 真实时间再 pump，共给到约 5s 预算。
+Future<void> _pumpUntil(
+  WidgetTester tester,
+  bool Function() condition,
+) async {
+  for (int i = 0; i < 100 && !condition(); i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+}
+
 /// 把首页挂到指定目录上：与 _pumpHome 同样的注入口径，只是目录换成预置好的。
 Future<void> _pumpHomeWithDir(WidgetTester tester, Directory dir) async {
   await tester.pumpWidget(MaterialApp(
@@ -155,24 +172,8 @@ Future<void> _pumpHomeWithDir(WidgetTester tester, Directory dir) async {
     ),
   ));
   // 首页 initState 里 unawaited(_load()) 的真实文件读也在 FakeAsync 里等待，
-  // pump 推不动它：用 runAsync 排空真实事件循环让读盘完成，再 pump 处理 setState。
-  await tester.runAsync(
-    () => Future<void>.delayed(const Duration(milliseconds: 200)),
-  );
-  await tester.pump(const Duration(seconds: 1));
-  await tester.pump(const Duration(seconds: 2));
-}
-
-/// 等待首页移除流程里 await 的真实文件写入（_store.save）完成。
-///
-/// 与 _pumpHomeWithDir 同理：pump 推不动 FakeAsync 里的真实 I/O，须先经
-/// runAsync 排空事件循环，再 pump 让后续的重排 / 关窗 setState 走完。
-Future<void> _flushFileIo(WidgetTester tester) async {
-  await tester.runAsync(
-    () => Future<void>.delayed(const Duration(milliseconds: 200)),
-  );
-  await tester.pump(const Duration(seconds: 1));
-  await tester.pump(const Duration(seconds: 2));
+  // pump 推不动它：轮询排空真实事件循环直到预置的主播渲染出来。
+  await _pumpUntil(tester, () => find.text('主播甲').evaluate().isNotEmpty);
 }
 
 /// 模拟「已建窗」的全局状态：真实取值来自建窗动作，测试里直接置位。
@@ -287,7 +288,9 @@ void main() {
     await tester.tap(find.text('移除主播'));
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('移除'));
-    await _flushFileIo(tester);
+    // 移除流程里 await 的真实落盘（_store.save）与随后的重排调用都需要真实
+    // 事件循环排空：轮询等到「主播甲从列表消失」再断言插件调用。
+    await _pumpUntil(tester, () => find.text('主播甲').evaluate().isEmpty);
 
     expect(find.text('主播甲'), findsNothing, reason: '主播甲应从列表移除');
 
@@ -339,7 +342,11 @@ void main() {
     await tester.tap(find.text('移除主播'));
     await tester.pump(const Duration(milliseconds: 100));
     await tester.tap(find.text('移除'));
-    await _flushFileIo(tester);
+    // 最后一栏的移除走关窗：等真实落盘完成、关窗调用发出（关闭入口消失）。
+    await _pumpUntil(
+      tester,
+      () => find.byTooltip('关闭悬浮窗').evaluate().isEmpty,
+    );
 
     // 没有剩余栏位可下发：走关窗，而不是下发空绑定的 config。
     expect(
