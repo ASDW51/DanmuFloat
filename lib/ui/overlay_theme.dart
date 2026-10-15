@@ -297,6 +297,13 @@ class OverlayTheme {
     activeColor: colors['activeColor'] ?? activeColor,
     chromeBg: colors['chromeBg'] ?? chromeBg,
     menuBg: colors['menuBg'] ?? menuBg,
+    typeScreenChat: colors['typeScreenChat'] ?? typeScreenChat,
+    typePrivilegeScreenChat: colors['typePrivilegeScreenChat'] ?? typePrivilegeScreenChat,
+    typeGift: colors['typeGift'] ?? typeGift,
+    typeMember: colors['typeMember'] ?? typeMember,
+    typeLike: colors['typeLike'] ?? typeLike,
+    typeSocial: colors['typeSocial'] ?? typeSocial,
+    typeRoomRank: colors['typeRoomRank'] ?? typeRoomRank,
     highlightStyle: highlightStyle,
   );
 
@@ -317,6 +324,13 @@ class OverlayTheme {
     'activeColor' => activeColor,
     'chromeBg' => chromeBg,
     'menuBg' => menuBg,
+    'typeScreenChat' => typeScreenChat,
+    'typePrivilegeScreenChat' => typePrivilegeScreenChat,
+    'typeGift' => typeGift,
+    'typeMember' => typeMember,
+    'typeLike' => typeLike,
+    'typeSocial' => typeSocial,
+    'typeRoomRank' => typeRoomRank,
     _ => body,
   };
 
@@ -336,6 +350,13 @@ class OverlayTheme {
     activeColor: activeColor,
     chromeBg: chromeBg,
     menuBg: menuBg,
+    typeScreenChat: typeScreenChat,
+    typePrivilegeScreenChat: typePrivilegeScreenChat,
+    typeGift: typeGift,
+    typeMember: typeMember,
+    typeLike: typeLike,
+    typeSocial: typeSocial,
+    typeRoomRank: typeRoomRank,
     highlightStyle: highlightStyle,
   );
 
