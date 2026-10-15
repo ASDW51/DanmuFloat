@@ -651,3 +651,16 @@ git checkout main && git pull --ff-only
 **第 7 轮候选（已由 PM 裁决推后）**：`chromeBg` 角色（球/菜单/胶囊三处 alpha 各不相同，须先定 1 个还是 2 个角色及四套预设取值）；「最近使用色」UI 与去重交互（字段已在 B 落盘）；浅色预设 `secondary` 若跌破 4.5:1 则换 `0xFF49454F` 并统一口径；`DanmakuKind.privilegeScreenChat` 等按弹幕类型写死的颜色与 `typeColor()` 派生口径并存的问题。
 
 **本轮新增踩坑**：⑤ 用「字段名 + 相邻行」当文本锚点在长文件里替换时，**同名邻居会让锚点撞车**——`if (windowX != null)` 在 `overlay_bridge.dart` 里出现两次（`OverlayStyle`/`OverlayConfig` 与 `OverlayPrefsPatch` 各一处），于是 `themeId` 被插进了不相干的类，`flutter analyze` 报 `undefined name`。正确做法是按 `class X {` 切片后只在该切片内替换（本轮的 C 与 F1 各踩一次）。⑥ **`git commit` 前先确认自己在哪个分支**：一次修复被提交到本地 `main` 上，导致「分支仍旧是坏的、main 多出一个 commit」的错位；处理方式是 `git branch fix-tmp <commit>` 保命 → `git reset --hard origin/main` → 回分支 `cherry-pick` → 推。⑦ `tester.tap(find.byKey(...))` 报 `Bad state: No element` 时，先看堆栈是不是 `getCenter`——那是 **finder 命中 0 个元素**，与回调逻辑无关；被测行为若是「开关取什么值」，直接驱动 `widget.onChanged!(...)` 比猜命中区域更诚实。
+
+### 第 7 轮候选（待 PM 裁决优先级）
+
+第 6 轮配色体系 A~F 已全部交付（见上表）。以下四项都是第 6 轮过程中发现、经 PM 裁决推后的问题；此处只列事实与待决口径，**先后顺序与验收口径请 PM 定**。
+
+| 候选 | 问题实质 | 影响面 / 待决点 |
+| --- | --- | --- |
+| **① 底色角色粒度** | 悬浮球（`white70`/`black54`）、菜单（`white@0.94`/`black@0.9`）、胶囊（`white70`/`black54`）三处底色 alpha 各不相同，**一个角色装不下三种取值** | 需先定「1 个角色」还是「2 个角色」，并为四套预设给出取值；涉及新增角色 → 预设取值 + 老配置迁移 + 对比度守卫口径 |
+| **② 最近使用色 UI** | `recentColors` 字段已随 UX-29 落盘，且做了过滤 / 去重 / 上限（8），但**没有任何 UI 在用**——落盘不展示等于白存 | 仅主 App 设置页；待决「何时入库」（选色即入 / 确定才入）与跨主题的去重与排序交互 |
+| **③ 浅色预设 `secondary` 余量** | 现值 `Colors.black54`（alpha 0.5412）在纯白上约 **4.61:1**，仅高于 4.5 门槛一点点；统一方案是换成 `0xFF49454F`（与 `danmu_text_colors.dart` 同值） | 会改变浅色观感，属用户可见变化；待决是否值得，以及是否同时统一两套对比度口径 |
+| **④ 弹幕类型颜色双来源** | `overlay_page.dart` 仍对 `DanmakuKind.privilegeScreenChat` 写死 `const Color(0xFF2E7D32)`，与 `_palette.typeColor()` 并存 | 同族两处真相，改法明确但属重构；待决是否本轮做、以及是否顺带把 `typeColor()` 的取值来源也纳入主题 |
+
+**请 PM 裁决**：四项的**先后顺序**；每项的**验收口径**（尤其 ① 的角色个数与四套预设取值要求、② 的入库时机）；以及**是否有应剔除或合并的项**。
