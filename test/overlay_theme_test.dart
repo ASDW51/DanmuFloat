@@ -133,12 +133,16 @@ void main() {
     }
   });
 
-  test('文字角色对比度：高对比预设 ≥7:1，深色/护眼 ≥4.5:1', () {
+  test('文字角色对比度：四套预设分别在 4.5:1 / 7:1 阈值下达标', () {
     _expectTextRoles(OverlayTheme.contrast, 7);
     _expectTextRoles(OverlayTheme.dark, 4.5);
     _expectTextRoles(OverlayTheme.sepia, 4.5);
-    // 浅色预设有意不在此断言：它的 secondary 是既有取值 Colors.black54，合成后实测
-    // 约 4.47:1（略低于 4.5）。这是本轮开工前就存在的取值，改它属于可见的外观变更，
-    // 已作为待裁决项记在 docs/iteration-todo.md 第 6 轮第 2 点，不在本 PR 顺手改。
+    // 浅色预设也一并断言，而不是只把数值写在注释里：它的 secondary 是既有取值
+    // Colors.black54（0x8A000000，alpha 0.5412），展平到白色蒙版后约 4.61:1——只高出
+    // 4.5 线 0.11，是全项目最贴近阈值的一处取值，最需要被用例盯住。
+    // PM 口径：本轮不改浅色外观（改了会破坏本 PR 的「零突变」钉子）；若这条断言将来
+    // 失败，说明余量被吃掉，单开一项到第 7 轮把它换成 danmu_text_colors.dart 里的
+    // 0xFF49454F，并顺带统一两处对比度口径。
+    _expectTextRoles(OverlayTheme.light, 4.5);
   });
 }
