@@ -902,16 +902,20 @@ class _OverlayPageState extends State<OverlayPage> {
     double fontSize,
     int index,
   ) {
+    final String webRid = _webRids[index];
+    // 未绑定栏根本没有会话，写「等待中」会让人以为正在连（UX-15）：与标识行同口径
+    // 只写「未绑定」，并且不拼第二个分隔符，避免出现「第 1 栏 ·  · 等待中」。
+    final bool bound = webRid.isNotEmpty;
     final _PaneReport? report = _reports[index];
-    final String name = _roomNameOf(_webRids[index]);
-    final String stage = report == null
-        ? '等待中'
-        : paneStageText(report.stage);
+    final String label = bound
+        ? '第 ${index + 1} 栏 · ${_roomNameOf(webRid)} · '
+              '${report == null ? '等待中' : paneStageText(report.stage)}'
+        : '第 ${index + 1} 栏 · 未绑定';
     return Row(
       children: <Widget>[
         Expanded(
           child: Text(
-            '第 ${index + 1} 栏 · $name · $stage',
+            label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: palette.secondary, fontSize: fontSize),
