@@ -45,11 +45,11 @@ class HomePage extends StatefulWidget {
 
   /// 各 store 的目录解析器可注入，便于单测用临时目录隔离、不依赖 path_provider
   /// 插件通道（默认走应用私有目录）。
-  final Future<Directory> Function()? directoryResolver = null;
+  final Future<Directory> Function()? directoryResolver;
 
   /// 凭证存储可整体注入（默认用加密落盘后端）；单测传内存后端以避开
   /// flutter_secure_storage 的原生通道。
-  final CredentialStore? credentialStore = null;
+  final CredentialStore? credentialStore;
 
   @override
   State<HomePage> createState() => _HomePageState();
