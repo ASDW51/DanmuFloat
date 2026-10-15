@@ -85,7 +85,9 @@ void main() {
       await tester.tap(pick);
       await tester.pumpAndSettle();
       expect(find.text('最近使用'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey<String>('overlayRecent_$0xFF00BCD4')));
+      await tester.tap(
+        find.byKey(ValueKey<String>('overlayRecent_${0xFF00BCD4}')),
+      );
       await tester.pumpAndSettle();
       expect(calls.single, ('body', 0xFF00BCD4));
     });
