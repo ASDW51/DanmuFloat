@@ -2,11 +2,12 @@
 // 首页的「关闭悬浮窗」入口必须以窗口真实存在为准，而不是只认本页的开窗动作。
 //
 // 不依赖任何原生通道：本地存储用临时目录解析器注入、凭证用内存后端，插件窗口
-// 查询通道用 mock 应答。悬浮窗上行状态经消息通道 handler 直接驱动首页监听分支。
+// 查询通道用 mock 应答。悬浮窗上报经 overlay_launcher 的测试辅助直接驱动首页监听分支。
 import 'dart:io';
 
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
+import 'package:danmu_float/app/overlay_launcher.dart';
 import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/ui/home_page.dart';
 import 'package:flutter/material.dart';
@@ -17,11 +18,6 @@ import 'package:flutter_test/flutter_test.dart';
 const MethodChannel _overlayControlChannel = MethodChannel(
   'x-slayer/overlay_channel',
 );
-
-/// 插件的上行消息通道名：悬浮窗状态经它送进主 App 引擎。
-const BasicMessageChannel<dynamic> _messengerChannel =
-    BasicMessageChannel<dynamic>('x-slayer/overlay_messenger',
-        JSONMessageCodec());
 
 /// 内存凭证后端：测试不依赖 flutter_secure_storage 原生通道。
 class _MemoryCredentialBackend implements CredentialBackend {
@@ -64,24 +60,6 @@ void _mockOverlayChannels(WidgetTester tester, {required bool active}) {
   });
   addTearDown(
     () => messenger.setMockMethodCallHandler(_overlayControlChannel, null),
-  );
-}
-
-/// 模拟悬浮窗引擎上报一条状态（PM-001 测试用）。
-///
-/// overlay_launcher 在主 App 引擎里对 _messengerChannel 注册了 handler，
-/// 这里按平台侧上行的路径把 JSON 塞给框架，驱动首页的状态监听分支。
-Future<void> _pushOverlayStatus(
-  WidgetTester tester,
-  OverlayStatus status,
-) async {
-  final ByteData? encoded =
-      const JSONMessageCodec().encodeMessage(status.toJson());
-  await TestDefaultBinaryMessengerBinding
-      .instance.defaultBinaryMessenger.handlePlatformMessage(
-    _messengerChannel.name,
-    encoded,
-    (ByteData? reply) {},
   );
 }
 
@@ -130,14 +108,11 @@ void main() {
     expect(find.byTooltip('关闭悬浮窗'), findsNothing);
 
     // 悬浮窗引擎完成配置装载并开始周期上报（弹幕页开的单栏窗同样会上报）。
-    await _pushOverlayStatus(
-      tester,
-      const OverlayStatus(
-        stage: LiveSessionStage.live,
-        received: 10,
-        webRids: <String>['12345'],
-      ),
-    );
+    pushOverlayStatusForTest(const OverlayStatus(
+      stage: LiveSessionStage.live,
+      received: 10,
+      webRids: <String>['12345'],
+    ));
     await tester.pump();
     await tester.pump(const Duration(seconds: 2));
 
@@ -155,15 +130,12 @@ void main() {
     await _pumpHome(tester);
     expect(find.byTooltip('关闭悬浮窗'), findsOneWidget);
 
-    await _pushOverlayStatus(
-      tester,
-      const OverlayStatus(
-        stage: LiveSessionStage.error,
-        received: 0,
-        error: '悬浮窗权限已被撤销，已断开全部连接',
-        permissionRevoked: true,
-      ),
-    );
+    pushOverlayStatusForTest(const OverlayStatus(
+      stage: LiveSessionStage.error,
+      received: 0,
+      error: '悬浮窗权限已被撤销，已断开全部连接',
+      permissionRevoked: true,
+    ));
     await tester.pump();
     await tester.pump(const Duration(seconds: 2));
 

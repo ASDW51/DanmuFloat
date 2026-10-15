@@ -260,6 +260,12 @@ Stream<OverlayStatus> get overlayStatusStream =>
 
 StreamController<OverlayStatus>? _statusController;
 
+/// 测试辅助（PM-001）：直接向状态广播流注入一条上报，避免测试去模拟插件原生
+/// 的消息通道编解码。仅用于 widget 测试驱动首页 / 弹幕页的状态监听分支。
+@visibleForTesting
+void pushOverlayStatusForTest(OverlayStatus status) =>
+    (_statusController ??= _relayOverlayStatus()).add(status);
+
 /// 过滤偏好变化流（悬浮窗里把用户 / 文本加入屏蔽后由主 App 落盘的那份）。
 ///
 /// 广播分发：首页、弹幕页等已打开的页面都按同一份口径刷新展示，
