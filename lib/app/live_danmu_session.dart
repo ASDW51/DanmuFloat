@@ -330,6 +330,10 @@ class LiveDanmuSession {
 
   void _setStage(LiveSessionStage stage) {
     _stage = stage;
+    // 不变量：[_stages] 必须是「非 sync 的 broadcast」——监听回调要晚于本次状态写入
+    // 所在的同步段执行，界面才能在回调里读到已经复位的 autoRechecking。谁把它改成
+    // sync: true 或加上 distinct()，「复检预算用尽 → 放出重试入口」立刻退回永久
+    // 「复检中…」（UX-08）。
     if (!_stages.isClosed) _stages.add(stage);
   }
 
@@ -338,7 +342,16 @@ class LiveDanmuSession {
   /// 次数到顶就不再安排：界面上的手动重试是此时的唯一出口（UX-02）。
   void _scheduleOfflineRecheck() {
     if (_stopped) return;
-    if (_offlineRecheckCount >= maxOfflineRechecks) return;
+    if (_offlineRecheckCount >= maxOfflineRechecks) {
+      // 预算用尽时补发一次 offline：阶段没变，但 autoRechecking 由 true 变 false，
+      // 界面要据此把「复检中…」换成「未开播」并放出重试入口。此时该栏不会有弹幕事件
+      // 触发重建，不补发这一条，界面就永远停在「复检中…」（UX-08）。
+      //
+      // 只在「这一次到顶」补发：真实路径里本方法在到顶后不再被调用，若将来改成每轮
+      // 空转都调，这里会变成反复发同一条 offline（单测锁了「恰好一条」）。
+      _setStage(LiveSessionStage.offline);
+      return;
+    }
     _offlineRecheckTimer?.cancel();
     _offlineRecheckTimer = Timer(offlineRecheckInterval, () {
       _offlineRecheckTimer = null;

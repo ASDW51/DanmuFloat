@@ -12,6 +12,19 @@ enum DanmuConnectionState {
   closed,
 }
 
+/// 连接状态的中文文案（诊断信息与详情页共用）。
+///
+/// 直接写 `state.name` 会把 idle / connecting 这类英文标识暴露给用户：用户既看不懂，
+/// 也没法据此描述问题，而诊断信息正是要复制给他人排查的（UX-09）。
+String connectionStateLabel(DanmuConnectionState state) => switch (state) {
+  DanmuConnectionState.idle => '未连接',
+  DanmuConnectionState.connecting => '连接中',
+  DanmuConnectionState.connected => '已连接',
+  DanmuConnectionState.reconnecting => '重连中',
+  DanmuConnectionState.failed => '重连失败',
+  DanmuConnectionState.closed => '已关闭',
+};
+
 /// 连接状态机：只负责状态流转与重连计数，不做任何 IO，
 /// 便于离线单测覆盖「固定 10s 重连、单房间最多 10 次、连接成功计数清零」口径。
 class ConnectionStateMachine {

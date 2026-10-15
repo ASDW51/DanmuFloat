@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
+import 'package:danmu_float/connection/connection_state.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/danmu/auto_scroll.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
@@ -30,6 +31,45 @@ const TextStyle _highlightStyle = TextStyle(
   fontWeight: FontWeight.bold,
   backgroundColor: Color(0x66FFEB3B),
 );
+
+/// 汇总诊断信息，供用户一键复制反馈（真机问题排查用）。
+///
+/// 抽成顶层纯函数而不是页面方法：诊断内容会经剪贴板外发给他人，必须能脱离页面单测
+/// ——尤其要能断言凭证不出现在里面（见 test/danmu_diagnostics_test.dart）。
+///
+/// [stageLabel] 由调用方给出：阶段文案要读会话的自动复检状态，属于页面侧的口径。
+String buildDanmuDiagnostics({
+  required String webRid,
+  required String stageLabel,
+  required int received,
+  required LiveDanmuSession? session,
+  required String? errorMessage,
+}) {
+  final RoomInfo? room = session?.room;
+  final StringBuffer buffer = StringBuffer()
+    ..writeln('页面: App 内弹幕页')
+    ..writeln('阶段: $stageLabel')
+    ..writeln('webRid: $webRid')
+    ..writeln('已收条数: $received')
+    ..writeln(
+      '连接状态: ${session == null ? '未连接' : connectionStateLabel(session.connectionState)}',
+    );
+  if (room != null) {
+    buffer
+      ..writeln('主播: ${room.owner}')
+      ..writeln('liveId: ${room.liveId}')
+      ..writeln('标题: ${room.title}');
+  }
+  if (errorMessage != null) buffer.writeln('错误: $errorMessage');
+  if (session?.signatureDegraded ?? false) {
+    buffer.writeln(
+      '签名降级为 $fallbackDanmuSignature: ${session?.signatureWarning}',
+    );
+  }
+  final String? socketError = session?.socketError;
+  if (socketError != null) buffer.writeln('连接错误: $socketError');
+  return buffer.toString().trimRight();
+}
 
 class DanmuPage extends StatefulWidget {
   const DanmuPage({super.key, required this.webRid, this.title});
@@ -379,31 +419,13 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   }
 
   /// 汇总当前诊断信息，供用户一键复制反馈（真机问题排查用）。
-  String _buildDiagnostics() {
-    final RoomInfo? room = _session?.room;
-    final StringBuffer buffer = StringBuffer()
-      ..writeln('页面: App 内弹幕页')
-      ..writeln('阶段: ${_stageLabel(_stage)}')
-      ..writeln('webRid: ${widget.webRid}')
-      ..writeln('已收条数: $_received')
-      ..writeln('连接状态: ${_session?.connectionState.name ?? '未连接'}');
-    if (room != null) {
-      buffer
-        ..writeln('主播: ${room.owner}')
-        ..writeln('liveId: ${room.liveId}')
-        ..writeln('标题: ${room.title}');
-    }
-    if (_errorMessage != null) buffer.writeln('错误: $_errorMessage');
-    if (_session?.signatureDegraded ?? false) {
-      buffer.writeln(
-        '签名降级为 $fallbackDanmuSignature: ${_session!.signatureWarning}',
-      );
-    }
-    if (_session?.socketError != null) {
-      buffer.writeln('连接错误: ${_session!.socketError}');
-    }
-    return buffer.toString().trimRight();
-  }
+  String _buildDiagnostics() => buildDanmuDiagnostics(
+    webRid: widget.webRid,
+    stageLabel: _stageLabel(_stage),
+    received: _received,
+    session: _session,
+    errorMessage: _errorMessage,
+  );
 
   Future<void> _copyDiagnostics() async {
     await Clipboard.setData(ClipboardData(text: _buildDiagnostics()));
@@ -581,7 +603,9 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
               ],
               if (_session != null) ...<Widget>[
                 const SizedBox(width: 12),
-                Text('连接: ${_session!.connectionState.name}'),
+                Text(
+                  '连接: ${connectionStateLabel(_session!.connectionState)}',
+                ),
               ],
             ],
           ),

@@ -48,6 +48,39 @@ String formatRefreshedAgo(int? refreshedAt, {required DateTime now}) {
   return '${seconds ~/ 86400} 天前';
 }
 
+/// 回前台时房间数据超过这个时长就算过期，需要静默补刷（UX-10）。
+///
+/// 定 30 分钟：切出去几分钟再回来不该看到整列表重刷（费流量、列表乱跳），而隔夜回来时
+/// 旧数据会一直显示「未开播」，用户又不知道那只是过期结论。
+const Duration staleRoomRefreshAfter = Duration(minutes: 30);
+
+/// 房间数据是否过期（UX-10）：从没刷过、或距上次成功刷新超过 [after]。
+///
+/// [now] 与 [lastRefreshedAt] 都是 epoch 毫秒（AGENTS 第 5 节）；时钟回拨导致差值为负
+/// 时按「刚刷过」处理，不触发补刷。
+bool isRoomStale(
+  int? lastRefreshedAt, {
+  required int now,
+  Duration after = staleRoomRefreshAfter,
+}) {
+  if (lastRefreshedAt == null || lastRefreshedAt <= 0) return true;
+  return now - lastRefreshedAt > after.inMilliseconds;
+}
+
+/// 距离上次自动补刷尝试是否已过 [after]（UX-13）。
+///
+/// 只按 `lastRefreshedAt`（成功才写）判断会漏掉失败路径：弱网或被风控时每次回前台都
+/// 会把整列表重打一遍，而 30 分钟节流对「失败」完全不生效——恰好放过了它该防的场景。
+/// 因此再记一个「上次尝试时间」（纯内存，不落盘）。
+bool shouldAttemptStaleRefresh(
+  int? lastAttemptAt, {
+  required int now,
+  Duration after = staleRoomRefreshAfter,
+}) {
+  if (lastAttemptAt == null) return true;
+  return now - lastAttemptAt > after.inMilliseconds;
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({
     super.key,
@@ -55,6 +88,7 @@ class HomePage extends StatefulWidget {
     this.directoryResolver,
     this.credentialStore,
     this.roomInfoClient,
+    this.store,
   });
 
   /// 「清除所有本地数据」完成后回调外层，把入口切回免责声明页（prd F26）。
@@ -70,6 +104,11 @@ class HomePage extends StatefulWidget {
 
   /// 房间信息客户端可注入（默认走真实接口）；单测传假实现以隔离网络。
   final RoomInfoClient? roomInfoClient;
+
+  /// 主播列表存储可注入（默认落应用私有目录）；单测传计数实现来断言
+  /// 「整批只落盘一次」（UX-11）。
+  @visibleForTesting
+  final RoomStore? store;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -101,6 +140,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 正在刷新房间信息的直播间号（行内按钮转圈用）。
   final Set<String> _refreshing = <String>{};
+
+  /// 回前台自动补刷正在飞的直播间号（UX-13）。
+  ///
+  /// 与 [_refreshing] 分开：补刷不是用户点的，行内不该转圈、也不该让它挡住行内刷新
+  /// 按钮的可用性；但两条路径必须互斥——房间接口对同 IP 并发不友好（UX-04 为此刻意
+  /// 串行），同一 webRid 两路在飞会把风控风险成倍放大。
+  final Set<String> _autoRefreshing = <String>{};
+
+  /// 上次自动补刷的尝试时间（epoch 毫秒，纯内存）：成功与失败都算一次尝试，
+  /// 否则失败路径等于没有节流（UX-13）。
+  int? _lastStaleRefreshAttemptAt;
 
   /// 是否正在「刷新全部」；以及它的进度（已完成 / 总数），用于列表上方的进度条。
   ///
@@ -143,7 +193,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // 单测可注入临时目录解析器，把本地存储隔离到临时目录、不依赖 path_provider
     // 插件通道（见 HomePage.directoryResolver）。默认仍走应用私有目录。
     final Future<Directory> Function()? resolver = widget.directoryResolver;
-    _store = RoomStore(directoryResolver: resolver);
+    _store = widget.store ?? RoomStore(directoryResolver: resolver);
     _prefsStore = OverlayPrefsStore(directoryResolver: resolver);
     _credentialStore = widget.credentialStore ?? CredentialStore();
     WidgetsBinding.instance.addObserver(this);
@@ -210,7 +260,56 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       // 悬浮窗可能在后台期间被用户从通知栏 / 悬浮球关掉，或由弹幕页新开：
       // 每次回前台都重新收敛一次开关状态（PM-001）。
       unawaited(_reconcileOverlayVisible());
+      // 后台期间主播可能已开播 / 下播，列表里的旧结论要静默补一次（UX-10）。
+      unawaited(_refreshStaleRooms());
     }
+  }
+
+  /// 回前台静默补刷过期房间（UX-10）。
+  ///
+  /// 只刷「从没刷过」或「超过 [staleRoomRefreshAfter]」的房间，且不弹提示；整批只推送
+  /// 一次悬浮窗候选（≤1 条，不是逐条），否则一批补刷会像刷屏一样连发配置。
+  ///
+  /// 两层节流（UX-13）：一是「距上次尝试」的窗口——失败路径没有写 `lastRefreshedAt`，
+  /// 弱网下每次回前台都会把整列表重打；二是同一 webRid 的在飞互斥（[_autoRefreshing]）。
+  Future<void> _refreshStaleRooms() async {
+    // 全量刷新进行中就不插队：它已经在逐条刷了，再插一遍等于把接口请求翻倍。
+    if (_refreshAllRunning || !mounted) return;
+    final int now = _nowMillis();
+    if (!shouldAttemptStaleRefresh(_lastStaleRefreshAttemptAt, now: now)) {
+      return;
+    }
+    final List<String> stale = <String>[
+      for (final ManagedRoom room in _rooms)
+        if (!_refreshing.contains(room.webRid) &&
+            !_autoRefreshing.contains(room.webRid) &&
+            isRoomStale(room.lastRefreshedAt, now: now))
+          room.webRid,
+    ];
+    if (stale.isEmpty) return;
+    // 先记尝试时间再发请求：中途失败也要算这一次，否则失败就会变成「每次都试」。
+    _lastStaleRefreshAttemptAt = now;
+    // 走 setState：行内刷新按钮要跟着置灰，否则用户点了没反应会以为按钮坏了。
+    setState(() => _autoRefreshing.addAll(stale));
+    try {
+      for (final String webRid in stale) {
+        final String? error = await _refreshRoomQuiet(webRid, persist: false);
+        // 静默刷新失败不打扰用户（不是他主动点的），但日志要留痕：用户反馈「回来还是
+        // 旧数据」时，得能看出到底是没刷还是刷失败了。
+        if (error != null) debugPrint('回前台补刷主播失败（$webRid）：$error');
+        if (!mounted) return;
+      }
+    } finally {
+      // 页面已销毁时不能 setState，但仍要清掉在飞标记（只为不留悬空状态）。
+      if (mounted) {
+        setState(() => _autoRefreshing.removeAll(stale));
+      } else {
+        _autoRefreshing.removeAll(stale);
+      }
+    }
+    await _store.save(_rooms);
+    if (!mounted) return;
+    _syncOverlayRooms();
   }
 
   /// 悬浮窗真实存在但本页不知道时，补上「已开启」状态（PM-001）。
@@ -629,7 +728,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 拉取一次房间信息，更新主播名 / 标题 / 开播状态并落盘，并给出行内提示。
   Future<void> _refreshRoom(String webRid) async {
-    if (_roomOf(webRid) == null || _refreshing.contains(webRid)) return;
+    // 回前台补刷正在飞的先让开：同一主播两路在飞会把风控风险翻倍（UX-13）。
+    if (_roomOf(webRid) == null ||
+        _refreshing.contains(webRid) ||
+        _autoRefreshing.contains(webRid)) {
+      return;
+    }
     setState(() => _refreshing.add(webRid));
 
     final String? error = await _refreshRoomQuiet(webRid);
@@ -649,7 +753,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   ///
   /// 与 [_refreshRoom] 的区别是不弹提示、不推送悬浮窗候选：批量刷新时由调用方
   /// 统一收尾，否则刷 8 个主播会弹 8 个 SnackBar、发 8 次配置（UX-04）。
-  Future<String?> _refreshRoomQuiet(String webRid) async {
+  ///
+  /// [persist] 为 false 时不落盘：批量刷新逐条写 rooms.json 会把同一个文件写 N 次
+  /// （8 个主播就是 8 次），由调用方在整批结束后统一保存一次（UX-11）。
+  Future<String?> _refreshRoomQuiet(
+    String webRid, {
+    bool persist = true,
+  }) async {
     final ManagedRoom? current = _roomOf(webRid);
     if (current == null) return '主播已不在列表中';
 
@@ -678,7 +788,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         .map((ManagedRoom item) => item.webRid == webRid ? target : item)
         .toList(growable: false);
     setState(() => _rooms = next);
-    await _store.save(next);
+    if (persist) await _store.save(next);
     return null;
   }
 
@@ -690,7 +800,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_refreshAllRunning) return;
     final List<String> targets = <String>[
       for (final ManagedRoom room in _rooms)
-        if (!_refreshing.contains(room.webRid)) room.webRid,
+        if (!_refreshing.contains(room.webRid) &&
+            !_autoRefreshing.contains(room.webRid))
+          room.webRid,
     ];
     if (targets.isEmpty) {
       _snack(_rooms.isEmpty ? '列表为空，没有可刷新的主播' : '所有主播都在刷新中');
@@ -707,7 +819,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     int ok = 0;
     int failed = 0;
     for (final String webRid in targets) {
-      final String? error = await _refreshRoomQuiet(webRid);
+      final String? error = await _refreshRoomQuiet(webRid, persist: false);
       if (!mounted) return;
       if (error == null) {
         ok++;
@@ -716,6 +828,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
       setState(() => _refreshAllDone++);
     }
+    if (!mounted) return;
+    // 整批刷完只落盘一次：逐条写会把 rooms.json 写 N 次，慢且更容易留下半批数据（UX-11）。
+    await _store.save(_rooms);
     if (!mounted) return;
     setState(() => _refreshAllRunning = false);
     _syncOverlayRooms();
@@ -1071,7 +1186,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           TextButton(
-            onPressed: refreshing ? null : () => _refreshRoom(room.webRid),
+            // 补刷期间也禁用：同一主播不能两路在飞（UX-13）；补刷不是用户点的，
+            // 因此不转圈，避免「整列表突然都在刷」的视觉噪音。
+            onPressed:
+                refreshing || _autoRefreshing.contains(room.webRid)
+                ? null
+                : () => _refreshRoom(room.webRid),
             child: refreshing
                 ? const SizedBox(
                     width: 14,

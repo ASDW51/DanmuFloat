@@ -294,6 +294,49 @@ void main() {
       await session.stop();
     });
 
+    test('复检预算用尽时补发一次 offline，界面才能放出重试入口（UX-08）', () async {
+      final SequenceRoomInfoClient client = SequenceRoomInfoClient(<RoomInfo>[
+        const RoomInfo.offline(webRid: '12345', api: RoomInfoApi.web),
+      ]);
+      final LiveDanmuSession session = build(
+        client: client,
+        offlineRecheckInterval: const Duration(milliseconds: 5),
+        maxOfflineRechecks: 2,
+      );
+      final List<LiveSessionStage> stages = <LiveSessionStage>[];
+      // 事件到达监听端那一刻的 autoRechecking：界面就是靠它决定要不要放出重试入口，
+      // 而它成立的前提是 stages 走「非 sync 的 broadcast」、回调晚于状态写入的同步段。
+      final List<bool> recheckingAtEvent = <bool>[];
+      session.stages.listen((LiveSessionStage stage) {
+        stages.add(stage);
+        recheckingAtEvent.add(session.autoRechecking);
+      });
+
+      await session.start();
+      await _waitFor(() => !session.autoRechecking);
+      // 补发的事件经微任务投递到监听端，先让出一轮再断言。
+      await _tick();
+
+      expect(session.stage, LiveSessionStage.offline);
+      expect(
+        stages.where((LiveSessionStage s) => s == LiveSessionStage.offline).length,
+        2,
+        reason: '到顶后只补发「恰好一条」：每轮空转都发会让界面反复重建',
+      );
+      expect(stages.last, LiveSessionStage.offline);
+      expect(
+        recheckingAtEvent.last,
+        isFalse,
+        reason: '补发时复检已停：界面据此把「复检中…」换成可重试的「未开播」',
+      );
+      expect(
+        shouldOfferRetry(session.stage, autoRechecking: session.autoRechecking),
+        isTrue,
+        reason: '补发这条事件的唯一目的就是让重试入口出现（UX-08）',
+      );
+      await session.stop();
+    });
+
     test('stop() 取消复检定时器，会话结束后不再请求房间信息（UX-01）', () async {
       final SequenceRoomInfoClient client = SequenceRoomInfoClient(<RoomInfo>[
         const RoomInfo.offline(webRid: '12345', api: RoomInfoApi.web),
