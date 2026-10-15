@@ -1622,16 +1622,6 @@ class _OverlayPaneState extends State<_OverlayPane> {
     unawaited(_start());
   }
 
-  /// 悬浮球菜单里点了本栏的「重试」：重建会话（UX-08）。
-  ///
-  /// 不复用 key 重建：那会连弹幕缓存一起丢掉，而已有历史的栏位只是连接失败，
-  /// 重连后用户还指望能接着看（`restart()` 只换连接、不换列表）。
-  @override
-  void didUpdateWidget(covariant _OverlayPane oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.retryToken != oldWidget.retryToken) unawaited(_retry());
-  }
-
   /// 暂停态下离底超过阈值即进入回溯；回到底部则退出（prd F12 状态流转）。
   void _onScroll() {
     if (!_paused || !_scrollController.hasClients) return;
@@ -1757,10 +1747,15 @@ class _OverlayPaneState extends State<_OverlayPane> {
   ///
   /// 过滤偏好变化时内存里的 [FilterPrefs] 会经 setState 重建本栏 widget，
   /// 可见列表在 build 时按新口径派生，无需在此重算。
+  ///
+  /// 悬浮球菜单点「重试」只递增 `retryToken`（UX-08）：不复用 key 重建，那会连弹幕
+  /// 缓存一起丢掉，而已有历史的栏位只是连接失败，重连后用户还指望能接着看
+  /// （`restart()` 只换连接、不换列表）。
   @override
   void didUpdateWidget(_OverlayPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     _autoScroller.speed = widget.scrollSpeed;
+    if (widget.retryToken != oldWidget.retryToken) unawaited(_retry());
   }
 
   Future<void> _start() async {
