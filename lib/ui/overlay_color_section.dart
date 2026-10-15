@@ -110,6 +110,7 @@ class OverlayColorSection extends StatelessWidget {
     required this.onOverrideChanged,
     required this.contrastPolicy,
     required this.onContrastPolicyChanged,
+    this.recentColors = const <int>[],
   });
 
   /// 当前主题标识（未知值由 [OverlayTheme.preset] 回落深色）。
@@ -128,6 +129,9 @@ class OverlayColorSection extends StatelessWidget {
 
   /// 切换对比度策略。
   final ValueChanged<String> onContrastPolicyChanged;
+
+  /// 「最近使用」的颜色（新色在前）。跨主题共用一份，由偏好层维护。
+  final List<int> recentColors;
 
   @override
   Widget build(BuildContext context) {
@@ -249,7 +253,11 @@ class OverlayColorSection extends StatelessWidget {
     final int? picked = await showDialog<int>(
       context: context,
       builder: (BuildContext context) =>
-          _OverlayColorPickerDialog(role: role, current: current),
+          _OverlayColorPickerDialog(
+            role: role,
+            current: current,
+            recentColors: recentColors,
+          ),
     );
     if (picked == null) return;
     onOverrideChanged(
@@ -261,10 +269,17 @@ class OverlayColorSection extends StatelessWidget {
 
 /// 取色对话框：候选色块 + 十六进制输入 + 恢复默认。
 class _OverlayColorPickerDialog extends StatefulWidget {
-  const _OverlayColorPickerDialog({required this.role, required this.current});
+  const _OverlayColorPickerDialog({
+    required this.role,
+    required this.current,
+    required this.recentColors,
+  });
 
   final String role;
   final Color current;
+
+  /// 「最近使用」的颜色；为空时整块不渲染。
+  final List<int> recentColors;
 
   @override
   State<_OverlayColorPickerDialog> createState() =>
@@ -303,6 +318,27 @@ class _OverlayColorPickerDialogState extends State<_OverlayColorPickerDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          // 最近使用放在候选色块之前：复用比重新挑更快，且它才是用户上次真正采纳的值。
+          if (widget.recentColors.isNotEmpty) ...<Widget>[
+            Text(
+              '最近使用',
+              style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                for (final int argb in widget.recentColors)
+                  InkWell(
+                    key: ValueKey<String>('overlayRecent_$argb'),
+                    onTap: () => Navigator.of(context).pop(argb),
+                    child: _ColorSwatch(color: Color(argb), size: 28),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
           Wrap(
             spacing: 8,
             runSpacing: 8,
