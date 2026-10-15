@@ -354,9 +354,11 @@ List<({int start, int end})> _regexHighlightRanges(
   return ranges;
 }
 
-/// 在线人数：过万折算为「x.x万」，与平台展示口径一致。
-String formatOnlineCount(int value) =>
-    value >= 10000 ? '${(value / 10000).toStringAsFixed(1)}万' : '$value';
+/// 在线人数：一律给完整数字（UX-12）。
+///
+/// 原先过万折算成「x.x万」：栏目标识行里这一行是多栏窄窗最该保住的信息，折算后
+/// 用户拿不到准确人数，而省下的几个字符换成布局收益并不划算（人数据此裁定不可省略）。
+String formatOnlineCount(int value) => '$value';
 
 /// 次要文字（时间、等级、灯牌、状态、类型标记）相对正文缩小的字号，
 /// 并设 8 的下限，避免用户把基准字号调到很小后出现 0 或负数。
