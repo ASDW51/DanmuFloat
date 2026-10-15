@@ -331,6 +331,11 @@ void main() {
 
     // 浅色皮肤开关已由「悬浮窗配色」的四套预设 chips 取代：lightTheme 现在是派生值
     // （themeId == 'light'），「清爽」预设等价于原来的开关。
+    // 配色区默认折叠，先展开再点预设 chip。
+    await tester.tap(
+      find.byKey(const ValueKey<String>('overlayColorSection')),
+    );
+    await tester.pumpAndSettle();
     final Finder coolChip = find.byKey(const ValueKey<String>('overlayTheme_light'));
     await tester.ensureVisible(coolChip);
     await tester.pumpAndSettle();

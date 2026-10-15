@@ -104,8 +104,18 @@ class OverlayColorSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final OverlayTheme theme = OverlayTheme.preset(themeId).resolve(overrides);
     final Brightness brightness = Theme.of(context).brightness;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    // 默认折叠：11 个角色铺开会把设置页后面几项挤出懒加载窗口（那会让既有用例
+    // 找不到「导出数据」这类条目），而且一次列 11 行本身也不好挑。
+    final String summary = overrides.isEmpty
+        ? '全部元素跟随主题'
+        : '已自定义 ${overrides.length} 个元素';
+    return ExpansionTile(
+      key: const ValueKey<String>('overlayColorSection'),
+      title: const Text('逐元素取色'),
+      subtitle: Text(
+        summary,
+        style: TextStyle(fontSize: 12, color: secondaryTextColor(brightness)),
+      ),
       children: <Widget>[
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -121,18 +131,6 @@ class OverlayColorSection extends StatelessWidget {
                   onSelected: (_) => onThemeChanged(preset.id),
                 ),
             ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Text(
-            overrides.isEmpty
-                ? '全部元素跟随主题，可按需单独调整'
-                : '已自定义 ${overrides.length} 个元素，其余跟随主题',
-            style: TextStyle(
-              fontSize: 12,
-              color: secondaryTextColor(brightness),
-            ),
           ),
         ),
         const Divider(height: 1),

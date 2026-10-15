@@ -68,7 +68,8 @@ void main() {
       Map<String, int> overrides = const <String, int>{},
       ValueChanged<String>? onThemeChanged,
       void Function(String role, int? argb)? onOverrideChanged,
-    }) => tester.pumpWidget(
+    }) async {
+      await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: SingleChildScrollView(
@@ -81,7 +82,13 @@ void main() {
           ),
         ),
       ),
-    );
+      );
+      // 配色区默认折叠：先展开「逐元素取色」再断言各行。
+      await tester.tap(
+        find.byKey(const ValueKey<String>('overlayColorSection')),
+      );
+      await tester.pumpAndSettle();
+    }
 
     testWidgets('当前主题的 chip 处于选中态，点其它 chip 回报其标识', (WidgetTester tester) async {
       String? selected;
@@ -118,7 +125,7 @@ void main() {
         );
       }
       expect(find.text('跟随主题'), findsNWidgets(OverlayTheme.colorKeys.length));
-      expect(find.text('全部元素跟随主题，可按需单独调整'), findsOneWidget);
+      expect(find.text('全部元素跟随主题'), findsOneWidget);
     });
 
     testWidgets('打开开关回报该角色的当前主题取值，关闭回报 null', (WidgetTester tester) async {
