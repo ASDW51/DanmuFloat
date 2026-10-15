@@ -293,8 +293,10 @@ class OverlayTheme {
   ///
   /// 全项目唯一的对比度口径：测试与守卫都调它，避免各写一份实现后互相漂移。
   static double contrastRatio(Color foreground, Color background) {
+    // 前景展平到背景上（半透明前景的真实观感）；背景按自身 RGB 计算——把背景
+    // 「合成到自己身上」是无意义的，半透明底色要由调用方先展平到真实背衬上。
     final Color fg = flattenOver(foreground, background);
-    final Color bg = flattenOver(background, background);
+    final Color bg = background;
     final double l1 = fg.computeLuminance();
     final double l2 = bg.computeLuminance();
     final double hi = l1 > l2 ? l1 : l2;

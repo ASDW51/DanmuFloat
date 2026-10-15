@@ -21,12 +21,14 @@ void main() {
       expect(ratio, lessThan(7));
     });
 
-    test('背景自身的 alpha 也被展平（半透明底色不会算出虚高的对比度）', () {
-      final double opaque =
-          OverlayTheme.contrastRatio(Colors.white, Colors.black);
-      final double translucent =
-          OverlayTheme.contrastRatio(Colors.white, Colors.black54);
-      expect(translucent, lessThan(opaque));
+    test('半透明背景要由调用方先展平到真实背衬上（结果随之变化）', () {
+      // contrastRatio 只负责把**前景**展平到背景上；半透明背景自己不知道该压在什么
+      // 上面，所以先展平再比较——否则「白字压在 54% 黑上」会被算成 21:1。
+      final Color translucent =
+          OverlayTheme.flattenOver(Colors.black54, Colors.white);
+      final double ratio = OverlayTheme.contrastRatio(Colors.white, translucent);
+      expect(ratio, lessThan(21));
+      expect(ratio, greaterThan(1));
     });
   });
 
