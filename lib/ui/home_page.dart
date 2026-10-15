@@ -23,6 +23,7 @@ import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/storage/theme_store.dart';
 import 'package:danmu_float/ui/add_room_dialog.dart';
 import 'package:danmu_float/ui/danmu_page.dart';
+import 'package:danmu_float/ui/high_performance_dialog.dart';
 import 'package:danmu_float/ui/settings_page.dart';
 import 'package:flutter/material.dart';
 
@@ -773,9 +774,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     final List<String> webRids =
         selected.map((ManagedRoom room) => room.webRid).toList(growable: false);
-    // 超过 4 栏属于高性能模式，切换前强制确认（prd F4，无「不再提示」）。
-    if (webRids.length > maxStandardPaneCount) {
-      final bool goOn = await _confirmHighPerformance(webRids.length);
+    // 超过 4 栏属于高性能模式，切换前强制确认（prd F4，无「不再提示」）；
+    // 与悬浮窗内加栏共用同一份弹窗，保证两处口径一致（UX-05）。
+    if (needsHighPerformanceConfirm(webRids.length)) {
+      final bool goOn = await confirmHighPerformance(context, webRids.length);
       if (!goOn || !mounted) return;
     }
     // 点「开启悬浮窗」后直接连接：连接前的二次确认已按需求移除。
@@ -828,31 +830,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await closeOverlayWindow();
     if (!mounted) return;
     setState(() => _overlayVisible = false);
-  }
-
-  /// 超过 4 栏的高性能模式确认（prd F4）：强制确认，不提供「不再提示」。
-  Future<bool> _confirmHighPerformance(int paneCount) async {
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('高性能模式'),
-        content: Text(
-          '本次要开 $paneCount 栏：栏数越多，同时维持的弹幕连接与绘制负载越高，'
-          '低端设备可能出现卡顿或发热。建议先按栏数调大悬浮窗尺寸，并关闭不必要的栏。',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('继续开启'),
-          ),
-        ],
-      ),
-    );
-    return confirmed ?? false;
   }
 
   void _snack(String message) {
@@ -1372,7 +1349,10 @@ class _MultiSelectDialogState extends State<_MultiSelectDialog> {
   };
 
   /// 超过 4 栏为高性能模式，提示会在下一步弹出强制确认（prd F4）。
-  bool get _highPerformance => _selected.length > maxStandardPaneCount;
+  bool get _highPerformance => needsHighPerformanceConfirm(_selected.length);
+
+  /// 已达硬上限：未勾选的主播一律不可再勾（已勾选的仍可取消，见 prd F2 的 1~9 栏）。
+  bool get _atPaneCap => !canAddPane(_selected.length);
 
   @override
   Widget build(BuildContext context) {
@@ -1386,7 +1366,8 @@ class _MultiSelectDialogState extends State<_MultiSelectDialog> {
           children: <Widget>[
             Text(
               '按选择顺序分配到各栏'
-              '${_highPerformance ? '；超过 $maxStandardPaneCount 栏需二次确认高性能模式' : ''}',
+              '${_highPerformance ? '；超过 $maxStandardPaneCount 栏需二次确认高性能模式' : ''}'
+              '${_atPaneCap ? '；已达上限 $maxPaneCount 栏，取消勾选后可换别的' : ''}',
               style: TextStyle(
                 fontSize: 12,
                 color: _highPerformance ? Colors.orange.shade800 : Colors.grey,
@@ -1456,13 +1437,16 @@ class _MultiSelectDialogState extends State<_MultiSelectDialog> {
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(room.webRid, style: const TextStyle(fontSize: 12)),
-      onChanged: (bool? value) => setState(() {
-        if (value ?? false) {
-          _selected.add(room.webRid);
-        } else {
-          _selected.remove(room.webRid);
-        }
-      }),
+      // 已到硬上限时只锁「未勾选」的行：已勾选的必须还能取消，否则用户被卡死在 9 栏。
+      onChanged: checked || !_atPaneCap
+          ? (bool? value) => setState(() {
+                if (value ?? false) {
+                  _selected.add(room.webRid);
+                } else {
+                  _selected.remove(room.webRid);
+                }
+              })
+          : null,
     );
   }
 
