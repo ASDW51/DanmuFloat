@@ -336,3 +336,20 @@ Future<bool> verifyOverlayPermission() async {
   await teardownOverlay();
   return false;
 }
+
+/// 只读探测悬浮窗是否在屏幕上（PM-001）：不拆窗口、不改任何状态。
+///
+/// 与 [verifyOverlayPermission] 的区别：那个把「窗口不在」当失效去拆除，适合
+/// 「我确认过它应该开着」的场景；这里只做查询，供首页 / 弹幕页收敛开关状态——
+/// 窗口本就关着不算异常，拆一次反而让开着的入口凭空消失。
+///
+/// 查询抛错（非 Android 运行 / 通道异常）按「未显示」处理，与插件内部 catch 后
+/// 返回 false 的口径一致。
+Future<bool> isOverlayActive() async {
+  try {
+    return await FlutterScreenOverlay.isActive();
+  } on Object catch (exception) {
+    debugPrint('查询悬浮窗状态失败: $exception');
+    return false;
+  }
+}
