@@ -98,8 +98,9 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {
         _overlayState = state;
-        // 悬浮窗自查发现权限被撤销且已自行断开：按钮状态同步回未开启。
-        if (state.permissionRevoked) _overlayVisible = false;
+        // 悬浮窗自查发现权限被撤销且已自行断开，或在窗内被关掉（悬浮球菜单 /
+        // 通知栏）：按钮状态同步回未开启。
+        if (state.permissionRevoked || state.closed) _overlayVisible = false;
         // 悬浮球里改的透明度 / 字号 / 尺寸 / 锁定 / 吸附角：本地偏好同步跟上，
         // 否则本页仍持有旧值，再从这里开窗会把悬浮窗里改过的设置冲回旧值。
         final OverlayPrefsPatch? patch = state.prefsPatch;

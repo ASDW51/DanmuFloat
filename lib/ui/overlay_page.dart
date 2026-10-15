@@ -351,6 +351,13 @@ class _OverlayPageState extends State<OverlayPage> {
       if (clickThroughChanged) unawaited(_applyClickThrough(_clickThrough));
       return;
     }
+    // 主 App 下发的窗口尺寸（设置页滑杆 / 已建窗时重排栏位）：只有本引擎能改窗口
+    // 大小（插件把尺寸通道注册在悬浮窗引擎），主 App 只能把请求转过来。
+    final OverlayResize? resize = OverlayResize.tryParse(message);
+    if (resize != null) {
+      unawaited(_applyWindowSize(resize));
+      return;
+    }
     // 纯过滤调整：屏蔽 / 高亮 / 类型筛选，改了只影响后续判定，已有列表按新口径重建。
     final FilterPrefs? filter = OverlayFilter.tryParse(message);
     if (filter != null) {
@@ -476,7 +483,11 @@ class _OverlayPageState extends State<OverlayPage> {
     LiveSessionStage.idle,
   ];
 
-  void _reportState() {
+  /// 聚合各栏状态上报主 App。
+  ///
+  /// [closed] 为真表示窗口已由本引擎关掉（悬浮球菜单 / 通知栏）：主 App 据此
+  /// 复位「窗口已建立」，否则它会以为窗口还在，下次开窗只重排、不重新建窗。
+  void _reportState({bool closed = false}) {
     if (_permissionRevoked) {
       unawaited(
         FlutterScreenOverlay.shareData(
@@ -512,6 +523,7 @@ class _OverlayPageState extends State<OverlayPage> {
           received: received,
           webRid: webRid,
           error: error,
+          closed: closed,
           webRids: _webRids,
           // 悬浮球里改的透明度 / 尺寸 / 锁定随本次上报带给主 App 落盘；
           // 带出去后就清空，避免每秒重复上报同一个值。
@@ -1050,6 +1062,24 @@ class _OverlayPageState extends State<OverlayPage> {
     );
   }
 
+  /// 主 App 下发的窗口尺寸（设置页滑杆 / 已建窗时重排栏位）。
+  ///
+  /// 只改窗口大小与本地记录，不动各栏绑定，也不回传偏好增量：尺寸偏好以主 App
+  /// 为权威值，回传只会形成来回打架。
+  Future<void> _applyWindowSize(OverlayResize resize) async {
+    setState(() => _windowSize = Size(resize.width, resize.height));
+    try {
+      await FlutterScreenOverlay.resizeOverlay(
+        resize.width.round(),
+        resize.height.round(),
+        // 手势期间的临时锁定优先；主 App 下发的持久锁定同样要尊重。
+        !(resize.dragLocked || _gestureDragLock),
+      );
+    } on Object catch (exception) {
+      debugPrint('调整悬浮窗尺寸失败: $exception');
+    }
+  }
+
   /// 悬浮球菜单里改窗口尺寸：本地立刻重排，并记下待落盘的尺寸。
   void _setWindowSize(double width, double height) {
     final ({double width, double height}) next = _fitWindowSize(width, height);
@@ -1168,6 +1198,9 @@ class _OverlayPageState extends State<OverlayPage> {
       _gestureOpacity.clear();
       _menuOpen = false;
     });
+    // 关窗前补发一次聚合状态（AGENTS.md §5 的关窗顺序）：主 App 收到 closed 后
+    // 复位「已建窗」与各页开关，否则它会以为窗口还在、下次开窗只重排不建窗。
+    _reportState(closed: true);
     try {
       await FlutterScreenOverlay.closeOverlay();
     } on Object catch (exception) {
@@ -1429,6 +1462,9 @@ class _OverlayPaneState extends State<_OverlayPane> {
   /// 暂停态下离底超过阈值即进入回溯；回到底部则退出（prd F12 状态流转）。
   void _onScroll() {
     if (!_paused || !_scrollController.hasClients) return;
+    // 自动滚动动画自身造成的位移不算用户回溯（与 danmu_page 同一口径）：
+    // 动画进行中被暂停时列表正被推离底部，据此判定会短暂误报「回到最新」。
+    if (_autoScroller.animating) return;
     final ScrollPosition position = _scrollController.position;
     final bool atBottom = position.maxScrollExtent - position.pixels <= 24;
     if (!atBottom && !_backtracking) {
