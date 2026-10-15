@@ -633,3 +633,21 @@ git checkout main && git pull --ff-only
 | F | UX-33 窗内配色入口（预设 chips + 跟随主题；`insetPadding: 8` + `scrollable: true`；行高 ≥28dp） | ⬜ | — |
 
 **本轮 CI 教到的坑**：① `toConfig()` 造的是 `OverlayConfig` 而不是 `OverlayPrefs`，两处构造点的参数有多处同名邻居（都紧跟 `showTitleBar`），文本锚点会撞——按行号对调才干净；② `lightTheme` 一旦降级为 getter，测试里 `OverlayPrefs(lightTheme: true)` 这类**构造**调用会编译失败（`copyWith(lightTheme:)` 不受影响）；③ 对比度断言必须先把前景 alpha 展平到背景；而**背景**自己不知道该压在什么上面，「把背景合成到自己身上」是无意义的——半透明底色要由调用方先 `flattenOver` 到真实背衬；④ 弹窗路由挂在 `MaterialApp` 的 Navigator 上，比页面高一层，只在页面里包 `Theme` 管不到弹窗，必须让根 widget 拿到主题。
+
+#### 第 6 轮收口（配色体系，截至 `456cb00`）
+
+| # | 条目 | 状态 | PR |
+| --- | --- | --- | --- |
+| A | UX-28 抽出 `OverlayTheme`（4 套预设 + 角色级覆盖解析 + `parseArgb`） | ✅ | #49 |
+| B | UX-29 偏好扩展与迁移（`themeId`/`colorOverrides`/`recentColors`/`contrastPolicy`；`lightTheme` 降为派生 getter） | ✅ | #51 |
+| C | UX-30 下发通道（`style` 消息可选字段 + `parseColorOverrides` 唯一实现 + `_palette` 接到三处渲染） | ✅ | #53 |
+| E | UX-31 对比度守卫（唯一口径 `contrastRatio` + 只调明度的 `ensureContrast`） | ✅ | #52 |
+| H | 弹窗跟随皮肤（`overlayThemeData` + 根 widget 订阅发布；修掉深色下弹窗白底） | ✅ | #54 |
+| I | 状态点口径统一（`_stageColor` 委托 `stageTextColor`） | ✅ | #56 |
+| D | UX-32 主 App 配色 UI（预设 chips + 11 角色逐元素取色 + 十六进制输入 + 恢复默认） | ✅ | #57 |
+| F1 | UX-33 第一步：patch 携带 `themeId`/`colorOverrides`（`null`=不改，空表=清空） | ✅ | #58 |
+| F2 | UX-33 第二步：悬浮球菜单内的配色入口（预设 chips + 全部跟随主题） | ⬜ 下一项 | — |
+
+**第 7 轮候选（已由 PM 裁决推后）**：`chromeBg` 角色（球/菜单/胶囊三处 alpha 各不相同，须先定 1 个还是 2 个角色及四套预设取值）；「最近使用色」UI 与去重交互（字段已在 B 落盘）；浅色预设 `secondary` 若跌破 4.5:1 则换 `0xFF49454F` 并统一口径；`DanmakuKind.privilegeScreenChat` 等按弹幕类型写死的颜色与 `typeColor()` 派生口径并存的问题。
+
+**本轮新增踩坑**：⑤ 用「字段名 + 相邻行」当文本锚点在长文件里替换时，**同名邻居会让锚点撞车**——`if (windowX != null)` 在 `overlay_bridge.dart` 里出现两次（`OverlayStyle`/`OverlayConfig` 与 `OverlayPrefsPatch` 各一处），于是 `themeId` 被插进了不相干的类，`flutter analyze` 报 `undefined name`。正确做法是按 `class X {` 切片后只在该切片内替换（本轮的 C 与 F1 各踩一次）。⑥ **`git commit` 前先确认自己在哪个分支**：一次修复被提交到本地 `main` 上，导致「分支仍旧是坏的、main 多出一个 commit」的错位；处理方式是 `git branch fix-tmp <commit>` 保命 → `git reset --hard origin/main` → 回分支 `cherry-pick` → 推。⑦ `tester.tap(find.byKey(...))` 报 `Bad state: No element` 时，先看堆栈是不是 `getCenter`——那是 **finder 命中 0 个元素**，与回调逻辑无关；被测行为若是「开关取什么值」，直接驱动 `widget.onChanged!(...)` 比猜命中区域更诚实。
