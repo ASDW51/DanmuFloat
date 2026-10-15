@@ -122,25 +122,27 @@ jobs:
       - name: 单元测试
         run: flutter test
 
-      - name: 构建 arm64 精简包
+      - name: 构建 APK（arm64 精简包 + 通用包）
         shell: bash
         env:
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           set -euo pipefail
+          mkdir -p dist
+          # 两个产物只能分别构建：--split-per-abi 产出的是按 ABI 拆分的包
+          # （app-arm64-v8a-release.apk），通用包必须走不带 --split-per-abi 的构建
+          # （app-release.apk）——Flutter 没有「一条命令同时出两者」的选项，
+          # 所以这里合并的是「步骤」，不是构建命令。
+          echo "::group::构建 arm64 精简包"
           # 限定 android-arm64 + split-per-abi：只编 arm64 一个 ABI，避免白编另外两个拆分包的产物
           flutter build apk --release --target-platform android-arm64 --split-per-abi
-          mkdir -p dist
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "dist/DanmuFloat-${TAG}-arm64-v8a.apk"
-
-      - name: 构建通用包
-        shell: bash
-        env:
-          TAG: ${{ steps.ver.outputs.tag }}
-        run: |
-          set -euo pipefail
+          echo "::endgroup::"
+          echo "::group::构建通用包"
           flutter build apk --release
           cp build/app/outputs/flutter-apk/app-release.apk "dist/DanmuFloat-${TAG}-universal.apk"
+          echo "::endgroup::"
+          ls -lh dist
 
       - name: 生成校验和
         shell: bash
@@ -160,6 +162,12 @@ jobs:
         run: |
           set -euo pipefail
           if git rev-parse -q --verify "refs/tags/${TAG}" > /dev/null; then
+            # 已有 tag（「更新 Release」走的正是这条路）：先切到该 tag 再 --current。
+            # 否则 checkout 停在触发分支的提交上，`git cliff --current` 取的是 HEAD 所在的
+            # 那一个 tag（不是 $TAG）——更新 Release 时就会看到与 $TAG 对不上的旧说明。
+            # --force 只为顶掉 `flutter pub get` 可能改动的 pubspec.lock；APK 已拷进
+            # dist/，此后不再依赖工作区内容。
+            git checkout -q --force --detach "$TAG"
             git cliff --current --strip all > RELEASE_NOTES.md
           else
             git cliff --unreleased --tag "${TAG}" --strip all > RELEASE_NOTES.md
