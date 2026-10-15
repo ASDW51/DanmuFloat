@@ -606,8 +606,6 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 状态色：浅色主题下这几个原色对比度偏低，UX-19 会统一收敛到文字取色表；
-  /// 本轮只搬布局不动视觉，所以先按原样保留映射。
   /// 状态色统一走 [stageTextColor]：旧版直接用 green/orange/grey 原色，浅色主题下
   /// 对白底只有约 2.2~2.9:1，而状态词是中文文本，不能只靠旁边 10dp 的圆点传达。
   Color _stageColor(BuildContext context, LiveSessionStage stage) =>
