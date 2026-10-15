@@ -33,7 +33,12 @@ import 'package:flutter/material.dart';
 const Duration _overlayAliveProbeDelay = Duration(seconds: 1);
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, this.onResetAll});
+  const HomePage({
+    super.key,
+    this.onResetAll,
+    this.directoryResolver,
+    this.credentialStore,
+  });
 
   /// 「清除所有本地数据」完成后回调外层，把入口切回免责声明页（prd F26）。
   final VoidCallback? onResetAll;
