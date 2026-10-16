@@ -188,6 +188,28 @@ void main() {
     expect(loaded.regexEnabled, isFalse);
     expect(loaded.blockedKeywords, <String>['加群']);
   });
+
+  test('显式空 visibleKinds 原样保留：空数组不等于坏数据（#83）', () {
+    // 全部取消勾选后 toJson 写出的就是 []，这是有效选择，不能被回落成默认。
+    final FilterPrefs loaded = decodeFilterPrefs('{"visibleKinds":[]}');
+    expect(loaded.visibleKinds, isEmpty);
+    // 往返一次仍然为空：落盘 / 重启 / 备份导入都不能让设置悄悄回到默认。
+    expect(
+      decodeFilterPrefs(encodeFilterPrefs(loaded)).visibleKinds,
+      isEmpty,
+    );
+  });
+
+  test('visibleKinds 里全是未登记的名字时仍回落默认：坏数据的安全网（#83）', () {
+    final FilterPrefs loaded =
+        decodeFilterPrefs('{"visibleKinds":["未来的类型"]}');
+    expect(loaded.visibleKinds, defaultListKinds);
+  });
+
+  test('缺 visibleKinds 键时按默认处理，老配置文件行为不变（#83）', () {
+    final FilterPrefs loaded = decodeFilterPrefs('{"blockedKeywords":[]}');
+    expect(loaded.visibleKinds, defaultListKinds);
+  });
 }
 
 const double _screenWidth = 800;
