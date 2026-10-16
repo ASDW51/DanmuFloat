@@ -3,12 +3,11 @@
 // 从设置页「屏蔽与高亮」分区进入：设置页只留一个入口，具体编辑与教程都放这里，
 // 免得设置页越堆越长。页面内自带「使用教程」折叠区，讲清普通匹配与正则匹配的差别。
 //
-// 落盘策略与设置页一致：任一改动立即落盘并回调外层，外层再把过滤偏好推给悬浮窗引擎。
-import 'dart:async';
-
+// 落盘策略：本页**不自己写文件**，改动只回调外层，由首页（权威聚合点）合并后统一落盘并
+// 推给悬浮窗引擎（#97）。此前本页直接整份覆盖 filter.json，与本页持有的进页快照叠加，
+// 会把窗内刚屏蔽的用户解封。
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
-import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
 
@@ -16,17 +15,13 @@ class FilterSettingsPage extends StatefulWidget {
   const FilterSettingsPage({
     super.key,
     required this.prefs,
-    this.store,
     this.onChanged,
   });
 
   /// 进入页面时的过滤偏好快照。
   final FilterPrefs prefs;
 
-  /// 过滤偏好存储；单测可注入内存后端。
-  final FilterStore? store;
-
-  /// 每次改动后的回调：外层负责同步给悬浮窗引擎（本页负责落盘）。
+  /// 每次改动后的回调：外层负责合并、落盘并同步给悬浮窗引擎（#97）。
   final void Function(FilterPrefs prefs)? onChanged;
 
   @override
@@ -35,12 +30,11 @@ class FilterSettingsPage extends StatefulWidget {
 
 class _FilterSettingsPageState extends State<FilterSettingsPage> {
   late FilterPrefs _prefs = widget.prefs;
-  late final FilterStore _store = widget.store ?? FilterStore();
 
   void _apply(FilterPrefs next) {
     setState(() => _prefs = next);
+    // 只上报意图，不写文件：写文件由首页统一做（#97），否则本页的进页快照会覆盖窗内改动。
     widget.onChanged?.call(next);
-    unawaited(_store.save(next));
   }
 
   @override

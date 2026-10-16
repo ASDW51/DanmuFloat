@@ -5,7 +5,6 @@ import 'dart:async';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
-import 'package:danmu_float/storage/filter_store.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
@@ -286,17 +285,15 @@ StreamController<OverlayStatus>? _statusController;
 void pushOverlayStatusForTest(OverlayStatus status) =>
     (_statusController ??= _relayOverlayStatus()).add(status);
 
-/// 过滤偏好变化流（悬浮窗里把用户 / 文本加入屏蔽后由主 App 落盘的那份）。
+/// 过滤偏好变化流（悬浮窗里把用户 / 文本加入屏蔽后，由主 App 落盘的那份）。
 ///
 /// 广播分发：首页、弹幕页等已打开的页面都按同一份口径刷新展示，
-/// 避免一处改了屏蔽词、另一处还按旧口径显示。
+/// 避免一处改了屏蔽词、另一处还按旧口径显示。落盘由首页统一做（#97）：
+/// 这里再存一份，就会出现两个互不知情的写入者。
 Stream<FilterPrefs> get filterChangedStream =>
     (_filterController ??= StreamController<FilterPrefs>.broadcast()).stream;
 
 StreamController<FilterPrefs>? _filterController;
-
-/// 主 App 侧的过滤偏好存储（只为落盘悬浮窗内改动的过滤项）。
-final FilterStore _filterStore = FilterStore();
 
 StreamController<OverlayStatus> _relayOverlayStatus() {
   final StreamController<OverlayStatus> controller =
@@ -314,19 +311,14 @@ StreamController<OverlayStatus> _relayOverlayStatus() {
     // 窗口都不在了，复位「已建窗」。不复位的话首页 / 弹幕页会以为窗口还在，下次开窗
     // 走重排分支（只下发配置、不调用 showOverlay），窗口再也回不来。
     if (status.closed || status.permissionRevoked) _overlayShown = false;
-    if (status.filter != null) unawaited(_persistFilter(status.filter!));
+    if (status.filter != null) _persistFilter(status.filter!);
     if (!controller.isClosed) controller.add(status);
   }, onError: (Object error) => debugPrint('悬浮窗状态流异常: $error'));
   return controller;
 }
 
-/// 悬浮窗里改了过滤偏好：主 App 落盘并广播，供各页面刷新同一份口径。
-Future<void> _persistFilter(FilterPrefs prefs) async {
-  try {
-    await _filterStore.save(prefs);
-  } on Object catch (exception) {
-    debugPrint('落盘过滤偏好失败: $exception');
-  }
+/// 悬浮窗里改了过滤偏好：广播给各页面，由首页统一落盘（#97）。
+void _persistFilter(FilterPrefs prefs) {
   if (!(_filterController?.isClosed ?? true)) _filterController!.add(prefs);
 }
 

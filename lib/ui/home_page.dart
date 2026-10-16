@@ -19,6 +19,7 @@ import 'package:danmu_float/room/room_info_client.dart';
 import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/local_data_reset.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
+import 'package:danmu_float/storage/prefs_merge.dart';
 import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/storage/theme_store.dart';
 import 'package:danmu_float/system/system_permissions.dart';
@@ -177,6 +178,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final FilterStore _filterStore = FilterStore();
   FilterPrefs _filter = const FilterPrefs();
 
+  /// 设置页打开时它看到的偏好 / 过滤快照（#97）。
+  ///
+  /// 设置页与过滤二级页只会在各自的进页快照上 `copyWith` 并整份回传，因此「相对快照
+  /// 变过的字段」正好是用户在页内真正改的东西。写回时据此取差量，把快照里那些用户没碰、
+  /// 只是被悬浮窗引擎改过的旧值挡在外面。为 null（未经本页打开）时按整份写回处理。
+  OverlayPrefs? _settingsPrefsSnapshot;
+  FilterPrefs? _settingsFilterSnapshot;
+
   /// 主 App 主题偏好；导入数据后要按备份里的值复位。
   final ThemeStore _themeStore = ThemeStore();
 
@@ -244,7 +253,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
     _filterSubscription = filterChangedStream.listen((FilterPrefs filter) {
       if (!mounted) return;
+      // 悬浮窗内改的过滤偏好：这是窗内引擎的现状，不是「相对某份快照的差量」，
+      // 因此整份采用。落盘集中在本页（#97）——launcher 只负责广播，不再自己写文件。
       setState(() => _filter = filter);
+      unawaited(_filterStore.save(filter));
     });
     unawaited(_load());
     unawaited(_loadPrefs());
@@ -527,7 +539,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _onPrefsChanged(
+      // 这里已经是最终值，不能走设置页那条差量合并（#97）。
+      _applyPrefs(
         _prefs.copyWith(windowWidth: scaled.width, windowHeight: scaled.height),
         persist: true,
       );
@@ -566,8 +579,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  /// 设置页改样式：先更新内存并推给已开着的悬浮窗，需要落盘时才写文件。
+  /// 设置页改样式：它只会报告「相对进页快照变过的字段」，这里以本页当前值合并后应用（#97）。
+  ///
+  /// 直接整份写回会出问题：悬浮窗引擎是并发的偏好修改者，用户在窗里改完透明度 / 字号、
+  /// 或把某个用户加入屏蔽后，设置页再动任意一个控件都会把进页时的旧快照整份推回——
+  /// 窗内刚做的修改被静默撤销。
   void _onPrefsChanged(OverlayPrefs prefs, {required bool persist}) {
+    final OverlayPrefs? snapshot = _settingsPrefsSnapshot;
+    final OverlayPrefs merged = snapshot == null
+        ? prefs
+        : mergeOverlayPrefsChanges(
+            current: _prefs,
+            previous: snapshot,
+            next: prefs,
+          );
+    _applyPrefs(merged, persist: persist);
+  }
+
+  /// 应用一份「已经是最终值」的偏好：更新内存、推给悬浮窗、必要时落盘。
+  void _applyPrefs(OverlayPrefs prefs, {required bool persist}) {
     final bool sizeChanged = prefs.windowWidth != _prefs.windowWidth ||
         prefs.windowHeight != _prefs.windowHeight;
     setState(() => _prefs = prefs);
@@ -588,6 +618,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _openSettings() {
+    // 记下设置页看到的快照：它只会在这份快照上 copyWith 并整份回传，
+    // 后续写回据此取差量，避免把页内没碰过的字段按旧值覆盖（#97）。
+    _settingsPrefsSnapshot = _prefs;
+    _settingsFilterSnapshot = _filter;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (BuildContext context) => SettingsPage(
@@ -597,7 +631,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           credentialStore: _credentialStore,
           onCredentialsChanged: _onCredentialsChanged,
           filter: _filter,
-          filterStore: _filterStore,
           onFilterChanged: _onFilterChanged,
           onDataImported: _reloadAfterImport,
         ),
@@ -637,10 +670,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  /// 设置页改过滤偏好：更新内存并推给已开着的悬浮窗（落盘由设置页负责）。
+  /// 设置页 / 过滤二级页改过滤偏好：同款差量合并（#97），并由本页统一落盘与下发。
+  ///
+  /// 落盘集中在这里：此前过滤二级页自己整份覆盖 filter.json，两份互不可见的进页快照
+  /// 叠在一起写，窗内刚屏蔽的用户会被解封。
   void _onFilterChanged(FilterPrefs filter) {
-    setState(() => _filter = filter);
-    unawaited(shareOverlayFilter(filter));
+    _applyFilterChange(previous: _settingsFilterSnapshot, next: filter);
+  }
+
+  /// 弹幕页改过滤偏好：它直接给出自己那份旧值，无需另存快照（#97）。
+  void _onDanmuFilterChanged(FilterPrefs previous, FilterPrefs next) {
+    _applyFilterChange(previous: previous, next: next);
+  }
+
+  /// 以本页当前过滤偏好为基，把 [previous] → [next] 之间变过的字段合并进来并落盘。
+  ///
+  /// [previous] 为 null 表示改动方没有基线（未经本页打开的独立挂载），按整份采用处理。
+  void _applyFilterChange({
+    required FilterPrefs? previous,
+    required FilterPrefs next,
+  }) {
+    final FilterPrefs merged = previous == null
+        ? next
+        : mergeFilterPrefsChanges(
+            current: _filter,
+            previous: previous,
+            next: next,
+          );
+    setState(() => _filter = merged);
+    unawaited(_filterStore.save(merged));
+    unawaited(shareOverlayFilter(merged));
   }
 
   /// 清除所有本地数据（prd F26 硬要求）：
@@ -946,8 +1005,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _connectSingle(ManagedRoom room) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (BuildContext context) =>
-            DanmuPage(webRid: room.webRid, title: room.displayName),
+        builder: (BuildContext context) => DanmuPage(
+          webRid: room.webRid,
+          title: room.displayName,
+          // 页内长按弹幕屏蔽用户 / 加屏蔽词：由本页合并落盘（#97）。
+          onFilterChanged: _onDanmuFilterChanged,
+        ),
       ),
     );
   }
