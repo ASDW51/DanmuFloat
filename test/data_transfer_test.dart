@@ -158,12 +158,15 @@ void main() {
       if (directory.existsSync()) directory.deleteSync(recursive: true);
     });
 
-    LocalDataTransfer makeTransfer({SaveTextToDownloads? saveToDownloads}) {
+    LocalDataTransfer makeTransfer({
+      SaveTextToDownloads? saveToDownloads,
+      FilterStore? filterStore,
+    }) {
       Future<Directory> resolve() async => directory;
       return LocalDataTransfer(
         roomStore: RoomStore(directoryResolver: resolve),
         prefsStore: OverlayPrefsStore(directoryResolver: resolve),
-        filterStore: FilterStore(directoryResolver: resolve),
+        filterStore: filterStore ?? FilterStore(directoryResolver: resolve),
         themeStore: ThemeStore(directoryResolver: resolve),
         complianceStore: ComplianceStore(directoryResolver: resolve),
         directoryResolver: resolve,
@@ -300,5 +303,152 @@ void main() {
       expect(location, isNotNull);
       expect(File(location!).existsSync(), isTrue);
     });
+
+    test('分区存在但读不出来时拒绝导入，现有数据一个字节都不改（#84）', () async {
+      Future<Directory> resolve() async => directory;
+      // 先放一份「现有数据」，导入被拒后它必须原样还在。
+      await RoomStore(directoryResolver: resolve).save(<ManagedRoom>[
+        const ManagedRoom(webRid: '111', name: '旧主播', addedAt: 1),
+      ]);
+      await OverlayPrefsStore(directoryResolver: resolve)
+          .save(const OverlayPrefs(opacity: 0.9));
+      final OverlayPrefs before =
+          await OverlayPrefsStore(directoryResolver: resolve).load();
+
+      // 备份里 overlayPrefs 是字符串而不是对象：旧实现会静默回落默认值，
+      // 于是「导入成功」却把样式 / 主题 / 栏位整体清成默认。
+      final String raw = jsonEncode(<String, Object?>{
+        'app': dataBundleAppId,
+        'version': dataBundleVersion,
+        'rooms': <String, Object?>{'rooms': <Object?>[]},
+        'overlayPrefs': '坏了',
+        'filter': <String, Object?>{},
+        'theme': <String, Object?>{},
+        'compliance': <String, Object?>{},
+      });
+
+      await expectLater(
+        makeTransfer().importJson(raw),
+        throwsA(
+          isA<DataTransferException>().having(
+            (DataTransferException error) => error.message,
+            'message',
+            allOf(contains('悬浮窗偏好'), contains('已中止导入')),
+          ),
+        ),
+      );
+
+      final List<ManagedRoom> rooms =
+          await RoomStore(directoryResolver: resolve).load();
+      expect(rooms.single.webRid, '111', reason: '被拒绝的导入不能动现有主播列表');
+      expect(
+        (await OverlayPrefsStore(directoryResolver: resolve).load()).opacity,
+        before.opacity,
+        reason: '被拒绝的导入不能把偏好覆盖成默认值',
+      );
+    });
+
+    test('主体分区解析不出来时同样拒绝（#84）', () async {
+      // rooms 是对象但缺 rooms 列表：tryDecodeRooms 会判为损坏。
+      final String raw = jsonEncode(<String, Object?>{
+        'app': dataBundleAppId,
+        'version': dataBundleVersion,
+        'rooms': <String, Object?>{},
+        'overlayPrefs': <String, Object?>{},
+        'filter': <String, Object?>{},
+        'theme': <String, Object?>{},
+        'compliance': <String, Object?>{},
+      });
+
+      await expectLater(
+        makeTransfer().importJson(raw),
+        throwsA(
+          isA<DataTransferException>().having(
+            (DataTransferException error) => error.message,
+            'message',
+            contains('主播列表'),
+          ),
+        ),
+      );
+    });
+
+    test('主题分区带非法 themeMode 时也拒绝导入（#84）', () async {
+      final String raw = jsonEncode(<String, Object?>{
+        'app': dataBundleAppId,
+        'version': dataBundleVersion,
+        'rooms': <String, Object?>{'rooms': <Object?>[]},
+        'overlayPrefs': <String, Object?>{},
+        'filter': <String, Object?>{},
+        'theme': <String, Object?>{'themeMode': 'neon'},
+        'compliance': <String, Object?>{},
+      });
+
+      await expectLater(
+        makeTransfer().importJson(raw),
+        throwsA(
+          isA<DataTransferException>().having(
+            (DataTransferException error) => error.message,
+            'message',
+            contains('主题'),
+          ),
+        ),
+      );
+    });
+
+    test('写到一半失败时把已覆盖的分区回滚回旧值（#84）', () async {
+      Future<Directory> resolve() async => directory;
+      await RoomStore(directoryResolver: resolve).save(<ManagedRoom>[
+        const ManagedRoom(webRid: '111', name: '旧主播', addedAt: 1),
+      ]);
+      final OverlayPrefs prefsBefore =
+          await OverlayPrefsStore(directoryResolver: resolve).load();
+
+      final String raw = encodeDataBundle(
+        rooms: <ManagedRoom>[
+          const ManagedRoom(webRid: '999', name: '备份主播', addedAt: 2),
+        ],
+        prefs: const OverlayPrefs(opacity: 0.3),
+        filter: const FilterPrefs(blockedKeywords: <String>['广告']),
+        themeMode: ThemeMode.light,
+        compliance: const ComplianceState(disclaimerAccepted: true),
+      );
+
+      // 第 3 步（过滤设置）必定失败：前两步已经覆盖了 rooms / prefs，必须被回滚。
+      final LocalDataTransfer transfer = makeTransfer(
+        filterStore: _FailingFilterStore(directoryResolver: resolve),
+      );
+
+      await expectLater(
+        transfer.importJson(raw),
+        throwsA(
+          isA<DataTransferException>().having(
+            (DataTransferException error) => error.message,
+            'message',
+            allOf(contains('过滤设置'), contains('已回滚 2 个分区')),
+          ),
+        ),
+      );
+
+      final List<ManagedRoom> rooms =
+          await RoomStore(directoryResolver: resolve).load();
+      expect(rooms.single.webRid, '111', reason: '失败前已覆盖的主播列表要回滚');
+      expect(
+        (await OverlayPrefsStore(directoryResolver: resolve).load()).opacity,
+        prefsBefore.opacity,
+        reason: '失败前已覆盖的偏好要回滚',
+      );
+    });
   });
+}
+
+/// 写入必定失败的过滤存储：用来验证中途失败会回滚（#84）。
+///
+/// 无法用真实存储制造「第 3 步失败而前两步成功」，所以只替换失败的那一个分区。
+class _FailingFilterStore extends FilterStore {
+  _FailingFilterStore({super.directoryResolver});
+
+  @override
+  Future<void> save(FilterPrefs prefs) async {
+    throw const FileSystemException('磁盘已满');
+  }
 }

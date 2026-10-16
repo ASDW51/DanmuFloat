@@ -27,6 +27,13 @@ import 'package:path_provider/path_provider.dart';
 const String dataBundleAppId = 'danmu-float';
 const int dataBundleVersion = 1;
 
+/// 各分区的用户可读名：导入失败与回滚结果都要写给用户看，不能只报内部字段名（#84）。
+const String dataSectionRooms = '主播列表';
+const String dataSectionPrefs = '悬浮窗偏好';
+const String dataSectionFilter = '过滤设置';
+const String dataSectionTheme = '主题';
+const String dataSectionCompliance = '合规状态';
+
 /// 备份文件原生通道名（与 MainActivity 约定）。
 const String dataFileChannelName = 'danmu_float/data_file';
 
@@ -137,7 +144,9 @@ String encodeDataBundle({
 
 /// 解析备份文本；不是本 App 的备份或结构对不上时抛 [DataTransferException]。
 ///
-/// 单个分区损坏时该分区退回默认值，不整份拒绝：备份来自旧版本时更可能局部缺字段。
+/// 分区**缺失**时退回默认值，不整份拒绝：备份来自旧版本时更可能局部缺字段。
+/// 但分区**存在却解析不出来**时必须整份拒绝（#84）——静默回落默认值等于把现有样式 /
+/// 主题 / 栏位整体清成默认，而摘要还写着「导入成功」，用户不会重试也不会察觉。
 DataBundle decodeDataBundle(String raw) {
   if (raw.trim().isEmpty) {
     throw const DataTransferException('内容为空，请粘贴完整的备份 JSON');
@@ -164,6 +173,14 @@ DataBundle decodeDataBundle(String raw) {
     );
   }
 
+  final List<String> unreadable = unreadableDataSections(decoded);
+  if (unreadable.isNotEmpty) {
+    throw DataTransferException(
+      '备份里有 ${unreadable.length} 个分区无法解析（${unreadable.join('、')}），'
+      '为避免把现有数据覆盖成默认值，已中止导入',
+    );
+  }
+
   return DataBundle(
     rooms: decodeRooms(_section(decoded['rooms'])),
     prefs: decodeOverlayPrefs(_section(decoded['overlayPrefs'])) ??
@@ -177,6 +194,70 @@ DataBundle decodeDataBundle(String raw) {
 
 /// 把备份里的一个分区还原成「单文件原文」，好复用各存储已有的解析函数。
 String _section(Object? value) => jsonEncode(value ?? const <String, Object?>{});
+
+/// 找出备份里「存在但读不出来」的分区名（#84）。
+///
+/// 判定分两层：分区在备份里一律是 JSON 对象，**不是对象**（字符串 / 数组 / 数字）时各解析器
+/// 只会回落默认值；是对象时再看该分区的解析器有没有明确说「读不出来」（`rooms` 的
+/// [tryDecodeRooms]、`overlayPrefs` 的 [decodeOverlayPrefs]、合规状态的
+/// `ComplianceState.tryParse` 都会返回 null；过滤与主题没有这种信号，只能做字段级检查）。
+///
+/// 缺失的分区**不算**损坏：老备份局部缺字段是正常的，取默认值即可。
+List<String> unreadableDataSections(Object? decoded) {
+  if (decoded is! Map) return const <String>[];
+  final List<String> unreadable = <String>[];
+  void check(String key, String label, bool Function(Map<dynamic, dynamic>) readable) {
+    if (!decoded.containsKey(key)) return;
+    final Object? value = decoded[key];
+    if (value is! Map) {
+      unreadable.add(label);
+      return;
+    }
+    if (!readable(value)) unreadable.add(label);
+  }
+
+  check(
+    'rooms',
+    dataSectionRooms,
+    (Map<dynamic, dynamic> value) => tryDecodeRooms(jsonEncode(value)) != null,
+  );
+  check(
+    'overlayPrefs',
+    dataSectionPrefs,
+    (Map<dynamic, dynamic> value) => decodeOverlayPrefs(jsonEncode(value)) != null,
+  );
+  check('filter', dataSectionFilter, _filterSectionReadable);
+  check('theme', dataSectionTheme, _themeSectionReadable);
+  check(
+    'compliance',
+    dataSectionCompliance,
+    (Map<dynamic, dynamic> value) => ComplianceState.tryParse(value) != null,
+  );
+  return unreadable;
+}
+
+/// 过滤分区没有「整体解析失败」的信号（[decodeFilterPrefs] 逐字段回落），因此只做字段级
+/// 类型检查：已知字段存在却不是列表，说明这份备份被改坏过，不能当成「导入成功」。
+bool _filterSectionReadable(Map<dynamic, dynamic> value) {
+  for (final String key in <String>[
+    'blockedKeywords',
+    'blockedUsers',
+    'highlightKeywords',
+    'visibleKinds',
+  ]) {
+    final Object? item = value[key];
+    if (item != null && item is! List) return false;
+  }
+  return true;
+}
+
+/// 主题分区同理：`themeMode` 字段存在但不是合法枚举名时判为损坏（缺字段仍取默认值）。
+bool _themeSectionReadable(Map<dynamic, dynamic> value) {
+  final Object? mode = value['themeMode'];
+  if (mode == null) return true;
+  return mode is String &&
+      ThemeMode.values.any((ThemeMode item) => item.name == mode);
+}
 
 /// 导入结果摘要，用于给用户一句明确的反馈。
 class DataImportSummary {
@@ -276,16 +357,71 @@ class LocalDataTransfer {
     return _directoryResolver();
   }
 
-  /// 应用一份备份：直接覆盖主播列表与各项设置。
+  /// 应用一份备份：先解析校验，再逐个分区覆盖；某一步失败就把已写入的分区回滚回旧值。
   ///
   /// 覆盖前由调用方负责二次确认——导入是破坏性操作。
+  /// 逐个覆盖而不管失败（#84）会留下半套数据：rooms 已换成备份内容、prefs 还是旧的，
+  /// 用户看到「导入失败」通常不会重试，重启后才发现两边对不上。所以这里做成一个小事务：
+  /// 校验前置、失败回滚，并在异常里说清回滚结果。
   Future<DataImportSummary> importJson(String raw) async {
+    // 解析、版本与分区损坏的校验都在这里完成：抛错时一个字节都还没写。
     final DataBundle bundle = decodeDataBundle(raw);
-    await _roomStore.save(bundle.rooms);
-    await _prefsStore.save(bundle.prefs);
-    await _filterStore.save(bundle.filter);
-    await _themeStore.save(bundle.themeMode);
-    await _complianceStore.save(bundle.compliance);
+
+    // 回滚基线：覆盖前先把现有值读进内存。读不出来（文件损坏）不阻断导入，但那个分区
+    // 就没有可回滚的旧值，失败提示里会写明。
+    final List<ManagedRoom>? roomsBefore =
+        await _readBefore(dataSectionRooms, _roomStore.load);
+    final OverlayPrefs? prefsBefore =
+        await _readBefore(dataSectionPrefs, _prefsStore.load);
+    final FilterPrefs? filterBefore =
+        await _readBefore(dataSectionFilter, _filterStore.load);
+    final ThemeMode? themeBefore =
+        await _readBefore(dataSectionTheme, _themeStore.load);
+    final ComplianceState? complianceBefore =
+        await _readBefore(dataSectionCompliance, _complianceStore.load);
+
+    final List<_ImportStep> steps = <_ImportStep>[
+      _ImportStep(
+        dataSectionRooms,
+        () => _roomStore.save(bundle.rooms),
+        roomsBefore == null ? null : () => _roomStore.save(roomsBefore),
+      ),
+      _ImportStep(
+        dataSectionPrefs,
+        () => _prefsStore.save(bundle.prefs),
+        prefsBefore == null ? null : () => _prefsStore.save(prefsBefore),
+      ),
+      _ImportStep(
+        dataSectionFilter,
+        () => _filterStore.save(bundle.filter),
+        filterBefore == null ? null : () => _filterStore.save(filterBefore),
+      ),
+      _ImportStep(
+        dataSectionTheme,
+        () => _themeStore.save(bundle.themeMode),
+        themeBefore == null ? null : () => _themeStore.save(themeBefore),
+      ),
+      _ImportStep(
+        dataSectionCompliance,
+        () => _complianceStore.save(bundle.compliance),
+        complianceBefore == null
+            ? null
+            : () => _complianceStore.save(complianceBefore),
+      ),
+    ];
+
+    final List<_ImportStep> applied = <_ImportStep>[];
+    for (final _ImportStep step in steps) {
+      try {
+        await step.apply();
+        applied.add(step);
+      } on Object catch (error) {
+        debugPrint('导入「${step.name}」失败：$error');
+        final String rollback = await _rollback(applied);
+        throw DataTransferException('导入「${step.name}」失败（$error）：$rollback');
+      }
+    }
+
     return DataImportSummary(
       rooms: bundle.rooms.length,
       blockedKeywords: bundle.filter.blockedKeywords.length,
@@ -293,4 +429,46 @@ class LocalDataTransfer {
       regexEnabled: bundle.filter.regexEnabled,
     );
   }
+
+  /// 覆盖前读一次旧值；读不出来时返回 null（该分区不可回滚，但不阻断导入）。
+  Future<T?> _readBefore<T>(String label, Future<T> Function() read) async {
+    try {
+      return await read();
+    } on Object catch (error) {
+      debugPrint('导入前读取「$label」失败，该分区将无法回滚：$error');
+      return null;
+    }
+  }
+
+  /// 把已写入的分区按**逆序**还原；返回一句可直接拼进异常提示的中文结果。
+  Future<String> _rollback(List<_ImportStep> applied) async {
+    if (applied.isEmpty) return '未写入任何分区，现有数据未被改动';
+    final List<String> failed = <String>[];
+    for (final _ImportStep step in applied.reversed) {
+      final Future<void> Function()? restore = step.restore;
+      if (restore == null) {
+        failed.add('${step.name}（导入前就没能读出旧值）');
+        continue;
+      }
+      try {
+        await restore();
+      } on Object catch (error) {
+        debugPrint('回滚「${step.name}」失败：$error');
+        failed.add(step.name);
+      }
+    }
+    if (failed.isEmpty) {
+      return '已回滚 ${applied.length} 个分区到导入前的数据';
+    }
+    return '回滚失败：${failed.join('、')}，这些分区可能停留在备份内容上，请重新导入或重启 App';
+  }
+}
+
+/// 导入事务里的一步：写入动作 + 回滚动作（回滚为 null 表示覆盖前读不出旧值）。
+class _ImportStep {
+  const _ImportStep(this.name, this.apply, this.restore);
+
+  final String name;
+  final Future<void> Function() apply;
+  final Future<void> Function()? restore;
 }
