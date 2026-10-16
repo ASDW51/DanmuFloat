@@ -9,7 +9,7 @@
 
 | 项 | 状态 | 位置 |
 | --- | --- | --- |
-| 迭代基线 | 已就位 | `main` @ 本轮 loop 末次合并点（第 5 轮确定性缺陷全部交付 #35 ~ #46；余 UX-22b 尾项 / UX-23b / UX-24 ~ UX-27） |
+| 迭代基线 | 已就位 | `main` @ 当前 loop 末次合并点（第 5 轮缺陷 #35 ~ #46；**第 6 轮配色 A~F #49 ~ #61**；**第 7 轮 ⑤①② #65 ~ #69**；**第 8 轮 ④ + UX-23b #72 #74**；余 UX-22b 术语） |
 | CR-01 代码审查修复 | ✅ 已合入 | PR #11 / PR #12 → `main` |
 | PM-001 | ✅ 已合入 | PR #7 → `main` |
 | PM-002 | ✅ 已合入 | PR #8 → `main` |
@@ -35,11 +35,19 @@
 | UX-20 最小窗宽弹窗溢出 | ✅ 已合入 | PR #40 → `main`（属性断言，未复现基线） |
 | UX-21 悬浮球/菜单触控过小 | ✅ 已合入 | PR #39 → `main` |
 | UX-22 术语不一致 | 🟡 部分交付 | a: PR #42（屏蔽词 + 诊断副标题）；b: 待做（直播间 / 栏位） |
-| UX-23 添加无反馈 / 清空无确认 | 🟡 部分交付 | a: PR #41（过滤页）；b: 待做（弹幕页清空确认，需注入口） |
-| UX-24 穿透态补关闭窗动作 | ⬜ 未开始 | 第 5 轮补充（P1）→ PR5（PM 建议优先） |
-| UX-25 栏位异常/开播提醒 | ⬜ 未开始 | 第 5 轮补充（P2）→ PR7（先冒烟） |
-| UX-26 查看弹幕时屏幕常亮 | ⬜ 未开始 | 第 5 轮补充（P2）→ PR6（零依赖） |
-| UX-27 网络状态感知 | ⬜ 未开始 | 第 5 轮补充（P2）→ PR8（pub 依赖+权限） |
+| UX-23 添加无反馈 / 清空无确认 | ✅ 已合入 | a: PR #41（过滤页）；b: PR #74（弹幕页清空二次确认，抽纯函数 `shouldClearDanmakuOnConfirm`） |
+| UX-24 穿透态补关闭窗动作 | 🚫 不做（降级为手工步骤文档） | PM 第 8 轮裁决：需改 `third_party` 原生 Java，而 CI 只跑 Dart，原生改动零门禁 |
+| UX-25 栏位异常/开播提醒 | 🚫 不做 | PM 第 8 轮裁决：需插件新增自有通道，冒烟须能构建运行 APK，本环境做不到 |
+| UX-26 查看弹幕时屏幕常亮 | ⬜ 本轮不做 | PM 第 8 轮裁决：需改原生侧 `MainActivity.kt`，拿不到门禁，收益低于 ④ |
+| UX-27 网络状态感知 | 🚫 不做 | PM 第 8 轮裁决：需新增 pub 依赖与权限，冒烟须能构建运行 APK |
+| 第 6 轮 配色体系 UX-28 ~ UX-34 | ✅ 全部交付 | A #49 · B #51 · E #52 · C #53 · H #54 · I #56 · D #57 · F1 #58 · F2 #60 #61 → `main` |
+| 第 7 轮 ⑤ 对比度策略真正接线 + 三态 UI | ✅ 已合入 | a #65（窗内 `_palette` 真正调 `enforceTextContrast`）；b #66（三态 chips + **设置页显示值 == 渲染值** + 两处下发点补 `contrastPolicy`） |
+| 第 7 轮 ① 底色角色 `chromeBg` / `menuBg` | ✅ 已合入 | #68（角色集 11 → 13；dark/light 与旧字面量逐位相等） |
+| 第 7 轮 ② 最近使用色 | ✅ 已合入 | #69（单一 `recordRecentColor` + 取色弹窗一行 + 确认采用时入库 + 上限 8） |
+| 第 8 轮 ④ 类型色数据驱动 | ✅ 已合入 | #72（7 类类型色下沉为 `OverlayTheme` 角色，`typeColor()` 不再按 `isLight` 猜；护眼主题不再继承深色亮色） |
+| 第 8 轮 UX-23b 清空二次确认 | ✅ 已合入 | #74（`shouldClearDanmakuOnConfirm`：`null` / `false` 一律不清空） |
+| ③ 浅色 `secondary` 余量 | 🟡 监控 | 现为 `Colors.black54` ≈ 4.61:1，达标；跌破 4.5 才换 `0xFF49454F`（PM 第 7、8 轮裁决） |
+| UX-22b 术语（直播间 / 栏位） | ⬜ 待做 | PM 第 8 轮判末轮不做，仍留候选（低收益、跨多文件） |
 
 > 待办清单已按 PM 子代理 2026-10-15 的第一版审查**整版重写**：旧编号 PM-003 ~ PM-006 作废（保留项重新编号为 UX-01 ~ UX-06；其中旧 PM-006 的问题描述与现状不符，已改写为 UX-06）。
 >
@@ -66,6 +74,8 @@
 ---
 
 ## 待办清单（PM 第一版 + 第二轮新增，按当前优先级排序）
+
+> **文档结构与阅读顺序**：本文按轮次追加，越靠后越新。第 1~4 轮的条目与结论在本节及以下「PM 二/三轮决策」「已完成（历史记录）」「明确不做」中；**第 5 轮及以后的清单、PM 裁决与交付记录统一在文末**（从 `## 第 5 轮` 起）。顶部「当前状态」表已同步到最新一轮，若与文末某轮的**过程记录**（如「截至本轮 loop」的进度表）冲突，以文末更靠后的**收口/交付记录**为准。
 
 > 第二轮（2026-10-15 复核 UX-01 ~ UX-04 落地代码后）新增 UX-07 ~ UX-11，并把它们插到 UX-05 / UX-06 之前：UX-07 是 UX-02 在多栏场景下的**回归**，UX-08 让重试入口在关掉栏目标识行后仍然可达。PM 建议顺序 **UX-07 → UX-08 → UX-09 → UX-10 → UX-05 → UX-06**，UX-11（批量刷新只落盘一次）视 PR 预算顺延。
 
@@ -425,14 +435,14 @@ git checkout main && git pull --ff-only
 - **验收**：新增 `test/overlay_touch_target_test.dart`（独立 mount）：① 球尺寸 ≥32（给球加 `ValueKey('overlayBall')`，或断言承载 `InkWell` 的 `RenderBox` 尺寸）；② 展开菜单后 `添加栏位` 高度 ≥28，且 `减少栏位` 仍在（未删入口）；③ 200×400 下 `takeException() == null`。
 - **依赖**：同一 PR 内排在 UX-20 之后。
 
-### UX-22　同一功能多个名字（P2 · 新增）
+### UX-22　同一功能多个名字（P2 · 部分交付：a #42 已合入；b 术语（直播间 / 栏位）仍待做，第 8 轮 PM 判末轮不做）
 
 - **现状（已核实）**：① 屏蔽名单在设置页 `settings_page.dart:278` 叫「屏蔽**关键词**」、过滤页 `filter_page.dart:67/204` 同，但 `filter_page.dart:219` 写「可与屏蔽**词**同时使用」，弹幕页 `danmu_page.dart:507/527` 与悬浮窗 `overlay_page.dart:1710/1728` 一律「屏蔽**词**」；② 同一对象三种叫法：首页「主播」（`home_page.dart:979/1004`）、添加表单「直播间号 / 抖音号」（`add_room_dialog.dart:124`）、状态文案「房间」（`danmu_page.dart:657`、`overlay_page.dart:2356`）；③ `settings_page.dart:472` 副标题「当前样式与凭证来源摘要」与实际内容（含主题/栏位/开关状态）不符；④ 悬浮窗「栏位 / 栏」混用。
 - **期望**：术语表固定为 `屏蔽词` / `直播间` / `栏位`（列表标题可保留「主播管理」）；`:472` 副标题改为「当前样式、凭证来源与悬浮窗状态摘要」。
 - **验收**：`settings_page_test.dart`（新副标题 + `屏蔽词`）、`filter_page_test.dart`（`屏蔽关键词` 命中 0）、复用 PR1 组件断言「解析直播间…」、`paneStageText` 纯函数扩展「栏位」口径。
 - **依赖**：跨 4 文件；overlay 部分排在 PR4 之后，danmu 部分排在 PR3 之后。
 
-### UX-23　点「添加」没反应；弹幕页「清空」误触即丢（P2 · 新增）
+### UX-23　点「添加」没反应；弹幕页「清空」误触即丢（P2 · 全部交付：a #41、b #74）
 
 - **现状（已核实）**：① `filter_page.dart:391-411` 的 `_add()` 先 `_controller.clear()`（`:406`）再判重，空输入/已存在则 `if (next.length == widget.values.length) return;`（`:409`）静默返回且 `_error` 被清空 → 用户看到「输入框被清空、列表无变化、无提示」；② `danmu_page.dart:560-567` 的「清空」直接 `_raw.clear(); _received = 0;`，无确认无撤销，且 `_online` / 进场行未复位。
 - **期望**：`_add()` 空输入 → `请输入内容`、重复 → `该词已在列表中`，**失败时不清空输入框**；「清空」前弹确认，确认后同时复位 `_received/_online/_latestEntry`。
@@ -463,7 +473,7 @@ git checkout main && git pull --ff-only
 
 **口径**：允许新增 pub 依赖 / Android 权限 / 后台机制 / 原生通道；仍禁止改宿主机环境、改 `.github/workflows/`、动 AGENTS.md 硬边界、删既有入口。每条须写「为什么非它不可 + 替代对比 + 拒绝授权时的降级路径」。
 
-#### UX-24　悬浮窗常驻通知补「关闭悬浮窗」动作（P1 · 原生改动，复用既有通道）
+#### UX-24　悬浮窗常驻通知补「关闭悬浮窗」动作（P1 · 原生改动，复用既有通道）——🚫 **已被 PM 否决并降级为手工步骤文档（第 8 轮裁决：CI 只跑 Dart，原生改动零门禁）**
 
 - **现状（已核实）**：开启点击穿透后窗口 flag 含 `FLAG_NOT_TOUCHABLE`（`third_party/flutter_screen_overlay/android/.../OverlayService.java:66-68`），窗内收不到任何触摸；通知里只有「关闭点击穿透」一个动作（`:390-424`）→ 关一个窗要三步。
 - **期望**：`buildOverlayNotification()` 在任何状态下都附「关闭悬浮窗」动作，点击后 `detachOverlayView()` + `stopSelf()` + 撤通知，并经既有下行通道让 Dart 侧收敛状态（先例 `:443-467`）。
@@ -471,7 +481,7 @@ git checkout main && git pull --ff-only
 - **验收**：Dart 侧沿用注入下行消息的写法，断言关窗 + 聚合状态上报一次；原生动作项人工验收（开穿透 → 通知栏点「关闭悬浮窗」→ 窗口消失、服务停止、主 App 按钮状态纠正）。
 - **PM 评估**：**已核实的确定性缺口、改动最小，建议优先**；若本轮只放 4 个 PR，用它换掉属读代码推断的 UX-20。
 
-#### UX-25　栏位异常 / 开播的本机提醒（P2 · 插件新增自有通道）
+#### UX-25　栏位异常 / 开播的本机提醒（P2 · 插件新增自有通道）——🚫 **不做（第 8 轮裁决：本环境无法构建运行 APK 做插件注册冒烟）**
 
 - **现状（已核实）**：栏位 `error`（复检预算耗尽）或未开播房间开播时，唯一呈现是**窗内**标识行（`overlay_page.dart:914-951`）；用户离开去干别的就永远看不到。
 - **为什么非它不可**：不能写进通知常驻文案（耗电、打断）；主 App 发通知不可靠（常已被杀，连接跑在插件前台服务引擎里）；`flutter_local_notifications` 要求该引擎有插件注册，而本仓库一律把悬浮窗引擎当无插件环境（`_copy` 走 `showData` 代理、`MissingPluginException` 当已授权），失败模式是**静默不提醒**。→ 在插件服务加 `x-slayer/overlay_notify` 通道（约 40 行 `NotificationManagerCompat`），与既有插件侧改动同一先例。
@@ -480,14 +490,14 @@ git checkout main && git pull --ff-only
 - **验收**：`test/overlay_alerts_test.dart` + 假 sink / 假通道：权限被拒不发系统通知、开关关闭不发、同栏 10 分钟内第二次被节流、`offline → live` 发一条且含主播名、通道抛 `MissingPluginException` 不崩；原生部分人工验收。
 - ⚠️ 动工前先做一次「悬浮窗引擎能否拿到通道」的冒烟验证。
 
-#### UX-26　App 内查看弹幕时保持屏幕常亮（P2 · 零依赖，复用 `danmu_float/system` 通道）
+#### UX-26　App 内查看弹幕时保持屏幕常亮（P2 · 零依赖，复用 `danmu_float/system` 通道）——⬜ **本轮不做（第 8 轮裁决：需改原生侧 `MainActivity.kt`，拿不到门禁）**
 
 - **现状（已核实）**：弹幕页无任何常亮处理，系统 30 秒~2 分钟熄屏，读长弹幕要反复点屏。
 - **方案**：在既有 `MainActivity.kt` 通道加 `setKeepScreenOn(true/false)`（`window.addFlags/clearFlags`，约 10 行、零依赖、零权限）；不引 `wakelock_plus`——为一句 `FLAG_KEEP_SCREEN_ON` 多一个插件不划算。
 - **范围/可关闭**：只在弹幕页**可见**时置位，`dispose` 与生命周期 `paused` 清除；设置页「显示」分区开关（默认开）。
 - **验收**：`test/keep_screen_on_test.dart` 挂载 `KeepScreenOnScope`（内含 `@visibleForTesting KeepScreenOnBackend`）即可，**不需要挂 `DanmuPage`**：挂载调 true 一次、卸载 / paused 调 false、假后端抛 `MissingPluginException` 不崩、设置关闭时一次都不调。
 
-#### UX-27　网络状态感知：无网络文案 + 暂停复检预算 + 恢复即补刷（P2 · 新增 pub 依赖）
+#### UX-27　网络状态感知：无网络文案 + 暂停复检预算 + 恢复即补刷（P2 · 新增 pub 依赖）——🚫 **不做（第 8 轮裁决：需新增 pub 依赖与权限，冒烟须能构建运行 APK）**
 
 - **现状（读代码推断）**：无网络时只看到底层异常文案，无法区分「自己断网 / 服务端挂了」；且未开播复检在无网期间照常消耗重试预算与流量。
 - **方案**：`connectivity_plus ^7.3.2`（`fluttercommunity.dev`、pub 160/160、Flutter Favorite、近 30 天约 398 万下载；要求 Dart ≥3.2 / Flutter ≥3.7，与仓库兼容）。零依赖替代（把 `SocketException` 归类为疑似断网）改善文案但**拿不到「网络回来了」事件**，故不采用。新增 `ACCESS_NETWORK_STATE`（正常权限、非运行时、无需申请入口）。**悬浮窗引擎不感知**，保持现状。
@@ -513,7 +523,7 @@ git checkout main && git pull --ff-only
 - **新能力（按收益 ÷ 改动面）**：**PR5 / UX-24（P1，建议优先）** → PR6 / UX-26（零依赖）→ PR7 / UX-25（需冒烟）→ PR8 / UX-27（pub 依赖 + 权限）。
 - 若本轮只允许 4 个 PR：用 UX-24 换掉 UX-20。**跨文件串行**：`danmu_page.dart` → PR1 → PR3 → UX-23b；`overlay_page.dart` → PR4 → PR5 → UX-22(overlay)；插件 `OverlayService.java` → PR5 → PR7。
 
-### 第 5 轮交付记录（截至 `1550b2a`）
+### 第 5 轮交付记录（历史：截至 `1550b2a`；UX-22b / UX-23b 等当时的余项现状见顶部状态表）
 
 | 条目 | 状态 | 交付说明 |
 | --- | --- | --- |
@@ -532,7 +542,7 @@ git checkout main && git pull --ff-only
 1. `find.widgetWithText(TextButton, '文案')` 抓不到 `TextButton.icon`——它的运行时类型是私有子类 `_TextButtonWithIcon`，而 `find.byType` 是**精确类型**匹配。改用 `ValueKey` 或 `find.text('文案')`；同时注意同一页可能有多个同名按钮（过滤页三个编辑器各一个「添加」），要 `.first` 或按 key 精确定位。
 2. `gh pr create --body "..."` 里出现行内反引号会被 shell 当命令替换、把正文吃坏（本轮与 PR #30 各中一次）。**PR 正文一律用 `--body-file`**。
 
-### 第 5 轮收尾记录（截至本轮 loop 结束）
+### 第 5 轮收尾记录（历史：截至当轮 loop 结束；余项现状见顶部状态表）
 
 本轮 loop 共合入 14 个 PR（`#33` ~ `#46`），第 5 轮 UI/交互体检里**所有确定性缺陷**已清空。
 
@@ -563,7 +573,7 @@ git checkout main && git pull --ff-only
 
 ### 第 6 轮：悬浮窗配色体系（UX-28 ~ UX-34）
 
-**问题**：悬浮窗只有「正文」一个元素能上色，且只有 6 个预设（`settings_page.dart` 的 `_paneColorChoices`：白/黄/橙/绿/蓝/粉），按栏存在 `PaneStyle.textColor`（`overlay_bridge.dart:239`）。而 `OverlayPalette`（`overlay_page.dart:64`）其实已有 **11 个纯色角色 + `highlightStyle` + `isLight`**，缺的不是元素，是「把它们暴露给用户」这一层。
+**问题**：悬浮窗只有「正文」一个元素能上色，且只有 6 个预设（`settings_page.dart` 的 `_paneColorChoices`：白/黄/橙/绿/蓝/粉），按栏存在 `PaneStyle.textColor`（`overlay_bridge.dart:239`）。而 `OverlayPalette`（`overlay_page.dart:64`）其实已有 **11 个纯色角色 + `highlightStyle` + `isLight`**（**现状：13 个基础角色 + 7 类类型色，共 20 个可配色角色，见顶部状态表**），缺的不是元素，是「把它们暴露给用户」这一层。
 
 **角色 ↔ 可见元素**（`overlay_page.dart` 行号为本轮核对结果）
 
@@ -576,9 +586,9 @@ git checkout main && git pull --ff-only
 | `divider` / `bannerBg` / `border` / `maskColor` | 分隔线 / 进场底色 / 窗口边框 / 窗口底色（再乘不透明度） | 开放，按预设收敛；`maskColor` 参与对比度校验 |
 | `activeColor` | 重试按钮、焦点/暂停态图标 | 只随预设，不单独开放（语义=「已生效」） |
 | `highlightStyle` | 高亮词前景+底色 | **不开放**：与「高亮词」功能耦合，独立改会让高亮失效 |
-| `typeColor(kind)` | 7 类弹幕类型前缀色 | **不开放**：派生自 `isLight` 的 switch，7×2 组合爆炸、收益低 |
+| `typeColor(kind)` | 7 类弹幕类型前缀色 | **第 6 轮判「不开放」；第 8 轮 ④ 已推翻**——PM 裁决把 7 类类型色下沉为 `OverlayTheme` 角色（见文末「第 8 轮 ④ 交付记录」） |
 
-**三处已核实的缺口（比扩角色更该先补）**：① 状态点颜色 `_stageColor()` 与 `danmu_text_colors.dart:33` 的 `stageTextColor()` 是**两套并行口径**，应让主题提供 `stageColor` 并两处共用；② 球/菜单/胶囊底色直接写 `white70`/`black54`/`white@0.94`/`black@0.9`，无角色（建议新增 `chromeBg`）；③ `OverlayApp` 未挂 `theme`/`darkTheme`，深色皮肤下弹窗仍是白底——不修这条，「多元素配色」在弹窗层是假的。
+**三处已核实的缺口（比扩角色更该先补；三条均已交付：① → I #56、② → 第 7 轮 ① #68、③ → H #54）**：① 状态点颜色 `_stageColor()` 与 `danmu_text_colors.dart:33` 的 `stageTextColor()` 是**两套并行口径**，应让主题提供 `stageColor` 并两处共用；② 球/菜单/胶囊底色直接写 `white70`/`black54`/`white@0.94`/`black@0.9`，无角色（建议新增 `chromeBg`）；③ `OverlayApp` 未挂 `theme`/`darkTheme`，深色皮肤下弹窗仍是白底——不修这条，「多元素配色」在弹窗层是假的。
 
 **分层模型（不新增第二条取色路径）**：`OverlayTheme`（纯数据，可 JSON 化）→ `resolve(overrides)` 合并元素级覆盖 → `toPalette()` 产出 `OverlayPalette`（widget 仍然只读它）。优先级：预设默认值 → 全局角色覆盖 → 栏级 `PaneStyle.textColor`（只覆盖 `body`）→ 对比度守卫修正。
 
@@ -586,11 +596,11 @@ git checkout main && git pull --ff-only
 
 **数据模型与迁移**：`OverlayPrefs` 增 `themeId`（默认 `dark`）、`colorOverrides`（角色名→ARGB，空表=全跟随主题）、`recentColors`（≤8）、`contrastPolicy`（`adjust` 默认 / `warn` / `allow`）；`lightTheme` 从存储字段降级为派生 getter（`themeId == 'light'`），`copyWith(lightTheme:)` 参数保留 → 现有调用点零改动。JSON 增写 `schemaVersion: 2`（**只写不分支**）；迁移按「缺字段→推导」处理：无 `themeId` + `lightTheme:false`→`dark`、`true`→`light`（外观与今天一致），`panes[].textColor` 原样保留继续作栏级 body 覆盖，未知 `themeId` 回落 `dark`，非法颜色**逐键丢弃**（不整表弃）。
 
-**可访问性**：默认 `adjust`——保留用户色相与饱和度，只调明度到达标（色相偏移 <15°，由单测钉住），并给一次轻提示；`warn` 在该行常驻显示实测比值；`allow` 只显示比值不干预。断言复用 `computeLuminance()` 现算 `(L1+0.05)/(L2+0.05)`。**已知例外**：浅色预设的 `secondary: Colors.black54` 实测约 4.47:1（低于 4.5），开放给用户前需先决定「修浅色预设」还是「按 warn 处理」。
+**可访问性**：默认 `adjust`——保留用户色相与饱和度，只调明度到达标（色相偏移 <15°，由单测钉住），并给一次轻提示；`warn` 在该行常驻显示实测比值；`allow` 只显示比值不干预。断言复用 `computeLuminance()` 现算 `(L1+0.05)/(L2+0.05)`。**已知例外的更正**：浅色预设的 `secondary: Colors.black54`（`0x8A000000`，alpha 0.5412）展平到纯白实测约 **4.61:1**，**达标**。本行初稿写的 4.47:1 是错的，已由第 6 轮 PM 裁决复算更正（见下「浅色预设 `secondary` 的裁决」）。
 
 **刷新与节流**：复用现有 `style` 消息（新增 `themeId`/`colorOverrides` 两个可选字段，缺字段由 `lightTheme` 推导，旧 payload 语义不变），不动 `config`（避免冲掉栏位绑定）；拖动取色期间只下发不落盘（沿用 `persist:false` / `onChangeEnd` 口径），窗内取色只本地 `setState`，点保存才经 `OverlayPrefsPatch` 回报一次；`resolve()` 结果缓存，不在 `build` 里逐行算对比度。
 
-**PR 拆分（建议顺序 A → B → C → E → D → F，G 随 A）**
+**PR 拆分（初稿建议 A → B → C → E → D → F，G 随 A；实际执行为 A → B → E → C → { H → I ∥ D } → F，H/I 为 PM 插队项，见下方裁决）**
 
 | # | 条目 | 范围 | 验收断言 | 降级 |
 | --- | --- | --- | --- | --- |
@@ -602,7 +612,7 @@ git checkout main && git pull --ff-only
 | F | UX-33 窗内配色入口 | `overlay_page.dart` / `overlay_bridge.dart`(patch) | 菜单行高 ≥28dp；200×150 弹窗不溢出；确认后 patch 含 `themeId` | 每个测试文件只能 mount 一次 |
 | G | UX-34 高对比/护眼预设内容 | `lib/ui/overlay_theme.dart` | 两套预设对比度断言 | 可并入 A 或 E |
 
-**明确不做**：渐变/图片/纹理背景（需自绘 painter，与「蒙版不透明度」语义冲突）；动画或随时间变化的配色（无法静态校验对比度）；栏级多角色覆盖（本轮多角色只做全局，栏级仅保留既有 `textColor`=`body` 覆盖）；引入配色类 pub 依赖（三滑杆自研约 60 行即可，且色环手势会与「位移 >5px 搬窗口」冲突）；系统/壁纸取色（需原生通道与权限）；开放 `typeColor()` 与 `highlightStyle`；改 `third_party` 原生侧（CI 无原生门禁，且本方案不需要）；悬浮窗自动跟随系统深浅色（需新增下发字段与生命周期联动）。
+**明确不做**：渐变/图片/纹理背景（需自绘 painter，与「蒙版不透明度」语义冲突）；动画或随时间变化的配色（无法静态校验对比度）；栏级多角色覆盖（本轮多角色只做全局，栏级仅保留既有 `textColor`=`body` 覆盖）；引入配色类 pub 依赖（三滑杆自研约 60 行即可，且色环手势会与「位移 >5px 搬窗口」冲突）；系统/壁纸取色（需原生通道与权限）；开放 `typeColor()`（**第 8 轮 ④ 已推翻**，改为下沉主题角色）与 `highlightStyle`（仍不开放）；改 `third_party` 原生侧（CI 无原生门禁，且本方案不需要）；悬浮窗自动跟随系统深浅色（需新增下发字段与生命周期联动）。
 
 ### 第 6 轮 PM 优先级裁决（本轮执行口径，2026-10-16）
 
@@ -619,7 +629,7 @@ git checkout main && git pull --ff-only
 
 **由「缺口」改判为下一轮**：`chromeBg`（球 `white70`/`black54`、菜单 `white@0.94`/`black@0.9`、胶囊 `white70`/`black54` 三处 alpha 各不相同，**一个角色装不下**，须先定 1 个还是 2 个角色及各自在 4 套预设下的取值）；收益仅「允许用户改菜单底色」，优先级低于 H/I。
 
-#### 第 6 轮交付进度（截至本轮 loop）
+#### 第 6 轮交付进度（过程记录，截至当轮 loop；**以下方收口表为准**）
 
 | # | 条目 | 状态 | PR |
 | --- | --- | --- | --- |
@@ -628,9 +638,9 @@ git checkout main && git pull --ff-only
 | E | UX-31 对比度守卫（唯一口径 `contrastRatio` + 只调明度的 `ensureContrast`） | ✅ | #52 |
 | C | UX-30 下发通道（`style` 消息可选字段 + `parseColorOverrides` 唯一实现 + 三处 `OverlayPalette.of` 改走 `_palette`） | ✅ | #53 |
 | H | 弹窗跟随皮肤（`overlayThemeData` + 根 widget 订阅发布；修掉深色下弹窗白底这一既有缺陷） | ✅ | #54 |
-| I | 状态点两套口径统一（`_stageColor` 委托 `OverlayTheme`） | ⬜ 下一项 | — |
-| D | UX-32 主 App 配色 UI（预设 chips + 每元素跟随/自定义 + 十六进制 + 恢复默认；「最近使用色」推第 7 轮） | ⬜ | — |
-| F | UX-33 窗内配色入口（预设 chips + 跟随主题；`insetPadding: 8` + `scrollable: true`；行高 ≥28dp） | ⬜ | — |
+| I | 状态点两套口径统一（`_stageColor` 委托 `OverlayTheme`） | ✅（收口时交付） | #56 |
+| D | UX-32 主 App 配色 UI（预设 chips + 每元素跟随/自定义 + 十六进制 + 恢复默认；「最近使用色」推第 7 轮） | ✅（收口时交付） | #57 |
+| F | UX-33 窗内配色入口（预设 chips + 跟随主题；`insetPadding: 8` + `scrollable: true`；行高 ≥28dp） | ✅（收口时拆两步交付） | #58 #60 #61 |
 
 **本轮 CI 教到的坑**：① `toConfig()` 造的是 `OverlayConfig` 而不是 `OverlayPrefs`，两处构造点的参数有多处同名邻居（都紧跟 `showTitleBar`），文本锚点会撞——按行号对调才干净；② `lightTheme` 一旦降级为 getter，测试里 `OverlayPrefs(lightTheme: true)` 这类**构造**调用会编译失败（`copyWith(lightTheme:)` 不受影响）；③ 对比度断言必须先把前景 alpha 展平到背景；而**背景**自己不知道该压在什么上面，「把背景合成到自己身上」是无意义的——半透明底色要由调用方先 `flattenOver` 到真实背衬；④ 弹窗路由挂在 `MaterialApp` 的 Navigator 上，比页面高一层，只在页面里包 `Theme` 管不到弹窗，必须让根 widget 拿到主题。
 
@@ -648,13 +658,13 @@ git checkout main && git pull --ff-only
 | F1 | UX-33 第一步：patch 携带 `themeId`/`colorOverrides`（`null`=不改，空表=清空） | ✅ | #58 |
 | F2 | UX-33 第二步：悬浮球菜单内的配色入口（预设 chips + 全部跟随主题，含清空覆盖） | ✅ | #60 #61 |
 
-**第 7 轮候选（已由 PM 裁决推后）**：`chromeBg` 角色（球/菜单/胶囊三处 alpha 各不相同，须先定 1 个还是 2 个角色及四套预设取值）；「最近使用色」UI 与去重交互（字段已在 B 落盘）；浅色预设 `secondary` 若跌破 4.5:1 则换 `0xFF49454F` 并统一口径；`DanmakuKind.privilegeScreenChat` 等按弹幕类型写死的颜色与 `typeColor()` 派生口径并存的问题。（**已作废**：PM 只读核查确认该前提有误，见第 7 轮裁决的纠正）
+**第 6 轮收口时留下的候选（已由第 7 轮 PM 裁决处理，结果见下方「第 7 轮 PM 优先级裁决」与「第 7 轮交付记录」）**：`chromeBg` 角色（球/菜单/胶囊三处 alpha 各不相同，须先定 1 个还是 2 个角色及四套预设取值）；「最近使用色」UI 与去重交互（字段已在 B 落盘）；浅色预设 `secondary` 若跌破 4.5:1 则换 `0xFF49454F` 并统一口径；`DanmakuKind.privilegeScreenChat` 等按弹幕类型写死的颜色与 `typeColor()` 派生口径并存的问题。（**已作废**：PM 只读核查确认该前提有误，见第 7 轮裁决的纠正）
 
 **本轮新增踩坑**：⑤ 用「字段名 + 相邻行」当文本锚点在长文件里替换时，**同名邻居会让锚点撞车**——`if (windowX != null)` 在 `overlay_bridge.dart` 里出现两次（`OverlayStyle`/`OverlayConfig` 与 `OverlayPrefsPatch` 各一处），于是 `themeId` 被插进了不相干的类，`flutter analyze` 报 `undefined name`。正确做法是按 `class X {` 切片后只在该切片内替换（本轮的 C 与 F1 各踩一次）。⑥ **`git commit` 前先确认自己在哪个分支**：一次修复被提交到本地 `main` 上，导致「分支仍旧是坏的、main 多出一个 commit」的错位；处理方式是 `git branch fix-tmp <commit>` 保命 → `git reset --hard origin/main` → 回分支 `cherry-pick` → 推。⑦ `tester.tap(find.byKey(...))` 报 `Bad state: No element` 时，先看堆栈是不是 `getCenter`——那是 **finder 命中 0 个元素**，与回调逻辑无关；被测行为若是「开关取什么值」，直接驱动 `widget.onChanged!(...)` 比猜命中区域更诚实。
 
-### 第 7 轮候选（待 PM 裁决优先级）
+### 第 7 轮候选（第 6 轮遗留；**已由第 7、8 轮 PM 裁决并交付**）
 
-第 6 轮配色体系 A~F 已全部交付（见上表）。以下四项都是第 6 轮过程中发现、经 PM 裁决推后的问题；此处只列事实与待决口径，**先后顺序与验收口径请 PM 定**。
+第 6 轮配色体系 A~F 已全部交付（见上表）。以下四项都是第 6 轮过程中发现、经 PM 裁决推后的问题；此处保留事实与当初的待决口径，**结论见本节末尾的「裁决结果」**。
 
 | 候选 | 问题实质 | 影响面 / 待决点 |
 | --- | --- | --- |
@@ -663,7 +673,12 @@ git checkout main && git pull --ff-only
 | **③ 浅色预设 `secondary` 余量** | 现值 `Colors.black54`（alpha 0.5412）在纯白上约 **4.61:1**，仅高于 4.5 门槛一点点；统一方案是换成 `0xFF49454F`（与 `danmu_text_colors.dart` 同值） | 会改变浅色观感，属用户可见变化；待决是否值得，以及是否同时统一两套对比度口径 |
 | **④ 弹幕类型颜色双来源** | `overlay_page.dart` 仍对 `DanmakuKind.privilegeScreenChat` 写死 `const Color(0xFF2E7D32)`，与 `_palette.typeColor()` 并存 | 同族两处真相，改法明确但属重构；待决是否本轮做、以及是否顺带把 `typeColor()` 的取值来源也纳入主题 |（**已作废**：PM 只读核查确认该前提有误，见第 7 轮裁决的纠正）
 
-**请 PM 裁决**：四项的**先后顺序**；每项的**验收口径**（尤其 ① 的角色个数与四套预设取值要求、② 的入库时机）；以及**是否有应剔除或合并的项**。
+**裁决结果（第 7、8 轮 PM，均已交付）**：
+
+- **① 底色角色粒度** → 拆 **2 个**角色（`chromeBg` = 球 + 胶囊、`menuBg` = 菜单面板），角色集 11 → 13，**第 7 轮 ① #68 已交付**；
+- **② 最近使用色 UI** → 入库时机定为「**确认采用时**」，跨主题共用一份、上限 8，**第 7 轮 ② #69 已交付**；
+- **③ 浅色 `secondary` 余量** → **判监控**：现值 ≈ 4.61:1 达标，跌破 4.5 才换 `0xFF49454F`（第 7、8 轮重复确认），见顶部状态表；
+- **④ 弹幕类型颜色双来源** → 前提有误（第 7 轮 PM 只读核查纠正，见上表该行的「已作废」标注）；其**实质诉求**改由第 8 轮 ④ #72 承接：7 类类型色下沉为 `OverlayTheme` 角色、`typeColor()` 不再按 `isLight` 猜。
 
 ### 第 7 轮 PM 优先级裁决（本轮执行口径，2026-10-16）
 
@@ -749,7 +764,7 @@ git checkout main && git pull --ff-only
 - **Dart 插值 `$0xFF...` 非法**：`'key_$0xFF00BCD4'` 里的 `$0` 被解析成标识符（`Expected an identifier`），要写 `${0xFF00BCD4}`，且插值表达式不能出现在 `const` 里。
 - **编辑前先切分支**：结尾 `git checkout main` 之后，再用脚本改只在分支上存在的文件会 `ENOENT`（Round 20、#65、Round 32 各一次）。编辑调用的第一步固定先 checkout 目标分支。
 
-### 下一批候选（待 PM 裁决）
+### 下一批候选（第 7 轮末；**已由第 8 轮 PM 裁决，结果见下**）
 
 ③ 浅色 `secondary`（当前 `Colors.black54`，≈4.61:1，监控：跌破 4.5 才换 `0xFF49454F`）；④ `typeColor()` 未由 `OverlayTheme` 数据驱动（`contrast`/`sepia` 仍继承 dark 的 7 个类型色）；UX-24（原生 Java 通知「关闭悬浮窗」）；UX-23b（清屏二次确认）；UX-22b 尾项（`filter_page.dart:304`）；UX-25/26/27（`overlay_notify` 提醒 / 保持屏幕常亮 / `connectivity_plus`，各自需先做冒烟验证）。
 
@@ -785,7 +800,9 @@ git checkout main && git pull --ff-only
 
 验收（单测）：dark/light 逐位相等；sepia 整组与 dark 逐位不同、且组内两两不同；sepia 7 值对 `maskColor` ≥4.5:1；`DanmakuKind.values` 中恰好 7 类有专属色、其余返回 `null`；类型色随 `themeId` 变、不随 `colorOverrides` 变；两个角色集口径正确。
 
-**待 PM 裁决的口径冲突**：裁决里散文写「`contrast` 可直接沿用现有 dark 值（同为纯黑底，天然达标）」，同一项验收断言写「`contrast`/`sepia` 的 7 值与 dark **逐位不同**」——两者不能同时成立。本轮**按散文执行**（`contrast` = dark：纯黑底上换更亮的色没有收益），测试只断言 `sepia` 与 dark 整组不同。若 PM 要求 `contrast` 也必须不同，需为它单独设计 7 个高对比变体，作为独立 PR。
+**口径冲突（已裁决 = A）**：裁决的散文写「`contrast` 可直接沿用现有 dark 值（同为纯黑底，天然达标）」，同一项验收断言却写「`contrast`/`sepia` 的 7 值与 dark **逐位不同**」，两者不能同时成立。第 8 轮末轮 PM 裁决维持 **口径 A**：`contrast` = dark（纯黑底上另造 7 个高对比变体无可见收益），测试只断言 `sepia` 与 dark 整组不同。
+
+**由该裁决派生的后续项**：PM 同时指出「等于 / 不等于 dark」这组断言**两者都证明不了实质**——要证明 `typeColor()` 没退回 `isLight` 猜测，应断言「把某预设的 `typeScreenChat` 改成异值后，`typeColor()` 输出必须随之改变」。当前断言只覆盖了 dark/light 逐位相等与 sepia 整组不同，此项待补。
 
 **新增踩坑（第 8 轮）**
 
