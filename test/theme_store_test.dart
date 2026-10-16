@@ -76,6 +76,15 @@ void main() {
       await themeStore.save(ThemeMode.light);
       expect(await themeStore.load(), ThemeMode.light);
     });
+
+    test('目录解析抛异常时回落跟随系统，不把异常抛给启动链路（#86）', () async {
+      // 启动链路在 runApp 之前 await 主题读回：这里一抛就是白屏、没有任何降级入口。
+      final ThemeStore themeStore = ThemeStore(
+        directoryResolver: () async =>
+            throw const FileSystemException('path_provider 通道不可用'),
+      );
+      expect(await themeStore.load(), ThemeMode.system);
+    });
   });
 
   group('debugThemeName', () {

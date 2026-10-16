@@ -64,11 +64,20 @@ class ThemeStore {
     return File('${directory.path}${Platform.pathSeparator}$fileName');
   }
 
-  /// 读取主题偏好；文件缺失或内容损坏时回落「跟随系统」。
+  /// 读取主题偏好；文件缺失、内容损坏或**存储 IO 失败**时一律回落「跟随系统」。
+  ///
+  /// 启动链路在 `runApp` 之前就读它（#86）：目录解析（path_provider 通道）或
+  /// `readAsString` 抛出的异常若冒泡，`runApp` 根本不会执行，应用直接白屏。
+  /// 主题只是外观偏好，任何读取失败都不该阻止启动，故统一降级并记日志。
   Future<ThemeMode> load() async {
-    final File file = await _file();
-    if (!await file.exists()) return ThemeMode.system;
-    return decodeThemeMode(await file.readAsString());
+    try {
+      final File file = await _file();
+      if (!await file.exists()) return ThemeMode.system;
+      return decodeThemeMode(await file.readAsString());
+    } on Object catch (exception) {
+      debugPrint('读取主题偏好失败，按跟随系统处理: $exception');
+      return ThemeMode.system;
+    }
   }
 
   Future<void> save(ThemeMode mode) async {
