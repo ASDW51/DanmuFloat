@@ -6,12 +6,20 @@
 // - 开播判定：room_status ∈ {0,1}（1 为电台）；status_code=30003 表示直播已结束
 //
 // 说明：本期仅实现 web 通道；webHTML / mobile / userHTML 与负载均衡按 11.8 后续补齐。
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/net/http_transport.dart';
 import 'package:danmu_float/room/room_info.dart';
 import 'package:danmu_float/sign/abogus.dart';
+
+/// 房间信息接口的超时阈值（#76）。
+///
+/// 超过即抛 [RoomInfoException]：接口挂起（DNS 挂起 / 建连无响应 / 服务端不返回）时
+/// 会话会永久停在「解析房间…」，而该阶段没有任何重试出口，用户只能关窗或杀进程。
+/// 阈值与 UX-03 的短链解析超时同量级。
+const Duration defaultRoomInfoTimeout = Duration(seconds: 8);
 
 /// 组装 webcast/room/web/enter 的查询参数。
 ///
@@ -97,6 +105,7 @@ class RoomInfoClient {
     HttpTransport? transport,
     CookieProvider? cookieProvider,
     Abogus Function()? abogusFactory,
+    this.requestTimeout = defaultRoomInfoTimeout,
   })  : _transport = transport ?? IoHttpTransport(),
         _cookieProvider =
             cookieProvider ?? CookieProvider(transport: transport),
@@ -107,6 +116,9 @@ class RoomInfoClient {
   final HttpTransport _transport;
   final CookieProvider _cookieProvider;
   final Abogus Function() _abogusFactory;
+
+  /// 接口超时阈值（测试注入更短的值）。
+  final Duration requestTimeout;
 
   /// 由 webRid 取房间信息（含 liveId）。
   ///
@@ -121,14 +133,35 @@ class RoomInfoClient {
         _abogusFactory().sign(buildWebEnterParams(webRid));
     final Uri uri =
         Uri.parse('https://live.douyin.com$_enterPath?${abogus.query}');
-    final HttpResponseData response = await _transport.get(
-      uri,
-      headers: <String, String>{
-        'cookie': cookies,
-        'User-Agent': abogus.userAgent,
-      },
-    );
+    final HttpResponseData response =
+        await _requestEnter(uri, cookies, abogus.userAgent);
     return parseWebEnterResponse(response.body, webRid: webRid);
+  }
+
+  /// 请求房间信息接口；超时按接口失败处理（#76）。
+  ///
+  /// 超时必须变成异常而不是继续等待：会话拿到异常才会推进到 error 阶段，
+  /// 「解析房间…」上原本不存在的重试入口才会出现。
+  Future<HttpResponseData> _requestEnter(
+    Uri uri,
+    String cookies,
+    String userAgent,
+  ) async {
+    try {
+      return await _transport
+          .get(
+            uri,
+            headers: <String, String>{
+              'cookie': cookies,
+              'User-Agent': userAgent,
+            },
+          )
+          .timeout(requestTimeout);
+    } on TimeoutException {
+      throw RoomInfoException(
+        '房间信息接口超时（${requestTimeout.inSeconds} 秒），请检查网络后重试',
+      );
+    }
   }
 
   void close() => _transport.close();
