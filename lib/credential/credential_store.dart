@@ -286,18 +286,40 @@ class CredentialStore {
   /// 只影响凭证，不动主播列表 / 样式偏好 / 合规状态。
   /// 返回错误提示，成功返回 null（与本文件 [deleteProfile] / [_persist] 同口径）：
   /// 「清除所有本地数据」要据此判断「含凭证密文」这句承诺有没有兑现（#92）。
+  ///
+  /// 删除后**回读校验**，且失败时保留内存列表（#87）：
+  /// - `delete()` 不抛错也可能是静默失败（插件只报失败、Keystore 条目失效），只有
+  ///   `read()` 读不回东西才算真清干净，否则用户会在「已清除」的假象下继续使用密文；
+  /// - 内存与磁盘必须一致：删不掉却把列表清空，界面会显示成匿名，但 `load()` 一跑
+  ///   凭证又原样回来（换设备/重启后的「复活」），比留着列表并明确报错更难理解。
   Future<String?> clearAll() async {
-    String? error;
     try {
       await _backend.delete();
     } on Object catch (exception) {
       // 删除失败不再静默：密文可能仍在磁盘上，而用户被告知「已清除」是隐私承诺失真。
-      error = '凭证密文清除失败：$exception';
+      final String error = '凭证密文清除失败：$exception';
       debugPrint(error);
+      return error;
     }
+
+    final String? leftover;
+    try {
+      leftover = await _backend.read();
+    } on Object catch (exception) {
+      // 校验本身失败同样按失败处理：宁可让用户重试一次，也不谎报已清除。
+      final String error = '凭证密文清除校验失败：$exception';
+      debugPrint(error);
+      return error;
+    }
+    if (leftover != null && leftover.isNotEmpty) {
+      const String error = '凭证密文清除后仍可读回，清除未生效';
+      debugPrint(error);
+      return error;
+    }
+
     _profiles = const <CredentialProfile>[];
     _decryptFailed = false;
-    return error;
+    return null;
   }
 
   Future<String?> _persist(List<CredentialProfile> profiles) async {
