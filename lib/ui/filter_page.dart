@@ -132,40 +132,73 @@ class _FilterSettingsPageState extends State<FilterSettingsPage> {
     );
   }
 
-  /// 正则模式下提示哪些规则写法非法（非法规则会被跳过，不参与匹配）。
+  /// 正则模式下提示哪些规则被跳过：写法非法的，以及有灾难性回溯风险的（#79）。
   Widget _buildRuleWarnings() {
     final List<String> invalid = <String>[
       ...invalidFilterRules(_prefs.blockedKeywords),
       ...invalidFilterRules(_prefs.highlightKeywords),
     ];
-    if (invalid.isEmpty) return const SizedBox.shrink();
+    final List<String> risky = <String>[
+      ...riskyFilterRules(_prefs.blockedKeywords),
+      ...riskyFilterRules(_prefs.highlightKeywords),
+    ];
+    if (invalid.isEmpty && risky.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: const Color(0x22FF5252),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const Text(
-              '以下规则不是合法正则，已跳过（不影响其它规则）：',
-              style: TextStyle(fontSize: 12, color: Color(0xFFD32F2F)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (invalid.isNotEmpty)
+            _buildRuleWarningCard(
+              message: '以下规则不是合法正则，已跳过（不影响其它规则）：',
+              rules: invalid,
+              color: const Color(0xFFD32F2F),
+              background: const Color(0x22FF5252),
             ),
-            const SizedBox(height: 4),
-            for (final String rule in invalid)
-              Text(
-                '• $rule',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFFD32F2F),
-                  fontFamily: 'monospace',
-                ),
+          if (invalid.isNotEmpty && risky.isNotEmpty)
+            const SizedBox(height: 8),
+          if (risky.isNotEmpty)
+            _buildRuleWarningCard(
+              // 这类规则写法合法，但会让界面卡住：Dart 的正则没有超时，只能不匹配（#79）。
+              message: '以下规则在长文本上可能卡住界面（嵌套量词 / 分支重叠），已停用；'
+                  '请改写得更具体（如把 (a+)+ 换成 a+）：',
+              rules: risky,
+              color: const Color(0xFFE65100),
+              background: const Color(0x22FF9800),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 一类被跳过规则的提示卡片。
+  Widget _buildRuleWarningCard({
+    required String message,
+    required List<String> rules,
+    required Color color,
+    required Color background,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(message, style: TextStyle(fontSize: 12, color: color)),
+          const SizedBox(height: 4),
+          for (final String rule in rules)
+            Text(
+              '• $rule',
+              style: TextStyle(
+                fontSize: 12,
+                color: color,
+                fontFamily: 'monospace',
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -392,13 +425,20 @@ class _RuleListEditorState extends State<_RuleListEditor> {
   void _add() {
     final String raw = _controller.text;
     // 正则模式下先校验写法，非法就不让添加，避免存进去后被静默跳过。
-    if (widget.regexEnabled &&
-        widget.validateRegex &&
-        compileFilterRule(raw) == null) {
-      setState(() => _error = raw.trim().isEmpty
-          ? '请输入内容'
-          : '正则写法不合法，请检查括号、方括号是否配对');
-      return;
+    if (widget.regexEnabled && widget.validateRegex) {
+      if (compileFilterRule(raw) == null) {
+        setState(() => _error = raw.trim().isEmpty
+            ? '请输入内容'
+            : '正则写法不合法，请检查括号、方括号是否配对');
+        return;
+      }
+      // 有灾难性回溯风险的写法直接不让加（#79）：存进去也只会被停用匹配，
+      // 不如在这里说清原因，用户还能立刻改写。
+      if (hasBacktrackingRisk(raw)) {
+        setState(() => _error = '这条正则遇到长文本可能卡住界面（如嵌套量词 (a+)+），'
+            '请改写得更具体');
+        return;
+      }
     }
     final List<String> next = normalizeKeywordList(<Object?>[
       ...widget.values,

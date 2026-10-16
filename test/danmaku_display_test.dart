@@ -186,6 +186,105 @@ void main() {
       isTrue,
     );
   });
+
+  group('规则编译缓存（#79）', () {
+    test('同一份规则只编译一次：两条匹配路径复用同一个 RegExp 实例', () {
+      // 热路径上 isBlockedBy 按「每条弹幕 × 每条规则」、splitHighlights 按
+      // 「每个可见行 × 每条规则」取规则，页面又在 build 里现算可见列表，
+      // 不缓存就是每帧重建全部 RegExp。
+      expect(
+        identical(compileFilterRule(r'\d+'), compileFilterRule(r'\d+')),
+        isTrue,
+        reason: '同一规则第二次取必须命中缓存，而不是重新构造',
+      );
+      expect(
+        identical(compileFilterRule(r'\d+'), compileMatchableFilterRule(r'\d+')),
+        isTrue,
+        reason: '屏蔽与高亮两条路径共用同一份缓存',
+      );
+      // 前后空白不同也算同一条规则。
+      expect(
+        identical(compileFilterRule(r'\d+'), compileFilterRule(r'  \d+  ')),
+        isTrue,
+      );
+    });
+
+    test('非法规则的否定结果同样缓存，空规则不进缓存', () {
+      expect(compileFilterRule('(未闭合'), isNull);
+      expect(compileFilterRule('(未闭合'), isNull);
+      expect(compileFilterRule('   '), isNull);
+      expect(compileMatchableFilterRule(''), isNull);
+    });
+  });
+
+  group('灾难性回溯筛查（#79）', () {
+    test('嵌套量词 / 重叠分支判定为风险', () {
+      for (final String rule in <String>[
+        r'(a+)+$',
+        r'([a-z]+)*',
+        r'(a?)+',
+        r'(a|aa)+$',
+        r'(a|a)*',
+        r'(\d+){2,}',
+        r'((a+))+',
+        r'(?:a+)+',
+      ]) {
+        expect(hasBacktrackingRisk(rule), isTrue, reason: '$rule 应当被判为风险写法');
+      }
+    });
+
+    test('线性写法不能被误判（否则用户规则会白白失效）', () {
+      for (final String rule in <String>[
+        r'\d+',
+        r'^6{3,}$', // 设置页 placeholder 的写法
+        r'(抽奖|福利)',
+        r'(抽奖|福利)+', // 分支首字符不同，不会互相回溯
+        r'(?:abc)+', // 组前缀不是量词
+        r'(\d+)-(\d+)',
+        r'[a-z]+',
+        r'\(a+\)\+', // 转义后的字面量
+      ]) {
+        expect(hasBacktrackingRisk(rule), isFalse, reason: '$rule 是线性写法，不能误判');
+      }
+    });
+
+    test('风险规则被停用匹配，非法规则与正常规则的口径不变', () {
+      expect(riskyFilterRules(<String>[r'(a+)+', '(未闭合', '加群']), <String>[r'(a+)+']);
+      // 写法非法的仍只由 invalidFilterRules 负责，两者不互相串。
+      expect(invalidFilterRules(<String>[r'(a+)+', '(未闭合']), <String>['(未闭合']);
+      expect(compileMatchableFilterRule(r'(a+)+'), isNull);
+      expect(compileMatchableFilterRule(r'加群'), isNotNull);
+      // 语法校验不管风险：设置页要能把「写法合法但有风险」单独提示出来。
+      expect(compileFilterRule(r'(a+)+'), isNotNull);
+    });
+
+    test('屏蔽过滤跳过高风险规则，其它规则照常生效', () {
+      // (a+)+ 本身能匹配 'aaa'，这里必须不生效——风险规则一律不参与匹配。
+      const FilterPrefs onlyRisky = FilterPrefs(
+        blockedKeywords: <String>[r'(a+)+'],
+        regexEnabled: true,
+      );
+      expect(isBlockedBy(_chat('aaa'), onlyRisky), isFalse);
+
+      const FilterPrefs mixed = FilterPrefs(
+        blockedKeywords: <String>[r'(a+)+', '加群'],
+        regexEnabled: true,
+      );
+      expect(isBlockedBy(_chat('aaa'), mixed), isFalse);
+      expect(isBlockedBy(_chat('加群看福利'), mixed), isTrue);
+    });
+
+    test('正则高亮同样跳过风险规则', () {
+      expect(
+        _highlighted(splitHighlights('aaa', <String>[r'(a+)+'], regex: true)),
+        isEmpty,
+      );
+      expect(
+        _highlighted(splitHighlights('aaa 666', <String>[r'(a+)+', r'\d+'], regex: true)),
+        <String>['666'],
+      );
+    });
+  });
 }
 
 /// 构造一条聊天弹幕，供过滤用例使用。
