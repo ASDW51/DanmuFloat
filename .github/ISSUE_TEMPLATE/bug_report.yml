@@ -1,6 +1,7 @@
 name: 缺陷报告
 description: 报告一个可复现的问题
 title: "[Bug] "
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
