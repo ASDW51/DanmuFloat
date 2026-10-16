@@ -367,6 +367,10 @@ void main() {
       tester.binding.defaultBinaryMessenger
           .setMockMethodCallHandler(SystemChannels.platform, null);
     });
+    // 平台通道上还有 SystemChrome / SystemSound 等无关调用，只看剪贴板写入。
+    List<MethodCall> clipboardWrites() => clipboardCalls
+        .where((MethodCall call) => call.method == 'Clipboard.setData')
+        .toList();
 
     final FakeDataTransfer transfer = FakeDataTransfer();
     await tester.pumpWidget(_wrapFull(
@@ -381,12 +385,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('公共「下载」目录'), findsOneWidget);
     expect(transfer.exportToDownloadsCalls, 0);
-    expect(clipboardCalls, isEmpty);
+    expect(clipboardWrites(), isEmpty);
 
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
     expect(transfer.exportToDownloadsCalls, 0);
-    expect(clipboardCalls, isEmpty);
+    expect(clipboardWrites(), isEmpty);
     expect(find.text('导出完成'), findsNothing);
 
     // 确认：落盘一份文件；剪贴板此时仍未被写入（#94 的核心：不再静默复制）。
@@ -400,15 +404,17 @@ void main() {
     expect(transfer.exportToFileCalls, 0);
     expect(find.textContaining('下载/danmu_float_backup_'), findsOneWidget);
     expect(find.textContaining('不含凭证内容'), findsOneWidget);
-    expect(clipboardCalls, isEmpty);
+    expect(
+      clipboardWrites(),
+      isEmpty,
+      reason: '剪贴板是最容易被忽略的外泄通道，导出不得顺手写它',
+    );
 
     // 完成弹窗里点「复制到剪贴板」才写入，并给出反馈。
     await tester.tap(find.text('复制到剪贴板'));
     await tester.pumpAndSettle();
 
-    final MethodCall setData = clipboardCalls.firstWhere(
-      (MethodCall call) => call.method == 'Clipboard.setData',
-    );
+    final MethodCall setData = clipboardWrites().single;
     expect(
       (setData.arguments as Map<Object?, Object?>)['text'],
       transfer.exportPayload,
