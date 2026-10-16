@@ -12,7 +12,6 @@ import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/storage/data_transfer.dart';
-import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/ui/overlay_color_section.dart';
 import 'package:danmu_float/storage/theme_store.dart';
@@ -31,7 +30,6 @@ class SettingsPage extends StatefulWidget {
     this.credentialStore,
     this.onCredentialsChanged,
     this.filter = const FilterPrefs(),
-    this.filterStore,
     this.onFilterChanged,
     this.themeStore,
     this.dataTransfer,
@@ -57,10 +55,7 @@ class SettingsPage extends StatefulWidget {
   /// 进入页面时的过滤偏好快照（prd F10 / F11 / F13）。
   final FilterPrefs filter;
 
-  /// 过滤偏好存储；单测可注入内存后端。
-  final FilterStore? filterStore;
-
-  /// 过滤偏好变化回调：调用方负责同步给悬浮窗引擎（本页负责落盘）。
+  /// 过滤偏好变化回调：调用方（首页）负责合并、落盘并同步给悬浮窗引擎（#97）。
   final void Function(FilterPrefs prefs)? onFilterChanged;
 
   /// 主 App 主题偏好存储；单测可注入内存后端。
@@ -80,7 +75,6 @@ class _SettingsPageState extends State<SettingsPage> {
   late OverlayPrefs _prefs = widget.prefs;
   late final CredentialStore _credentialStore =
       widget.credentialStore ?? CredentialStore();
-  late final FilterStore _filterStore = widget.filterStore ?? FilterStore();
   late final ThemeStore _themeStore = widget.themeStore ?? ThemeStore();
   late final LocalDataTransfer _dataTransfer =
       widget.dataTransfer ?? LocalDataTransfer();
@@ -96,7 +90,7 @@ class _SettingsPageState extends State<SettingsPage> {
     widget.onChanged(next, persist: persist);
   }
 
-  /// 过滤偏好的落盘由二级页面负责，这里只更新快照并转发给悬浮窗引擎。
+  /// 过滤偏好改动的转发：本页不落盘，由首页合并后统一落盘（#97）。
   void _applyFilter(FilterPrefs next) {
     setState(() => _filter = next);
     widget.onFilterChanged?.call(next);
@@ -107,7 +101,6 @@ class _SettingsPageState extends State<SettingsPage> {
       MaterialPageRoute<void>(
         builder: (_) => FilterSettingsPage(
           prefs: _filter,
-          store: _filterStore,
           onChanged: _applyFilter,
         ),
       ),

@@ -88,13 +88,22 @@ String? nextErrorReason(
 }
 
 class DanmuPage extends StatefulWidget {
-  const DanmuPage({super.key, required this.webRid, this.title});
+  const DanmuPage({
+    super.key,
+    required this.webRid,
+    this.title,
+    this.onFilterChanged,
+  });
 
   /// 要连接的直播间号。
   final String webRid;
 
   /// 列表里的展示名（备注 / 主播名），仅作标题占位，连接成功后改用主播昵称。
   final String? title;
+
+  /// 过滤偏好改动回调：带上「本页当时的旧值」与「改动后的新值」，由首页在当前权威值上
+  /// 合并后统一落盘（#97）。为 null 时本页自行落盘（单测 / 独立挂载场景）。
+  final void Function(FilterPrefs previous, FilterPrefs next)? onFilterChanged;
 
   @override
   State<DanmuPage> createState() => _DanmuPageState();
@@ -464,11 +473,23 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// 应用过滤偏好：刷新本页展示、落盘，并同步给已开着的悬浮窗（prd F10）。
+  /// 应用过滤偏好（prd F10）：刷新本页展示，并交给首页在当前权威值上合并后统一落盘（#97）。
+  ///
+  /// 本页持有的是进页快照，设置页或窗内可能已经改过别的过滤项并落盘。这里只上报
+  /// 「本页的旧值 → 新值」，由首页取差量合并；若仍像以前那样整份覆盖 filter.json，
+  /// 会把别处刚加的屏蔽词 / 类型选择冲回旧值。
   Future<void> _applyFilter(FilterPrefs next) async {
+    final FilterPrefs previous = _filter;
     setState(() => _filter = next);
-    await _filterStore.save(next);
-    await shareOverlayFilter(next);
+    final void Function(FilterPrefs previous, FilterPrefs next)? notify =
+        widget.onFilterChanged;
+    if (notify == null) {
+      // 没接首页（单测 / 独立挂载）时保持本页自理，行为与改动前一致。
+      await _filterStore.save(next);
+      await shareOverlayFilter(next);
+      return;
+    }
+    notify(previous, next);
   }
 
   /// 单击弹幕弹出的功能菜单：复制弹幕 / 复制 userId / 屏蔽该用户 / 加入屏蔽词。

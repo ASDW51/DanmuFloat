@@ -303,6 +303,19 @@ Future<void> _pumpUntil(
   }
 }
 
+/// 无条件推进若干轮「真实时间 + pump」，用于没有可观察条件的真实文件 I/O。
+///
+/// 与 [_pumpUntil] 同款理由：`await` 链的每一跳都要先排真实事件循环、再 pump 一次才能
+/// 落地。设置页回归用例里首页的读盘 / 落盘都没有 UI 可观察量，只能按轮数推进。
+Future<void> _drainRealIo(WidgetTester tester, {int rounds = 20}) async {
+  for (int i = 0; i < rounds; i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+}
+
 /// 模拟前后台切换：框架从 `flutter/lifecycle` 渠道接收状态，测试里发同一条消息即可。
 ///
 /// 刻意先发 inactive 再发 resumed：测试进程初始就是 resumed，同状态可能被框架视为
@@ -430,6 +443,87 @@ void main() {
       find.byTooltip('关闭悬浮窗'),
       findsOneWidget,
       reason: '有活跃栏位绑定的上报说明窗口活着，首页应出现关闭入口',
+    );
+  });
+
+  testWidgets('设置页只写回自己改过的字段，不冲掉窗内刚改的偏好（#97 回归）',
+      (WidgetTester tester) async {
+    // 加高屏幕：设置页很长，目标开关要能直接点到，免得滚动把点击位置带偏。
+    tester.view.physicalSize = const Size(800, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final Directory dir =
+        Directory.systemTemp.createTempSync('danmu_float_settings_merge');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    _mockOverlayChannels(tester, active: true);
+    _mockPathProvider(tester, dir);
+
+    await tester.pumpWidget(MaterialApp(
+      home: HomePage(
+        directoryResolver: () async => dir,
+        credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
+      ),
+    ));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 2));
+    // 首页 initState 的读盘与随后的落盘都是真实文件 I/O，且每一步 await 都要
+    // 「排真实时间 + pump」才能推进（FakeAsync 里 pump 单独推不动真实 I/O）。
+    // 先把它彻底跑完再动页面，否则残余的读回会把后面的内存改动覆盖成磁盘旧值。
+    await _drainRealIo(tester);
+
+    // 进设置页：它此刻拍下一份偏好快照，之后的改动都基于这份快照。
+    await _pumpUntil(
+      tester,
+      () => find.byTooltip('设置').evaluate().isNotEmpty,
+    );
+    await tester.tap(find.byTooltip('设置'));
+    await _pumpUntil(
+      tester,
+      () => find.byType(SettingsPage).evaluate().isNotEmpty,
+    );
+    await tester.pump(const Duration(seconds: 1));
+
+    // 用户在悬浮球菜单里把透明度调到 0.2：主 App 实时更新权威值并落盘。
+    pushOverlayStatusForTest(const OverlayStatus(
+      stage: LiveSessionStage.idle,
+      received: 0,
+      prefsPatch: OverlayPrefsPatch(opacity: 0.2),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+    // 同样排空：让这次窗内改动的落盘链跑完，免得它与下面设置页的落盘交错。
+    await _drainRealIo(tester, rounds: 10);
+
+    // 接着在设置页里改一个与透明度无关的开关。
+    final Finder titleBarSwitch = find.descendant(
+      of: find.widgetWithText(ListTile, '显示栏目标识'),
+      matching: find.byType(Switch),
+    );
+    await _pumpUntil(tester, () => titleBarSwitch.evaluate().isNotEmpty);
+    // 设置页是长列表，目标开关可能在首屏之外：先滚到它再点。
+    await tester.ensureVisible(titleBarSwitch);
+    await tester.pump();
+    final bool before = tester.widget<Switch>(titleBarSwitch).value;
+    await tester.tap(titleBarSwitch);
+    await tester.pump();
+
+    // 落盘同样是多步真实 I/O：推进到写完，再读回偏好文件。
+    await _drainRealIo(tester, rounds: 10);
+    final OverlayPrefs? saved = await tester.runAsync(
+      () => OverlayPrefsStore(directoryResolver: () async => dir).load(),
+    );
+
+    expect(
+      saved!.opacity,
+      0.2,
+      reason: '窗内刚调的透明度不能被设置页的进页快照覆盖回旧值',
+    );
+    expect(
+      saved.showTitleBar,
+      !before,
+      reason: '设置页里这次真正改动的开关要生效',
     );
   });
 

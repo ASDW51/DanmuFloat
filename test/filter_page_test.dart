@@ -229,15 +229,10 @@ Widget _wrapFilter({
   required FilterPrefs prefs,
   required void Function(FilterPrefs prefs) onChanged,
 }) {
-  final Directory directory =
-      Directory.systemTemp.createTempSync('filter_page_widget');
-  addTearDown(() {
-    if (directory.existsSync()) directory.deleteSync(recursive: true);
-  });
+  // #97 起本页不落盘（由首页统一写），故不再需要注入存储目录。
   return MaterialApp(
     home: FilterSettingsPage(
       prefs: prefs,
-      store: FilterStore(directoryResolver: () async => directory),
       onChanged: onChanged,
     ),
   );
