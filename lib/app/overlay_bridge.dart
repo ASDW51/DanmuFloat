@@ -544,7 +544,13 @@ FilterPrefs parseFilterPrefs(Object? raw) {
   );
 }
 
+/// 解析主 App 下发的类型名；显式空数组按「全部不显示」处理（#83）。
+///
+/// 与 `filter_store.dart` 的 `_parseKinds` 同口径：空数组是用户在过滤设置里把类型全部取消
+/// 勾选后的有效选择，悬浮窗必须照做，否则同一份设置会出现「App 内不显示、悬浮窗照常显示
+/// 聊天弹幕」的分裂。只有「给了名字却一个都不认识」才回落默认值。
 Set<DanmakuKind> _kindsFromNames(List<Object?> raw) {
+  if (raw.isEmpty) return const <DanmakuKind>{};
   final Set<DanmakuKind> kinds = <DanmakuKind>{};
   for (final Object? item in raw) {
     if (item is! String) continue;

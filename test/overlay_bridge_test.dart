@@ -654,6 +654,30 @@ void main() {
       expect(parsed.regexEnabled, isTrue);
     });
 
+    test('空 visibleKinds 原样下发：悬浮窗不能自己回到默认（#83）', () {
+      final FilterPrefs? parsed = OverlayFilter.tryParse(
+        roundTrip(const <String, Object?>{
+          'type': 'filter',
+          'filter': <String, Object?>{'visibleKinds': <Object?>[]},
+        }),
+      );
+      expect(parsed, isNotNull);
+      expect(parsed!.visibleKinds, isEmpty);
+    });
+
+    test('visibleKinds 全是未登记名字时仍回落默认（#83）', () {
+      final FilterPrefs? parsed = OverlayFilter.tryParse(
+        roundTrip(const <String, Object?>{
+          'type': 'filter',
+          'filter': <String, Object?>{
+            'visibleKinds': <Object?>['未来的类型'],
+          },
+        }),
+      );
+      expect(parsed, isNotNull);
+      expect(parsed!.visibleKinds, defaultListKinds);
+    });
+
     test('缺省 regexEnabled 按关闭处理：旧版消息不会意外切到正则匹配', () {
       final FilterPrefs? legacy = OverlayFilter.tryParse(
         roundTrip(const <String, Object?>{

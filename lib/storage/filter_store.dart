@@ -49,7 +49,13 @@ FilterPrefs decodeFilterPrefs(String raw) {
 
 /// 解析类型名集合：忽略未登记的名字；全空时回落默认（只聊天类），
 /// 免得一份坏数据把列表清空、用户以为功能坏了。
+///
+/// **显式空数组是例外**（#83）：用户可以把「列表显示的类型」逐个取消勾选，`toJson` 会写出
+/// `"visibleKinds": []`，这是一次有效选择。把它也当坏数据回落默认值，会让「App 内什么都不显示」
+/// 与「悬浮窗照常显示聊天弹幕、重启后 App 也恢复默认」两个口径分裂，设置静默丢失。
+/// 只有「给了名字却一个都不认识」才算坏数据（例如旧版本读到新版本写下的类型名）。
 Set<DanmakuKind> _parseKinds(List<Object?> raw) {
+  if (raw.isEmpty) return const <DanmakuKind>{};
   final Set<DanmakuKind> kinds = <DanmakuKind>{};
   for (final Object? item in raw) {
     if (item is! String) continue;
