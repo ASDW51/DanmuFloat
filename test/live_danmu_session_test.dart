@@ -61,6 +61,32 @@ class SequenceRoomInfoClient extends RoomInfoClient {
   }
 }
 
+/// 按开关在「未开播 / 已开播 / 请求失败」之间切换的假房间接口（#107）。
+///
+/// 复检失败与确认未开播要分开计费，用例得在中途把网络切坏再切回来，
+/// 所以按外部翻的开关决定返回值，而不是像 [SequenceRoomInfoClient] 那样按调用次序。
+class _FlakyRoomInfoClient extends RoomInfoClient {
+  final List<String> calls = <String>[];
+
+  /// true 时每个请求都失败，模拟弱网 / 断网。
+  bool failing = false;
+
+  /// true 时返回已开播的房间。
+  bool living = false;
+
+  @override
+  Future<RoomInfo> fetchByWebRid(
+    String webRid, {
+    String? credentialCookies,
+  }) async {
+    calls.add(webRid);
+    if (failing) throw Exception('网络不可达');
+    return living
+        ? _livingRoom()
+        : const RoomInfo.offline(webRid: '12345', api: RoomInfoApi.web);
+  }
+}
+
 class FakeCookieProvider extends CookieProvider {
   FakeCookieProvider({this.error});
 
@@ -288,6 +314,71 @@ void main() {
         hasLength(1),
         reason: '复检不得重走 start()，否则文案会在「解析房间」与「未开播」之间反复闪',
       );
+      await session.stop();
+    });
+
+    test('复检失败不消耗预算：弱网烧不掉，网络恢复后仍自动接回（#107）', () async {
+      // 旧实现把「请求失败」和「确认未开播」同额计费，弱网约 10 分钟（30s × 20）
+      // 就能把预算烧尽，栏位定格成「已停止复检」——此后主播开播也不会自动接回。
+      final _FlakyRoomInfoClient client = _FlakyRoomInfoClient();
+      final LiveDanmuSession session = build(
+        client: client,
+        offlineRecheckInterval: const Duration(milliseconds: 5),
+        maxOfflineRechecks: 2,
+      );
+
+      await session.start();
+      expect(session.stage, LiveSessionStage.offline);
+      expect(session.autoRechecking, isTrue);
+
+      // 切弱网：连跑若干轮全部失败（远超过 2 次预算）。
+      client.failing = true;
+      await _waitFor(() => client.calls.length >= 6);
+      expect(
+        session.autoRechecking,
+        isTrue,
+        reason: '失败轮次不消耗预算，弱网不得把挂机栏位停在「已停止复检」',
+      );
+      expect(session.stage, LiveSessionStage.offline, reason: '复检失败不打成错误态');
+
+      // 网络恢复且主播开播：必须自己接上，不需要手动重试。
+      client.failing = false;
+      client.living = true;
+      await _waitFor(() => socketArgs.isNotEmpty);
+      expect(session.autoRechecking, isFalse, reason: '已开播，复检定时器该停');
+      expect(client.calls.length, greaterThanOrEqualTo(7));
+
+      socket.emitState(DanmuConnectionState.connected);
+      await _tick();
+      expect(session.stage, LiveSessionStage.live);
+      await session.stop();
+    });
+
+    test('只有确认未开播才消耗预算，失败轮次不占额度（#107）', () async {
+      final _FlakyRoomInfoClient client = _FlakyRoomInfoClient();
+      final LiveDanmuSession session = build(
+        client: client,
+        offlineRecheckInterval: const Duration(milliseconds: 5),
+        maxOfflineRechecks: 2,
+      );
+
+      // 首轮解析：确认未开播。复检第 1 次确认未开播 → 预算用掉 1。
+      await session.start();
+      await _waitFor(() => client.calls.length >= 2);
+
+      // 中间夹一段弱网：这几轮不该占额度。
+      client.failing = true;
+      await _waitFor(() => client.calls.length >= 5);
+      expect(session.autoRechecking, isTrue, reason: '预算只被确认未开播的那 1 轮用掉');
+
+      // 网络恢复：再确认一次未开播即到顶（2/2），停止轮询。
+      client.failing = false;
+      await _waitFor(() => !session.autoRechecking);
+      expect(session.stage, LiveSessionStage.offline);
+      final int calls = client.calls.length;
+      // 再等若干个间隔，确认是真的停了。
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(client.calls, hasLength(calls), reason: '到顶后不得继续请求');
       await session.stop();
     });
 

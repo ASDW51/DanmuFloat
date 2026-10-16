@@ -25,6 +25,9 @@ const Duration defaultOfflineRecheckInterval = Duration(seconds: 30);
 ///
 /// 到顶后停止轮询，避免对着一个长期不开播的房间无限发请求；此时栏位保留
 /// [LiveDanmuSession.autoRechecking] 为 false 的「未开播」，由界面上的手动重试兜底。
+///
+/// 只统计**确认未开播**的轮次（#107）：请求失败不算，否则弱网 10 分钟就能把预算烧光，
+/// 而停止复检时界面文案说的是「主播未开播」——那是谎报，真实原因只是网络拿不到答案。
 const int defaultMaxOfflineRechecks = 20;
 
 /// 会话阶段，供界面提示当前进度。
@@ -115,7 +118,7 @@ class LiveDanmuSession {
   /// 未开播复检间隔（测试注入更短的值，避免真等 30 秒）。
   final Duration offlineRecheckInterval;
 
-  /// 未开播复检次数上限。
+  /// 未开播复检次数上限（只统计确认未开播的轮次，见 [defaultMaxOfflineRechecks]）。
   final int maxOfflineRechecks;
 
   final RoomInfoClient _roomInfoClient;
@@ -395,7 +398,6 @@ class LiveDanmuSession {
     if (_stopped || _starting) return;
     _starting = true;
     _rechecking = true;
-    _offlineRecheckCount++;
     try {
       final RoomInfo roomInfo;
       try {
@@ -406,6 +408,11 @@ class LiveDanmuSession {
       } on Object catch (error) {
         // 复检失败不打断会话：网络抖动不该把一个正常挂机的栏位打成错误态，
         // 下一轮继续复检即可，但日志要留下痕迹便于排查。
+        //
+        // 失败也**不消耗**复检预算（#107）：预算的语义是「别对着一个确定不开播的
+        // 房间无限发请求」，而「拿不到答案」不等于「没开播」。旧实现把两者同额计费，
+        // 未开播期间恰好弱网 10 分钟（默认间隔 × 20）就能把预算烧尽，栏位定格在
+        // 「已停止复检」，此后主播开播也不会自动接回——正是这条链路存在理由的反面。
         debugPrint('未开播复检失败（$webRid）：$error');
         _scheduleOfflineRecheck();
         return;
@@ -413,6 +420,8 @@ class LiveDanmuSession {
       if (_stopped) return;
       _room = roomInfo;
       if (!roomInfo.living) {
+        // 只有「确认未开播」才计费（#107）。
+        _offlineRecheckCount++;
         _scheduleOfflineRecheck();
         return;
       }
