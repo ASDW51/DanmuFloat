@@ -161,7 +161,7 @@ git fetch origin && git checkout main && git pull --ff-only
 | 代码 | 显式类型；fire-and-forget 用 `unawaited(...)`；中文「为什么」注释；绝对导入 `package:danmu_float/...`；**禁止 `dart format`**；`test/` 与 `lib/` 同构 |
 | 硬边界 | 纯弹幕查看器（无登录 / 发弹幕 / 打赏）；免责声明入口不可绕过；「清除所有本地数据」= 关窗 → 断连 → 回免责声明；禁止商业用途 |
 | 命令 | push 前 `source ~/gh.sh && gh auth setup-git`；PR 用 `gh pr create --body-file` |
-| 文档地图 | [`AGENTS.md`](../AGENTS.md)（规范与门禁）· [`CONTRIBUTING.md`](../CONTRIBUTING.md)（贡献流程 / Issue 与标签）· [`docs/ci-pr-workflow.md`](ci-pr-workflow.md)（PR + CI 步骤）· [`docs/labels.md`](labels.md)（标签体系）· [`docs/iteration-todo.md`](iteration-todo.md)（产品台账）· 本手册（通用实践） |
+| 文档地图 | [`AGENTS.md`](../AGENTS.md)（规范与门禁）· [`CONTRIBUTING.md`](../CONTRIBUTING.md)（贡献流程 / Issue 与标签）· [`docs/ci-pr-workflow.md`](ci-pr-workflow.md)（PR + CI 步骤）· [`docs/labels.md`](labels.md)（标签体系）· [`docs/agent-issue-protocol.md`](agent-issue-protocol.md)（Agent Issue 处理协议）· [`docs/iteration-todo.md`](iteration-todo.md)（产品台账）· 本手册（通用实践） |
 
 ---
 
