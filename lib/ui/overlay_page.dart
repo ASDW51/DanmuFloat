@@ -201,9 +201,6 @@ class OverlayPalette {
     ),
   );
 
-  /// 按皮肤开关取配色。
-  static OverlayPalette of(bool light) => light ? lightPalette : darkPalette;
-
   /// 各类型在皮肤上的配色（列表过滤与类型前缀文案见 danmaku_display.dart）：
   /// 普通弹幕正文用 [body]；其余类型前缀与正文同色（prd F13 类型区分）。
   Color? typeColor(DanmakuKind kind) => switch (kind) {
@@ -224,8 +221,11 @@ class OverlayPalette {
 /// 为什么要绕这一道：`OverlayApp` 是 const 无参 widget（由引擎侧直接挂载），拿不到
 /// 页面状态里的主题；而弹窗路由挂在 `MaterialApp` 的 Navigator 上、比页面高一层，
 /// 只在页面里包一层 `Theme` 是管不到弹窗的——深色皮肤下弹窗仍然是白底。
+/// 初值取自主题预设，而不是旧常量 `OverlayPalette.darkPalette`：那两组常量只作为
+/// 「默认外观零突变」的测试参考值保留；运行时若还从它们取值，主题之外就又多了一套
+/// 真相——改了预设却不生效，正是这类腐化的典型症状。
 final ValueNotifier<OverlayPalette> overlayPaletteNotifier =
-    ValueNotifier<OverlayPalette>(OverlayPalette.darkPalette);
+    ValueNotifier<OverlayPalette>(OverlayTheme.dark.toPalette());
 
 /// 由调色板派生悬浮窗的 `ThemeData`，让弹窗等 Material 组件跟随皮肤。
 ThemeData overlayThemeData(OverlayPalette palette) {
@@ -373,7 +373,7 @@ class _OverlayPageState extends State<OverlayPage> {
 
   /// widget 唯一可读的调色板：主题解析 + 角色级覆盖合并。
   ///
-  /// 默认配置下这里产出的取值与原 OverlayPalette.of(lightTheme) 逐字段相同
+  /// 默认配置下这里产出的取值与原「皮肤开关 + 旧常量」路径逐字段相同
   /// （由 test/overlay_theme_test.dart 钉住），因此默认外观零变化。
   /// adjust 策略下先按 maskColor 校正文字色；warn/allow 原样渲染用户的选色。
   ///

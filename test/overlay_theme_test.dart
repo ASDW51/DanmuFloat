@@ -23,7 +23,29 @@ void _expectTextRoles(OverlayTheme theme, double minimum) {
   }
 }
 
+/// 取一组覆盖「文字 / 底色 / 类型」三个角色族的字段，用于比较两份调色板。
+List<int> _argbOf(OverlayPalette palette) => <int>[
+  palette.body.toARGB32(),
+  palette.secondary.toARGB32(),
+  palette.chromeBg.toARGB32(),
+  palette.menuBg.toARGB32(),
+  palette.maskColor.toARGB32(),
+  palette.border.toARGB32(),
+  palette.typeScreenChat.toARGB32(),
+  palette.typeGift.toARGB32(),
+];
+
 void main() {
+  test(悬浮窗运行时调色板初值取自主题预设，且与旧常量逐位相等, () {
+    // 旧常量还在文件里，很容易被当成「拿调色板」的入口；这条钉子把运行时初值
+    // 钉在主题产出上，同时保证默认外观零突变（与旧常量逐位相等）。
+    final OverlayPalette initial = overlayPaletteNotifier.value;
+    final OverlayPalette fromTheme = OverlayTheme.dark.toPalette();
+    expect(initial.isLight, fromTheme.isLight);
+    expect(_argbOf(initial), _argbOf(fromTheme));
+    expect(_argbOf(initial), _argbOf(OverlayPalette.darkPalette));
+  });
+
   test('dark / light 预设与现有常量逐字段相等（默认外观零突变的钉子）', () {
     // 这是本 PR 唯一必须成立的硬约束：抽取出主题模型不能顺手改掉任何默认颜色。
     final OverlayPalette dark = OverlayTheme.dark.toPalette();
