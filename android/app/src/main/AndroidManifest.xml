@@ -11,7 +11,14 @@
     <!-- 首次启动引导里的「电池优化白名单」（prd 4.10）：
          申请加入白名单需要声明该权限，否则系统会拒绝该 Intent。 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <!-- 整个应用都不参与系统备份与换机迁移（#93）。
+         应用私有目录里放的是主播列表（rooms.json）、悬浮窗 / 过滤 / 主题偏好，
+         以及 flutter_secure_storage 落盘的凭证密文；allowBackup 缺省为 true，
+         这些文件会随云备份与设备迁移走——于是「清除所有本地数据」抹不掉云端副本，
+         卸载重装或换机会把数据无感带回，README 的「凭证加密保存在本地」与
+         设置页的清除承诺都不再成立。 -->
     <application
+        android:allowBackup="false"
         android:label="DanmuFloat"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
