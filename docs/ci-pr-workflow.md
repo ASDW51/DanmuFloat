@@ -39,7 +39,9 @@ git checkout main && git pull --ff-only
 
 - 同一分支重复 push 只会保留最新一次 CI（workflow 已配 concurrency），修问题后直接追加 commit 再 push，PR 自动重跑。
 - review 后不要 force push；追加 commit 即可。
+- **提 PR 前先 pull**：`git fetch origin && git checkout main && git pull --ff-only`，然后从 `origin/main` 拉分支（`git checkout -b <类型>/<描述> origin/main`）。分支基线不是 `origin/main` 时，PR 会**静默混入不属于本次改动的提交**；提 PR 前务必核对两点：`git log --oneline -1 origin/main` 是分支祖先，且 `git show --stat` 的文件数等于你实际改的文件数。
 - 分支要始终从最新 `main` 拉出；若 main 有更新，可 `git fetch && git rebase origin/main` 后再 push（仅限未 review 分支）。
+- 更完整的通用实践（开工前基线纪律、门禁反馈怎么读、长文件编辑与锚点纪律、测试断言口径、文档前后一致、交付前检查清单，以及按编号索引的事故档案）见 [docs/dev-playbook.md](dev-playbook.md)。
 - 提交信息遵循 Conventional Commits 中文格式（见 AGENTS.md 第 7 节）。
 - 建议在 GitHub 仓库 Settings → Branches 开启分支保护，把 `analyze-and-test` 设为合并必需 check，使「CI 绿了才进 main」成为强制约束。
 
