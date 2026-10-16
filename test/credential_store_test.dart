@@ -7,7 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// 内存后端：单测不依赖 Android Keystore 插件通道。
 class FakeBackend implements CredentialBackend {
-  FakeBackend({this.readError});
+  FakeBackend({this.readError, this.silentDelete = false});
 
   String? stored;
 
@@ -16,6 +16,10 @@ class FakeBackend implements CredentialBackend {
 
   /// 非空时删除抛错（#92：删除失败必须能被调用方看见，不能再静默）。
   Object? deleteError;
+
+  /// 删除既不抛错也不生效（#87：插件只报失败、Keystore 条目失效都属这一类，
+  /// 只有删除后的回读校验能发现）。
+  bool silentDelete;
 
   @override
   Future<String?> read() async {
@@ -31,6 +35,7 @@ class FakeBackend implements CredentialBackend {
   Future<void> delete() async {
     final Object? error = deleteError;
     if (error != null) throw error;
+    if (silentDelete) return;
     stored = null;
   }
 }
@@ -212,22 +217,49 @@ void main() {
       expect(store.profiles, isEmpty);
     });
 
-    test('clearAll 删除密文失败时返回错误提示，但内存仍清空（#92）', () async {
+    test('clearAll 删除密文抛错时返回错误提示并保留内存列表（#87）', () async {
       final FakeBackend backend = FakeBackend()..deleteError = Exception('keystore 不可用');
       final CredentialStore store = CredentialStore(backend: backend);
       await store.saveProfile(name: '主号', raw: 'ttwid=a');
 
       final String? error = await store.clearAll();
 
-      // 「清除所有本地数据」据此判断「含凭证密文」这句承诺有没有兑现。
+      // 「清除所有本地数据」据此判断「含凭证密文」这句承诺有没有兑现（#92）。
       expect(error, isNotNull);
       expect(error, contains('凭证密文清除失败'));
       expect(backend.stored, isNotNull, reason: '删除确实失败了，密文还在磁盘上');
       expect(
         store.hasProfiles,
-        isFalse,
-        reason: '内存仍要回到匿名，避免界面继续使用一个已被要求删除的凭证',
+        isTrue,
+        reason: '删不掉就别清空内存：否则界面显示成匿名，load() 一跑凭证又原样回来（#87）',
       );
+      expect(store.profiles.single.name, '主号');
+    });
+
+    test('clearAll 删除静默失败时由回读校验拦下（#87）', () async {
+      // 插件只报失败、Keystore 条目失效等场景：delete() 不抛错，但密文还在。
+      final FakeBackend backend = FakeBackend(silentDelete: true);
+      final CredentialStore store = CredentialStore(backend: backend);
+      await store.saveProfile(name: '主号', raw: 'ttwid=a');
+
+      final String? error = await store.clearAll();
+
+      expect(error, isNotNull, reason: '没有回读校验就会谎报「已清除」');
+      expect(error, contains('仍可读回'));
+      expect(backend.stored, isNotNull);
+      expect(store.hasProfiles, isTrue);
+    });
+
+    test('clearAll 回读校验本身失败时也按失败处理（#87）', () async {
+      final FakeBackend backend = FakeBackend(readError: Exception('通道异常'));
+      final CredentialStore store = CredentialStore(backend: backend);
+      await store.saveProfile(name: '主号', raw: 'ttwid=a');
+
+      final String? error = await store.clearAll();
+
+      expect(error, isNotNull);
+      expect(error, contains('校验失败'));
+      expect(store.hasProfiles, isTrue);
     });
 
     test('解密失败不静默降级：标记失败并回落空列表', () async {

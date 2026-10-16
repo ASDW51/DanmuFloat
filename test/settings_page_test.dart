@@ -16,6 +16,12 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// 内存凭证后端：设置页测试不依赖 Android Keystore 插件通道。
 class FakeCredentialBackend implements CredentialBackend {
+  FakeCredentialBackend({this.silentDelete = false});
+
+  /// 删除不抛错也不生效（#87：插件只报失败、Keystore 条目失效都属这一类，
+  /// 只有删除后的回读校验能发现）。
+  final bool silentDelete;
+
   String? stored;
 
   @override
@@ -25,7 +31,10 @@ class FakeCredentialBackend implements CredentialBackend {
   Future<void> write(String value) async => stored = value;
 
   @override
-  Future<void> delete() async => stored = null;
+  Future<void> delete() async {
+    if (silentDelete) return;
+    stored = null;
+  }
 }
 
 void main() {
@@ -238,6 +247,38 @@ void main() {
     expect(backend.stored, isNull);
     expect(store.hasProfiles, isFalse);
     expect(find.text('匿名自动获取（仅内存）'), findsOneWidget);
+  });
+
+  testWidgets('清除本地凭证失败时不谎报成功，凭证列表也保留（#87）', (WidgetTester tester) async {
+    _useFullScreen(tester);
+    // 删除既不抛错也不生效：只有删除后的回读校验能发现密文还在。
+    final FakeCredentialBackend backend =
+        FakeCredentialBackend(silentDelete: true);
+    final CredentialStore store = CredentialStore(backend: backend);
+    await store.saveProfile(name: '主号', raw: 'ttwid=abc');
+
+    await tester.pumpWidget(_wrapFull(prefs: const OverlayPrefs(), store: store));
+    await tester.pumpAndSettle();
+    expect(find.text('已配置 1 份凭证'), findsOneWidget);
+
+    await tester.tap(find.text('清除本地凭证').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '清除'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('已清除本地凭证'),
+      findsNothing,
+      reason: '密文还在设备上，提示成功就是隐私承诺失真',
+    );
+    expect(find.text('凭证清除失败，请重试'), findsOneWidget);
+    expect(backend.stored, isNotNull);
+    expect(store.hasProfiles, isTrue);
+    expect(
+      find.text('已配置 1 份凭证'),
+      findsOneWidget,
+      reason: '内存列表与磁盘保持一致，避免重启后凭证「复活」',
+    );
   });
 
   testWidgets('清除所有本地数据需二次确认，确认后才回调外层重置', (WidgetTester tester) async {

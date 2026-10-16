@@ -156,7 +156,7 @@ void main() {
     expect(await compliance.exists(), isTrue);
   });
 
-  test('凭证密文删除失败会被报告，内存凭证仍回到匿名（#92）', () async {
+  test('凭证密文删除失败会被报告，内存凭证保持原样（#92 / #87）', () async {
     final FakeBackend backend = FakeBackend('ttwid=manual')
       ..deleteError = const FileSystemException('denied');
     final CredentialStore credential = CredentialStore(backend: backend);
@@ -169,8 +169,8 @@ void main() {
     expect(result.targets, contains('凭证密文'));
     expect(
       credential.hasProfiles,
-      isFalse,
-      reason: '内存必须回到匿名，避免界面继续用一个已被要求删除的凭证',
+      isTrue,
+      reason: '删不掉就别清空内存：界面显示成匿名、load() 一跑凭证又回来，反而更难理解（#87）',
     );
     expect(backend.stored, 'ttwid=manual', reason: '删除确实失败了，报告属实');
   });

@@ -545,7 +545,14 @@ class _SettingsPageState extends State<SettingsPage> {
     );
     if (!confirmed || !mounted) return;
 
-    await _credentialStore.clearAll();
+    // 只有密文真的删掉了才动绑定映射并提示成功：删除静默失败时界面必须说实话，
+    // 否则用户会在「已清除」的假象下继续使用仍留在设备上的凭证（#87）。
+    final String? error = await _credentialStore.clearAll();
+    if (!mounted) return;
+    if (error != null) {
+      _snack('凭证清除失败，请重试');
+      return;
+    }
     // 绑定映射随凭证一起清空：主播全部回到匿名自动获取。
     setRoomCookieBindings(const <String, String>{});
     await shareOverlayCredential(const <String, String>{});
