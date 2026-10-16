@@ -136,8 +136,13 @@ class CookieProvider {
     final String cookies = await _fetchCookies();
 
     if (!cookies.contains('ttwid') && cached != null && cachedAt != null) {
-      // 新响应缺 ttwid：直接续期 1 小时后复用上次缓存（与参考实现一致）
-      _cachedAt = cachedAt.add(const Duration(hours: 1));
+      // 新响应缺 ttwid：续期后复用上次缓存（与参考实现一致）。
+      //
+      // 续期必须基于**当前时间**（#80）：这个分支只在缓存已过期（now - cachedAt ≥ cacheTtl）
+      // 时才会走到，若仍在旧时间戳上累加，续期结果几乎总是依旧过期——下一次调用立刻又发一次
+      // 请求，每次只把时间戳往前挪 1 小时，要连续调用多次才收敛；服务端一段时间不返回 ttwid
+      // （如风控降级）时就退化成每次取 Cookie 都联网，正是这段缓存想避免的事。
+      _cachedAt = now.add(const Duration(hours: 1));
       return cached;
     }
 

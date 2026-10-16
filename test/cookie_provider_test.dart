@@ -104,10 +104,56 @@ void main() {
       expect(await provider.getCookies(), 'ttwid=t1');
       expect(calls, 2);
 
-      // 参考实现是在旧时间戳上 +1h（t0+1h），故此刻起 6h 内仍命中缓存
+      // 续期基于当前时间（t0+6h+1s 再 +1h），故此刻起 6h 内仍命中缓存
       now = DateTime(2026, 1, 1, 6, 30, 0);
       expect(await provider.getCookies(), 'ttwid=t1');
       expect(calls, 2, reason: '续期后不应再发请求');
+    });
+
+    test('缓存已过期很久时续期仍生效：基于当前时间而不是旧时间戳（#80）', () async {
+      int calls = 0;
+      final FakeTransport transport = FakeTransport((Uri uri, _) async {
+        calls++;
+        return calls == 1
+            ? const HttpResponseData(
+                statusCode: 200,
+                body: '',
+                setCookie: <String>['ttwid=t1; Path=/'],
+              )
+            : const HttpResponseData(
+                statusCode: 200,
+                body: '',
+                setCookie: <String>['passport=2; Path=/'],
+              );
+      });
+      DateTime now = DateTime(2026, 1, 1, 0, 0, 0);
+      final CookieProvider provider = CookieProvider(
+        transport: transport,
+        now: () => now,
+      );
+
+      expect(await provider.getCookies(), 'ttwid=t1');
+
+      // 过期 8 小时（远超 6h TTL）后才拿到缺 ttwid 的响应。旧实现在旧时间戳上加 1h
+      // （t0+1h），续期后距当下仍是 7 小时前，等于没续上——上面那条用例只推进了
+      // 6h+1s，落在「旧时间戳 +1h 也够用」的窗口里，所以漏掉了这个 bug。
+      now = now.add(const Duration(hours: 8));
+      expect(await provider.getCookies(), 'ttwid=t1');
+      expect(calls, 2);
+
+      // 紧接着再取：续期必须已经生效，直接命中缓存（旧实现在这里会再发一次请求）。
+      expect(await provider.getCookies(), 'ttwid=t1');
+      expect(calls, 2, reason: '续期没生效的话，每次取 Cookie 都会重新联网');
+
+      // 续期点是 t0+8h 再 +1h：之后 6h TTL 内继续命中。
+      now = now.add(const Duration(hours: 6, minutes: 30));
+      expect(await provider.getCookies(), 'ttwid=t1');
+      expect(calls, 2, reason: '续期后 6h TTL 内不应打扰服务端');
+
+      // 越过续期点 6h：确实过期，这才重新请求。
+      now = now.add(const Duration(minutes: 31));
+      await provider.getCookies();
+      expect(calls, 3);
     });
 
     test('无 set-cookie 时抛 CookieFetchException', () async {
