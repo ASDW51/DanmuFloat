@@ -1,4 +1,4 @@
-﻿// 本地数据备份 / 恢复：JSON 编解码、错误分支与覆盖落盘。
+// 本地数据备份 / 恢复：JSON 编解码、错误分支与覆盖落盘。
 //
 // 各 store 一律注入临时目录，测试不依赖 path_provider 插件通道。
 import 'dart:convert';
@@ -17,7 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('备份编解码', () {
-    test('往返一致：主播 / 偏好 / 过滤 / 主题 / 合规状态都还原', () {
+    test('往返一致：主播 / 偏好 / 过滤 / 主题都还原', () {
       final String raw = encodeDataBundle(
         rooms: <ManagedRoom>[
           const ManagedRoom(webRid: '123', name: '备注', group: '朋友', addedAt: 1),
@@ -34,10 +34,6 @@ void main() {
           regexEnabled: true,
         ),
         themeMode: ThemeMode.dark,
-        compliance: const ComplianceState(
-          disclaimerAccepted: true,
-          onboardingDone: true,
-        ),
       );
 
       final DataBundle bundle = decodeDataBundle(raw);
@@ -51,8 +47,23 @@ void main() {
       expect(bundle.filter.highlightKeywords, <String>['抽奖']);
       expect(bundle.filter.regexEnabled, isTrue);
       expect(bundle.themeMode, ThemeMode.dark);
-      expect(bundle.compliance.disclaimerAccepted, isTrue);
-      expect(bundle.compliance.onboardingDone, isTrue);
+    });
+
+    test('备份里没有合规分区（#85）：同意状态不随备份搬运', () {
+      final Map<String, Object?> root = jsonDecode(
+        encodeDataBundle(
+          rooms: const <ManagedRoom>[],
+          prefs: const OverlayPrefs(),
+          filter: const FilterPrefs(),
+          themeMode: ThemeMode.system,
+        ),
+      ) as Map<String, Object?>;
+
+      expect(
+        root.containsKey('compliance'),
+        isFalse,
+        reason: '同意是与本机当次操作绑定的授权记录，写进备份就能被外部 JSON 改写',
+      );
     });
 
     test('根对象带 App 标识与版本号', () {
@@ -62,7 +73,6 @@ void main() {
           prefs: const OverlayPrefs(),
           filter: const FilterPrefs(),
           themeMode: ThemeMode.system,
-          compliance: const ComplianceState(),
         ),
       ) as Map<String, Object?>;
       expect(root['app'], dataBundleAppId);
@@ -136,7 +146,6 @@ void main() {
       expect(bundle.prefs.opacity, const OverlayPrefs().opacity);
       expect(bundle.filter.blockedKeywords, isEmpty);
       expect(bundle.themeMode, ThemeMode.system);
-      expect(bundle.compliance.disclaimerAccepted, isFalse);
     });
 
     test('备份文件名带时间戳', () {
@@ -168,7 +177,6 @@ void main() {
         prefsStore: OverlayPrefsStore(directoryResolver: resolve),
         filterStore: filterStore ?? FilterStore(directoryResolver: resolve),
         themeStore: ThemeStore(directoryResolver: resolve),
-        complianceStore: ComplianceStore(directoryResolver: resolve),
         directoryResolver: resolve,
         saveToDownloads: saveToDownloads,
       );
@@ -183,7 +191,6 @@ void main() {
         prefs: const OverlayPrefs(opacity: 0.3, webRids: <String>['999']),
         filter: const FilterPrefs(blockedKeywords: <String>['广告']),
         themeMode: ThemeMode.light,
-        compliance: const ComplianceState(disclaimerAccepted: true),
       );
 
       final DataImportSummary summary = await transfer.importJson(raw);
@@ -206,9 +213,14 @@ void main() {
           await FilterStore(directoryResolver: resolve).load();
       expect(filter.blockedKeywords, <String>['广告']);
       expect(await ThemeStore(directoryResolver: resolve).load(), ThemeMode.light);
+      // 合规状态不参与导入（#85）：导入前是什么，导入后还是什么。
       final ComplianceState compliance =
           await ComplianceStore(directoryResolver: resolve).load();
-      expect(compliance.disclaimerAccepted, isTrue);
+      expect(
+        compliance.disclaimerAccepted,
+        isFalse,
+        reason: '同意只能由本机首次启动时的勾选写下，导入不得改写它',
+      );
     });
 
     test('导出后再导入：数据原样还原', () async {
@@ -228,7 +240,6 @@ void main() {
         prefsStore: OverlayPrefsStore(directoryResolver: resolve),
         filterStore: FilterStore(directoryResolver: resolve),
         themeStore: ThemeStore(directoryResolver: resolve),
-        complianceStore: ComplianceStore(directoryResolver: resolve),
         directoryResolver: resolve,
       ).importJson(exported);
 
@@ -302,6 +313,62 @@ void main() {
 
       expect(location, isNotNull);
       expect(File(location!).existsSync(), isTrue);
+    });
+
+    test('导入旧备份不改写本机同意状态（#85）', () async {
+      Future<Directory> resolve() async => directory;
+      // 本机还没同意过：首次启动时的那次勾选是唯一的写入来源。
+      expect(
+        (await ComplianceStore(directoryResolver: resolve).load())
+            .disclaimerAccepted,
+        isFalse,
+      );
+
+      // 旧版本备份会带 compliance 分区：把它写成「已同意」也不能改写本机状态，
+      // 否则一份外部 JSON 就能让合规入口被绕过（AGENTS.md 硬边界）。
+      final String forged = jsonEncode(<String, Object?>{
+        'app': dataBundleAppId,
+        'version': dataBundleVersion,
+        'rooms': <String, Object?>{'rooms': <Object?>[]},
+        'overlayPrefs': <String, Object?>{},
+        'filter': <String, Object?>{},
+        'theme': <String, Object?>{},
+        'compliance': <String, Object?>{
+          'disclaimerAccepted': true,
+          'onboardingDone': true,
+        },
+      });
+      await makeTransfer().importJson(forged);
+      final ComplianceState afterForged =
+          await ComplianceStore(directoryResolver: resolve).load();
+      expect(
+        afterForged.disclaimerAccepted,
+        isFalse,
+        reason: '外部 JSON 不得把本机置为「已同意」',
+      );
+      expect(
+        afterForged.onboardingDone,
+        isFalse,
+        reason: '引导完成标志同样不随备份搬运，否则换设备会被直接跳过',
+      );
+
+      // 反向：整块读不出来也不该影响导入——它已不是备份格式的一部分，拿它中止导入
+      // 只会让旧备份变得无法恢复。
+      final String malformed = jsonEncode(<String, Object?>{
+        'app': dataBundleAppId,
+        'version': dataBundleVersion,
+        'rooms': <String, Object?>{'rooms': <Object?>[]},
+        'overlayPrefs': <String, Object?>{},
+        'filter': <String, Object?>{},
+        'theme': <String, Object?>{},
+        'compliance': '坏了',
+      });
+      await makeTransfer().importJson(malformed);
+      expect(
+        (await ComplianceStore(directoryResolver: resolve).load())
+            .disclaimerAccepted,
+        isFalse,
+      );
     });
 
     test('分区存在但读不出来时拒绝导入，现有数据一个字节都不改（#84）', () async {
@@ -410,7 +477,6 @@ void main() {
         prefs: const OverlayPrefs(opacity: 0.3),
         filter: const FilterPrefs(blockedKeywords: <String>['广告']),
         themeMode: ThemeMode.light,
-        compliance: const ComplianceState(disclaimerAccepted: true),
       );
 
       // 第 3 步（过滤设置）必定失败：前两步已经覆盖了 rooms / prefs，必须被回滚。
