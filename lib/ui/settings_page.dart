@@ -555,9 +555,21 @@ class _SettingsPageState extends State<SettingsPage> {
     _snack('已清除本地凭证');
   }
 
-  /// 导出数据：读回全部本地配置 → 复制到剪贴板 → 存进公共「下载」目录 →
-  /// 弹窗告知结果。
+  /// 导出数据：二次确认 → 读回全部本地配置 → 写进公共「下载」目录 →
+  /// 弹窗告知落地位置与注意点；剪贴板改成完成后的显式选择，不再默认复制（#94）。
   Future<void> _exportData() async {
+    // 导出会把「这个人盯哪些主播」的明文档案写进公共「下载」目录，而那里所有具备存储
+    // 权限的应用与自动同步的云备份都能读到；用户通常以为「导出＝存进自己手里」，
+    // 所以先讲清外泄面再动手（同页的导入与清除凭证都已经有二次确认）。
+    final bool confirmed = await _confirm(
+      title: '导出数据',
+      content: '将生成一份明文备份文件（JSON）写入公共「下载」目录，'
+          '任何能读取该目录的应用与云备份都可能获取它。'
+          '备份包含主播列表与偏好设置，不含凭证内容。',
+      confirmText: '仍要导出',
+    );
+    if (!confirmed || !mounted) return;
+
     final String json;
     try {
       json = await _dataTransfer.exportJson();
@@ -566,7 +578,6 @@ class _SettingsPageState extends State<SettingsPage> {
       _snack('导出失败：$exception');
       return;
     }
-    await Clipboard.setData(ClipboardData(text: json));
     final String? location = await _dataTransfer.exportToDownloads(json);
     if (!mounted) return;
     await showDialog<void>(
@@ -575,14 +586,26 @@ class _SettingsPageState extends State<SettingsPage> {
         title: const Text('导出完成'),
         content: Text(
           location == null
-              ? '备份已复制到剪贴板（${json.length} 字符）。未能写入本地文件，'
-                    '可粘到任意位置自行保存。'
-              : '备份已复制到剪贴板，并另存为文件：\n$location',
+              ? '未能写入本地文件（${json.length} 字符）。'
+                    '可点「复制到剪贴板」后自行粘贴保存。'
+              : '备份文件已写入：\n$location\n\n'
+                    '备份包含主播列表与偏好设置，不含凭证内容；'
+                    '请及时删除或移入私有位置。',
         ),
         actions: <Widget>[
+          TextButton(
+            // 剪贴板是最容易被忽略的外泄通道（有焦点的窗口即可读取），所以不再默认
+            // 复制，改由用户按需点选。
+            onPressed: () {
+              unawaited(Clipboard.setData(ClipboardData(text: json)));
+              Navigator.of(context).pop();
+              _snack('已复制到剪贴板');
+            },
+            child: const Text('复制到剪贴板'),
+          ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('知道了'),
+            child: const Text('完成'),
           ),
         ],
       ),

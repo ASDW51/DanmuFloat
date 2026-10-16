@@ -353,7 +353,7 @@ void main() {
     expect(latest.focusBehavior, focusBehaviorHide);
   });
 
-  testWidgets('导出数据：复制到剪贴板并弹窗提示', (WidgetTester tester) async {
+  testWidgets('导出数据：先二次确认，落盘后剪贴板由用户显式选择（#94）', (WidgetTester tester) async {
     _useFullScreen(tester);
     final List<MethodCall> clipboardCalls = <MethodCall>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -376,10 +376,36 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    // 取消：明说「明文写进公共下载目录」之后用户反悔，则一个字节都不写、也不碰剪贴板。
     await tester.tap(find.text('导出数据'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('公共「下载」目录'), findsOneWidget);
+    expect(transfer.exportToDownloadsCalls, 0);
+    expect(clipboardCalls, isEmpty);
+
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(transfer.exportToDownloadsCalls, 0);
+    expect(clipboardCalls, isEmpty);
+    expect(find.text('导出完成'), findsNothing);
+
+    // 确认：落盘一份文件；剪贴板此时仍未被写入（#94 的核心：不再静默复制）。
+    await tester.tap(find.text('导出数据'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('仍要导出'));
     await tester.pumpAndSettle();
 
     expect(find.text('导出完成'), findsOneWidget);
+    expect(transfer.exportToDownloadsCalls, 1);
+    expect(transfer.exportToFileCalls, 0);
+    expect(find.textContaining('下载/danmu_float_backup_'), findsOneWidget);
+    expect(find.textContaining('不含凭证内容'), findsOneWidget);
+    expect(clipboardCalls, isEmpty);
+
+    // 完成弹窗里点「复制到剪贴板」才写入，并给出反馈。
+    await tester.tap(find.text('复制到剪贴板'));
+    await tester.pumpAndSettle();
+
     final MethodCall setData = clipboardCalls.firstWhere(
       (MethodCall call) => call.method == 'Clipboard.setData',
     );
@@ -387,10 +413,7 @@ void main() {
       (setData.arguments as Map<Object?, Object?>)['text'],
       transfer.exportPayload,
     );
-    // 除复制外还另存了一份文件（优先落系统公共「下载」目录）。
-    expect(transfer.exportToDownloadsCalls, 1);
-    expect(transfer.exportToFileCalls, 0);
-    expect(find.textContaining('下载/danmu_float_backup_'), findsOneWidget);
+    expect(find.text('已复制到剪贴板'), findsOneWidget);
   });
 
   testWidgets('导入数据：确认后覆盖落盘并回调外层刷新', (WidgetTester tester) async {
