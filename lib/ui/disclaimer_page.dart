@@ -44,17 +44,30 @@ class _DisclaimerPageState extends State<DisclaimerPage> {
   bool _checked = false;
   bool _submitting = false;
 
+  /// 提交同意。
+  ///
+  /// 提交标志必须**异常安全复位**（#106）：旧实现把 `_submitting = false` 放在 await 之后，
+  /// 落盘一抛异常就永远复位不了——按钮永久禁用并挂转圈，而首次启动时本页是根路由
+  /// （无返回栈），用户没有任何出口，只能杀进程。
   Future<void> _agree() async {
     setState(() => _submitting = true);
-    await widget.onAgree();
-    if (!mounted) return;
-    // 首次启动时本页是根页面（无返回栈），由外层切换到主界面；
-    // 从设置页重进时直接返回上一页。
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-      return;
+    try {
+      await widget.onAgree();
+      if (!mounted) return;
+      // 首次启动时本页是根页面（无返回栈），由外层切换到主界面；
+      // 从设置页重进时直接返回上一页。
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    } on Object catch (exception) {
+      debugPrint('提交免责声明失败: $exception');
+      if (!mounted) return;
+      // 明确告知同意没有存下来：否则用户以为已经同意，重启却又回到这一页。
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('保存失败，请重试')));
+    } finally {
+      if (mounted && _submitting) setState(() => _submitting = false);
     }
-    setState(() => _submitting = false);
   }
 
   /// 首次启动的同意区：不勾选不可继续（prd F25 硬要求）。

@@ -110,21 +110,37 @@ class _AppEntryState extends State<AppEntry> {
     });
   }
 
+  /// 记下「已同意」。
+  ///
+  /// 写失败时**不吞异常**：抛回给页面，让它复位提交标志并提示重试（#106）。这里吞掉的话
+  /// 页面会以为成功而切走，用户下次启动又回到免责声明页，且看不到任何解释。
   Future<void> _agree() async {
     // 保留引导状态：清过数据后重进也应重新看一遍引导，所以不写死 false，
     // 而是沿用本次读到的值（清除数据后已随文件一起被删掉）。
-    await _store.save(
-      ComplianceState(disclaimerAccepted: true, onboardingDone: _onboarded),
-    );
+    try {
+      await _store.save(
+        ComplianceState(disclaimerAccepted: true, onboardingDone: _onboarded),
+      );
+    } on Object catch (exception) {
+      debugPrint('保存合规状态失败: $exception');
+      rethrow;
+    }
     if (!mounted) return;
     setState(() => _accepted = true);
   }
 
   /// 首次启动引导完成（prd 4.10）。
+  ///
+  /// 同 [_agree]（#106）：落盘失败必须让引导页能复位按钮并重试。
   Future<void> _finishOnboarding() async {
-    await _store.save(
-      const ComplianceState(disclaimerAccepted: true, onboardingDone: true),
-    );
+    try {
+      await _store.save(
+        const ComplianceState(disclaimerAccepted: true, onboardingDone: true),
+      );
+    } on Object catch (exception) {
+      debugPrint('保存引导完成状态失败: $exception');
+      rethrow;
+    }
     if (!mounted) return;
     setState(() => _onboarded = true);
   }
