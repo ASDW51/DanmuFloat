@@ -71,5 +71,15 @@ void main() {
       await file.writeAsString('{broken');
       expect((await store().load()).disclaimerAccepted, isFalse);
     });
+
+    test('目录解析抛异常时按未同意处理，不把异常抛给启动链路（#86）', () async {
+      final ComplianceStore failing = ComplianceStore(
+        directoryResolver: () async =>
+            throw const FileSystemException('path_provider 通道不可用'),
+      );
+      final ComplianceState state = await failing.load();
+      expect(state.disclaimerAccepted, isFalse);
+      expect(state.onboardingDone, isFalse);
+    });
   });
 }

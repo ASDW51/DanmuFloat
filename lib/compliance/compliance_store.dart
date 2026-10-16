@@ -7,6 +7,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// 合规状态文件名。
@@ -76,11 +77,20 @@ class ComplianceStore {
     return File('${directory.path}${Platform.pathSeparator}$fileName');
   }
 
-  /// 读取合规状态；文件缺失或损坏时返回未同意。
+  /// 读取合规状态；文件缺失、内容损坏或**存储 IO 失败**时返回未同意。
+  ///
+  /// 读不出来时按「未同意」处理（#86）：既让冷启动能继续走免责声明页（宁可多问一次），
+  /// 也保证 `AppEntry` 的加载态一定会结束——异常冒泡会让界面永久停在加载圈，
+  /// 用户既进不了主界面、也看不到合规入口。
   Future<ComplianceState> load() async {
-    final File file = await _file();
-    if (!await file.exists()) return const ComplianceState();
-    return decodeComplianceState(await file.readAsString());
+    try {
+      final File file = await _file();
+      if (!await file.exists()) return const ComplianceState();
+      return decodeComplianceState(await file.readAsString());
+    } on Object catch (exception) {
+      debugPrint('读取合规状态失败，按未同意处理: $exception');
+      return const ComplianceState();
+    }
   }
 
   /// 覆盖写入合规状态。
