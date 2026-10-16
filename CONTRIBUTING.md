@@ -74,6 +74,12 @@ feat(overlay): 持久化悬浮窗位置并修复横屏吸附范围
 
 提交信息会被 [git-cliff](cliff.toml) 用于自动生成 Release Notes，因此请保持规范，否则该条提交不会出现在 changelog 中。
 
+## Issue 与标签
+
+- 提交 Issue 前请先搜索现有 Issue，避免重复；本项目是纯弹幕查看器，互动类需求一律不会实现。
+- 缺陷与功能建议各有模板（见 [.github/ISSUE_TEMPLATE](.github/ISSUE_TEMPLATE)），模板会自动带上默认标签（`bug` / `feature`），无需自行选择类型标签。
+- 标签分为**优先级 / 性质 / 区域 / 状态**四个维度，含义与判定口径见 [docs/labels.md](docs/labels.md)。其中优先级由维护者在确认问题后评估添加，贡献者不必自行判断。
+
 ## 分支与 PR 流程
 
 ### 一、外部贡献者（没有仓库写权限）
