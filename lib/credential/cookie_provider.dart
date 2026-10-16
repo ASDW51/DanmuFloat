@@ -97,12 +97,16 @@ class CookieProvider {
     String? credentialCookies,
     DateTime Function()? now,
   })  : _transport = transport ?? IoHttpTransport(),
+        _ownsTransport = transport == null,
         _credentialCookies = normalizeCredentialCookies(credentialCookies),
         _now = now ?? DateTime.now;
 
   static final Uri _entryUri = Uri.parse('https://live.douyin.com/');
 
   final HttpTransport _transport;
+
+  /// [HttpTransport] 是否由本实例自建（#95）：只有自建的才由本实例关闭。
+  final bool _ownsTransport;
   final Duration cacheTtl;
   final String userAgent;
   final DateTime Function() _now;
@@ -146,6 +150,16 @@ class CookieProvider {
   void clearCache() {
     _cachedCookies = null;
     _cachedAt = null;
+  }
+
+  /// 释放资源（#95）：清缓存，并关闭**自建**的传输层。
+  ///
+  /// 注入的 transport 归创建者管（对照仓库「谁 new 谁 close」的约定：首页 /
+  /// 弹幕页 / 栏位各自关自己 new 的那份），这里若一并关掉，会把别人还在用的
+  /// 连接池关掉。可重复调用。
+  void close() {
+    clearCache();
+    if (_ownsTransport) _transport.close();
   }
 
   Future<String> _fetchCookies() async {

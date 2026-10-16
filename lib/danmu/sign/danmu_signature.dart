@@ -3,6 +3,7 @@
 // 链路：X-MS-STUB = md5(逗号拼接的签名字段) → webmssdk.js 的 get_sign → signature
 // X-MS-STUB 与签名字段为纯算法，可离线单测；get_sign 必须由 JS 引擎执行
 // （flutter_js，Android 走 QuickJS，需真机验证）。
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -75,6 +76,12 @@ class DanmuSignatureException implements Exception {
 abstract class DanmuSigner {
   /// 按签名字段产出 signature；失败时抛 [DanmuSignatureException]。
   Future<String> sign(Map<String, String> params);
+
+  /// 释放签名器持有的引擎侧资源（#77）。
+  ///
+  /// 放在接口上是为了让调用方能够多态释放：实现类持有的 QuickJS 运行时在原生内存里，
+  /// Dart GC 回收不到，只有显式释放才会真正归还。实现应当可重复调用（幂等）。
+  FutureOr<void> dispose();
 }
 
 /// 通道 A 实现：flutter_js 执行本地打包的 webmssdk.js 的 `get_sign`。
@@ -180,6 +187,8 @@ if (typeof document === 'undefined') {
     return signature;
   }
 
+  /// 释放 QuickJS 运行时（#77）；重复调用安全，下一次 [sign] 会重新建运行时。
+  @override
   void dispose() {
     _runtime?.dispose();
     _runtime = null;

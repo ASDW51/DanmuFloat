@@ -48,6 +48,33 @@ void main() {
       expect(calls, 1, reason: 'TTL 内应命中内存缓存，不再发请求');
     });
 
+    test('close() 清缓存但不关别人的 transport（谁 new 谁 close，#95）', () async {
+      int calls = 0;
+      final FakeTransport transport = FakeTransport((Uri uri, _) async {
+        calls++;
+        return const HttpResponseData(
+          statusCode: 200,
+          body: '',
+          setCookie: <String>['ttwid=t1; Path=/'],
+        );
+      });
+      final CookieProvider provider = CookieProvider(transport: transport);
+
+      await provider.getCookies();
+      expect(calls, 1);
+
+      provider.close();
+      expect(
+        transport.closeCount,
+        0,
+        reason: '注入的 transport 归创建者管，关掉会把别人还在用的连接池关了',
+      );
+
+      // 缓存已清：下一次取要重新请求（缓存还在的话这里仍是 1 次）。
+      await provider.getCookies();
+      expect(calls, 2);
+    });
+
     test('新响应缺 ttwid 且有缓存时复用旧缓存并续期 1 小时', () async {
       int calls = 0;
       final FakeTransport transport = FakeTransport((Uri uri, _) async {

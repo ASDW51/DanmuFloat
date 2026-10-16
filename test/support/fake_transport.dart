@@ -9,6 +9,10 @@ class FakeTransport implements HttpTransport {
   final List<Uri> requests = <Uri>[];
   final List<Map<String, String>> requestHeaders = <Map<String, String>>[];
 
+  /// close 调用次数：用于验证「谁 new 谁 close」（#95）——
+  /// 注入给别人的传输不该被对方关掉，自建的才该关。
+  int closeCount = 0;
+
   @override
   Future<HttpResponseData> get(
     Uri uri, {
@@ -20,5 +24,7 @@ class FakeTransport implements HttpTransport {
   }
 
   @override
-  void close() {}
+  void close() {
+    closeCount++;
+  }
 }

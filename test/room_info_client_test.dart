@@ -225,7 +225,69 @@ void main() {
         ),
       );
     });
+    test('不传 cookieProvider 时内建实例复用同一个 transport（#95）', () async {
+      final FakeTransport transport = FakeTransport((Uri uri, _) async {
+        if (uri.path == '/') {
+          return const HttpResponseData(
+            statusCode: 200,
+            body: '',
+            setCookie: <String>['ttwid=t1; Path=/'],
+          );
+        }
+        return const HttpResponseData(statusCode: 200, body: _liveJson);
+      });
+      final RoomInfoClient client = RoomInfoClient(
+        transport: transport,
+        abogusFactory: () => _testAbogus('UA-TEST'),
+      );
+
+      await client.fetchByWebRid('123456789');
+
+      // 旧实现把构造入参 transport（默认路径下为 null）透传给内建 CookieProvider，
+      // 后者会再建一个 HttpClient：取 ttwid 那一步就跑到真实网络上去了，
+      // 这里只会看到 1 次请求。
+      expect(transport.requests, hasLength(2));
+      expect(transport.requests.first.toString(), 'https://live.douyin.com/');
+
+      client.close();
+      expect(
+        transport.closeCount,
+        0,
+        reason: '注入的 transport 归创建者管，close() 不能替别人关连接池',
+      );
+    });
+
+    test('注入的 CookieProvider 不被 close() 关闭（#95）', () async {
+      final FakeTransport transport = FakeTransport(
+        (Uri uri, _) async =>
+            const HttpResponseData(statusCode: 200, body: _liveJson),
+      );
+      final _CountingCookieProvider cookieProvider =
+          _CountingCookieProvider(credentialCookies: 'ttwid=user');
+      final RoomInfoClient client = RoomInfoClient(
+        transport: transport,
+        cookieProvider: cookieProvider,
+        abogusFactory: () => _testAbogus('UA-TEST'),
+      );
+
+      client.close();
+
+      expect(cookieProvider.closeCount, 0, reason: '注入的实例归创建者管');
+      expect(transport.closeCount, 0);
+    });
   });
+}
+
+/// 记录 close 次数的假 Cookie 提供者（#95）。
+class _CountingCookieProvider extends CookieProvider {
+  _CountingCookieProvider({super.credentialCookies});
+
+  int closeCount = 0;
+
+  @override
+  void close() {
+    closeCount++;
+  }
 }
 
 /// 确定性 ABogus（时间与随机数固定），便于断言请求 URL。

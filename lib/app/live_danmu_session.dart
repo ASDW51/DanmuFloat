@@ -84,7 +84,10 @@ class LiveDanmuSession {
     this.bufferCapacity = 500,
     this.offlineRecheckInterval = defaultOfflineRecheckInterval,
     this.maxOfflineRechecks = defaultMaxOfflineRechecks,
-  })  : _roomInfoClient = roomInfoClient ?? RoomInfoClient(),
+  })  : _ownsRoomInfoClient = roomInfoClient == null,
+        _ownsCookieProvider = cookieProvider == null,
+        _ownsSigner = signer == null,
+        _roomInfoClient = roomInfoClient ?? RoomInfoClient(),
         _cookieProvider =
             cookieProvider ?? CookieProvider(credentialCookies: credentialCookies),
         _credentialCookies = normalizeCredentialCookies(credentialCookies),
@@ -122,6 +125,14 @@ class LiveDanmuSession {
   final DanmuSocketFactory _socketFactory;
   final String Function() _userUniqueIdFactory;
   final RingBuffer<DanmakuEvent> _buffer;
+
+  /// 三处外部资源是否由本会话自建（#77 / #95）：[stop] 只释放自建的那份。
+  ///
+  /// 注入的实例归调用者管（栏位传入的 `widget.roomInfoClient`、单测的假实现），
+  /// 会话若一并关掉，会把别人还在用的连接池 / 签名器运行时关掉。
+  final bool _ownsRoomInfoClient;
+  final bool _ownsCookieProvider;
+  final bool _ownsSigner;
 
   final StreamController<LiveSessionStage> _stages =
       StreamController<LiveSessionStage>.broadcast();
@@ -288,6 +299,14 @@ class LiveDanmuSession {
   }
 
   /// 主动关闭：停止重连、取消复检并释放网络资源。
+  ///
+  /// 本方法是会话终态（[restart] 走 [_teardownConnection] 而不是这里，会话仍要复用），
+  /// 因此除断开连接外还要归还**本会话自建**的外部资源：
+  /// - 签名器的 QuickJS 运行时（#77）：它占的是原生内存，Dart GC 回收不到；
+  /// - 自建的 [RoomInfoClient] / [CookieProvider]（#95）：各自持有一个 HttpClient
+  ///   连接池，栏位每次重绑都会换一个新会话，不关就是每次泄漏一个连接池。
+  ///
+  /// 注入的实例不在此关闭——谁 new 谁 close（与首页 / 栏位 / 弹幕页的既有约定一致）。
   Future<void> stop() async {
     if (_stopped) return;
     _stopped = true;
@@ -296,6 +315,9 @@ class LiveDanmuSession {
     _setStage(LiveSessionStage.idle);
     await _stages.close();
     await _danmu.close();
+    if (_ownsSigner) await _signer.dispose();
+    if (_ownsRoomInfoClient) _roomInfoClient.close();
+    if (_ownsCookieProvider) _cookieProvider.close();
   }
 
   /// 断开当前连接并取消订阅，保留会话流（供 [restart] 复用）。
