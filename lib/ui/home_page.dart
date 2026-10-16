@@ -140,6 +140,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   List<ManagedRoom> _rooms = const <ManagedRoom>[];
   bool _loading = true;
 
+  /// 主播列表文件读不出来时的常驻提示（#82）。
+  ///
+  /// 与「列表为空」严格区分：空列表是正常状态，而文件损坏必须让用户知道
+  /// 「原文件还在、别继续添主播把新列表当成全部数据」。null 表示一切正常。
+  String? _roomsLoadWarning;
+
+  /// 损坏文件连副本都没留住时暂停保存：否则下一次保存会覆盖唯一一份原始数据（#82）。
+  bool _roomsSaveBlocked = false;
+
   /// 正在刷新房间信息的直播间号（行内按钮转圈用）。
   final Set<String> _refreshing = <String>{};
 
@@ -315,7 +324,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         _autoRefreshing.removeAll(stale);
       }
     }
-    await _store.save(_rooms);
+    await _persistRooms(_rooms);
     if (!mounted) return;
     _syncOverlayRooms();
   }
@@ -408,13 +417,46 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 读取本地保存的主播（首次打开与下拉刷新都走这里）。
   Future<void> _load() async {
-    final List<ManagedRoom> rooms = await _store.load();
+    final RoomLoadResult result = await _store.loadResult();
     if (!mounted) return;
     setState(() {
-      _rooms = rooms;
+      _rooms = result.rooms;
       _loading = false;
+      _applyRoomsResult(result);
     });
     _syncCredentialBindings();
+  }
+
+  /// 记录一次读取结果：损坏时给出可操作提示，留存失败时进一步暂停保存（#82）。
+  void _applyRoomsResult(RoomLoadResult result) {
+    _roomsLoadWarning = _roomsWarningFor(result);
+    _roomsSaveBlocked = result.corrupted && result.backupPath == null;
+  }
+
+  /// 读取结果 → 常驻提示文案；正常时返回 null（#82）。
+  ///
+  /// 提示里必须给出去哪儿找回原文件，只说「读取失败」等于让用户干着急。
+  String? _roomsWarningFor(RoomLoadResult result) {
+    if (!result.corrupted) return null;
+    final String? backupPath = result.backupPath;
+    if (backupPath == null) {
+      return '主播列表文件损坏且未能留存副本，已暂停保存以免覆盖；'
+          '请先在设置页导出备份，原文件仍是应用目录下的 ${_store.fileName}';
+    }
+    return '主播列表文件损坏，原文件已留存副本（${backupPath.split(Platform.pathSeparator).last}），'
+        '当前列表显示为空；如需找回请从备份导入，不要直接继续添加';
+  }
+
+  /// 落盘主播列表；损坏且没能留存副本时拒绝写入（#82）。
+  ///
+  /// 留存成功时原始字节已安全躺在 `.bad` 副本里，继续写不会丢数据；
+  /// 留存失败时原文件还在原路径，再写一次就真的没了。
+  Future<void> _persistRooms(List<ManagedRoom> rooms) async {
+    if (_roomsSaveBlocked) {
+      _snack('原主播列表未能留存副本，已暂停保存以免覆盖；请先在设置页导出备份');
+      return;
+    }
+    await _store.save(rooms);
   }
 
   /// 读回已配置的凭证列表，并重建「主播 → 凭证」绑定。
@@ -566,14 +608,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 导入数据后重新读回全部本地数据，并把最新样式 / 过滤 / 尺寸 / 候选房间
   /// 推给已开着的悬浮窗（不重发 config，避免冲掉栏内已绑定的房间）。
   Future<void> _reloadAfterImport() async {
-    final List<ManagedRoom> rooms = await _store.load();
+    final RoomLoadResult rooms = await _store.loadResult();
     final OverlayPrefs prefs = await _prefsStore.load();
     final FilterPrefs filter = await _filterStore.load();
     final ThemeMode themeMode = await _themeStore.load();
     if (!mounted) return;
     appThemeMode.value = themeMode;
     setState(() {
-      _rooms = rooms;
+      _rooms = rooms.rooms;
+      _applyRoomsResult(rooms);
       _prefs = prefs;
       _filter = filter;
       _prefsReady = true;
@@ -610,6 +653,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     appThemeMode.value = ThemeMode.system;
     setState(() {
       _rooms = const <ManagedRoom>[];
+      _roomsLoadWarning = null;
+      _roomsSaveBlocked = false;
       _prefs = const OverlayPrefs();
       _filter = const FilterPrefs();
       _credentials = const <CredentialProfile>[];
@@ -630,7 +675,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     final List<ManagedRoom> next = <ManagedRoom>[..._rooms, room];
     setState(() => _rooms = next);
-    await _store.save(next);
+    await _persistRooms(next);
     _syncOverlayRooms();
     // 新加的主播还没有主播名与开播状态，顺手刷一次让行内立刻可读。
     unawaited(_refreshRoom(room.webRid));
@@ -641,7 +686,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         .where((ManagedRoom item) => item.webRid != room.webRid)
         .toList(growable: false);
     setState(() => _rooms = next);
-    await _store.save(next);
+    await _persistRooms(next);
     // 主播被移除后它绑定的凭证不再有任何作用，重建一次绑定以免留下悬挂项。
     _syncCredentialBindings();
     // 正在悬浮窗里显示的主播要先把它的栏位卸掉（PM-002），再推候选列表。
@@ -708,7 +753,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         )
         .toList(growable: false);
     setState(() => _rooms = next);
-    await _store.save(next);
+    await _persistRooms(next);
     _syncOverlayRooms();
     if (mounted) _snack(group.isEmpty ? '已移出分组' : '已归入「$group」');
   }
@@ -739,7 +784,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         )
         .toList(growable: false);
     setState(() => _rooms = next);
-    await _store.save(next);
+    await _persistRooms(next);
     _syncCredentialBindings();
     if (!mounted) return;
     _snack(anonymous ? '已改为匿名自动获取' : '已指定凭证，下次连接生效');
@@ -809,7 +854,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         .map((ManagedRoom item) => item.webRid == webRid ? target : item)
         .toList(growable: false);
     setState(() => _rooms = next);
-    if (persist) await _store.save(next);
+    if (persist) await _persistRooms(next);
     return null;
   }
 
@@ -851,7 +896,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     if (!mounted) return;
     // 整批刷完只落盘一次：逐条写会把 rooms.json 写 N 次，慢且更容易留下半批数据（UX-11）。
-    await _store.save(_rooms);
+    await _persistRooms(_rooms);
     if (!mounted) return;
     setState(() => _refreshAllRunning = false);
     _syncOverlayRooms();
@@ -1020,6 +1065,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         children: <Widget>[
           if (_overlayPermissionDenied && !_overlayVisible)
             _buildPermissionBanner(),
+          // 数据是否还在比权限更要紧，排在权限提示之后、进度条之前（#82）。
+          if (_roomsLoadWarning != null) _buildRoomsLoadWarning(),
           if (_refreshAllRunning) _buildRefreshAllProgress(),
           Expanded(child: _buildBody()),
         ],
@@ -1080,6 +1127,39 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       );
 
+  /// 主播列表文件损坏时的常驻提示（#82）。
+  ///
+  /// 与权限 banner 同样用普通容器：这条提示直接关系到用户数据是否还在，
+  /// 不能让后续 SnackBar 顶掉；文案本身已给出找回副本与导出备份的出路。
+  Widget _buildRoomsLoadWarning() => Material(
+        color: Colors.red.shade50,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.error_outline, color: Colors.red.shade900),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _roomsLoadWarning ?? '',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+              TextButton(
+                onPressed: _openSettings,
+                child: const Text('去设置'),
+              ),
+              // 留存失败时不给「知道了」：保存仍被暂停，提示必须一直在（#82）。
+              if (!_roomsSaveBlocked)
+                TextButton(
+                  onPressed: () => setState(() => _roomsLoadWarning = null),
+                  child: const Text('知道了'),
+                ),
+            ],
+          ),
+        ),
+      );
+
   Widget _buildBody() {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_rooms.isEmpty) {
@@ -1097,7 +1177,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     const Text('还没有主播'),
                     const SizedBox(height: 8),
                     Text(
-                      '点击右上角 + 添加直播间号 / 链接 / 抖音号',
+                      // 文件损坏时列表为空是「读不出来」而不是「真没有」，此时再引导
+                      // 用户添加等于坐实数据丢失（#82）。
+                      _roomsLoadWarning != null
+                          ? '主播列表读取失败，请先按上方提示处理，暂不要添加新主播'
+                          : '点击右上角 + 添加直播间号 / 链接 / 抖音号',
                       style: TextStyle(
                         color: secondaryTextColor(Theme.of(context).brightness),
                         fontSize: 12,

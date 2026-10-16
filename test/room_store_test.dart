@@ -115,12 +115,25 @@ void main() {
       expect(decoded.last.lastRefreshedAt, isNull);
     });
 
-    test('空内容、非 JSON、结构不符一律按空列表处理', () {
+    test('空内容、非 JSON、结构不符一律按空列表处理（备份导入用的宽松口径）', () {
       expect(decodeRooms(''), isEmpty);
       expect(decodeRooms('   '), isEmpty);
       expect(decodeRooms('{oops'), isEmpty);
       expect(decodeRooms('[]'), isEmpty);
       expect(decodeRooms('{"rooms":{}}'), isEmpty);
+    });
+
+    test('坏输入能被识别为「损坏」而不是「空列表」（#82）', () {
+      // 宽松口径把这几类都当空列表；严格口径必须报损坏，否则调用方无法把
+      // 「文件读不出来」与「真的没有主播」分开，下一次保存就会覆盖原件。
+      expect(tryDecodeRooms(''), isNull);
+      expect(tryDecodeRooms('   '), isNull);
+      expect(tryDecodeRooms('{oops'), isNull);
+      expect(tryDecodeRooms('{"rooms": ['), isNull);
+      expect(tryDecodeRooms('[]'), isNull);
+      expect(tryDecodeRooms('{"rooms":{}}'), isNull);
+      // 合法但列表为空是正常状态，不能算损坏。
+      expect(tryDecodeRooms('{"rooms":[]}'), isEmpty);
     });
 
     test('列表里的坏记录被跳过，好记录保留', () {
@@ -164,6 +177,105 @@ void main() {
       final File file = File('${directory.path}${Platform.pathSeparator}$roomStoreFileName');
       await file.writeAsString('{broken');
       expect(await store().load(), isEmpty);
+    });
+
+    test('文件不存在时不算损坏（首次启动的正常路径）', () async {
+      final RoomLoadResult result = await store().loadResult();
+      expect(result.rooms, isEmpty);
+      expect(result.corrupted, isFalse);
+      expect(result.backupPath, isNull);
+    });
+
+    test('文件损坏时报告损坏，并把原文件留存为 .bad 而不是留原地被覆盖（#82）', () async {
+      final File file = File('${directory.path}${Platform.pathSeparator}$roomStoreFileName');
+      await file.writeAsString('{broken');
+
+      final RoomLoadResult result = await store().loadResult();
+
+      expect(result.corrupted, isTrue, reason: '损坏必须与「列表为空」区分');
+      expect(result.rooms, isEmpty);
+      expect(result.backupPath, endsWith('$roomStoreFileName.bad'));
+      // 原件必须被移走：留在原地会在下一次保存时被覆盖，等于没保住。
+      expect(await file.exists(), isFalse);
+      expect(await File(result.backupPath!).readAsString(), '{broken');
+    });
+
+    test('已有留存件时新损坏件带时间戳，不覆盖上一份（#82）', () async {
+      final File file = File('${directory.path}${Platform.pathSeparator}$roomStoreFileName');
+      final File previous = File('${file.path}$roomStoreCorruptSuffix');
+      await previous.writeAsString('上一份坏文件');
+      await file.writeAsString('{broken-again');
+
+      final RoomLoadResult result = await store().loadResult();
+
+      expect(result.corrupted, isTrue);
+      expect(result.backupPath, isNot(previous.path));
+      expect(await previous.readAsString(), '上一份坏文件');
+      expect(await File(result.backupPath!).readAsString(), '{broken-again');
+    });
+
+    test('save 成功后不残留临时文件（#82）', () async {
+      await store().save(<ManagedRoom>[_room()]);
+      final List<String> names = directory
+          .listSync()
+          .map((FileSystemEntity e) => e.uri.pathSegments.last)
+          .toList();
+      expect(names, <String>[roomStoreFileName]);
+    });
+
+    test('写入中途失败时原文件保持不变（#82）', () async {
+      final File file = File('${directory.path}${Platform.pathSeparator}$roomStoreFileName');
+      await store().save(<ManagedRoom>[_room()]);
+      final String before = await file.readAsString();
+
+      // 用同名目录占住临时文件路径，让「写临时文件」这一步必然失败。
+      final Directory blocker = Directory(
+        '${directory.path}${Platform.pathSeparator}.$roomStoreFileName.tmp',
+      );
+      await blocker.create();
+
+      await expectLater(
+        store().save(<ManagedRoom>[_room(webRid: '999')]),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      // 原子写的全部意义：写不进去就保持旧文件，绝不出现半截新文件。
+      expect(await file.readAsString(), before, reason: '写入失败不能动原文件');
+      expect((await store().load()).single.webRid, '735');
+    });
+
+    test('rename 失败时抛出并清理临时文件（#82）', () async {
+      final File file = File('${directory.path}${Platform.pathSeparator}$roomStoreFileName');
+      final Directory blocker = Directory(file.path);
+      await blocker.create();
+
+      await expectLater(
+        store().save(<ManagedRoom>[_room()]),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      expect(await blocker.exists(), isTrue, reason: '失败不能碰坏目标');
+      final List<String> leftovers = directory
+          .listSync()
+          .map((FileSystemEntity e) => e.uri.pathSegments.last)
+          .where((String name) => name.endsWith('.tmp'))
+          .toList();
+      expect(leftovers, isEmpty, reason: '半截临时文件要清掉，不能越积越多');
+    });
+
+    test('clear 连留存件一起删，不留下主播列表明文（#82）', () async {
+      final File file = File('${directory.path}${Platform.pathSeparator}$roomStoreFileName');
+      await file.writeAsString('{broken');
+      final String? backupPath = (await store().loadResult()).backupPath;
+      expect(backupPath, isNotNull);
+      final File tmp = File('${directory.path}${Platform.pathSeparator}.$roomStoreFileName.tmp');
+      await tmp.writeAsString('半截');
+
+      await store().clear();
+
+      expect(await file.exists(), isFalse);
+      expect(await File(backupPath!).exists(), isFalse);
+      expect(await tmp.exists(), isFalse);
     });
   });
 }

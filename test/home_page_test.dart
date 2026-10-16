@@ -982,4 +982,55 @@ void main() {
     await tester.pump(const Duration(seconds: 10));
     await tester.pump(const Duration(seconds: 1));
   });
+
+  testWidgets('主播列表文件损坏时给出留存提示，不把空列表当正常状态（#82）',
+      (WidgetTester tester) async {
+    final Directory dir =
+        Directory.systemTemp.createTempSync('danmu_float_home_corrupt');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final String roomsPath =
+        '${dir.path}${Platform.pathSeparator}$roomStoreFileName';
+    await tester.runAsync(() async {
+      // 半截 JSON：写入中断最容易留下的形态，旧代码会当成「没有主播」。
+      await File(roomsPath).writeAsString('{broken');
+      await OverlayPrefsStore(directoryResolver: () async => dir)
+          .save(const OverlayPrefs());
+    });
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: false);
+
+    await tester.pumpWidget(MaterialApp(
+      home: HomePage(
+        directoryResolver: () async => dir,
+        credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
+      ),
+    ));
+    await _pumpUntil(
+      tester,
+      () => find.textContaining('主播列表文件损坏').evaluate().isNotEmpty,
+    );
+
+    expect(find.textContaining('主播列表文件损坏'), findsOneWidget);
+    expect(
+      find.text('主播列表读取失败，请先按上方提示处理，暂不要添加新主播'),
+      findsOneWidget,
+      reason: '损坏导致的空列表不能引导用户继续添加，否则等于坐实数据丢失',
+    );
+    // 原始字节必须已经被留存下来，不能被后续任何一次保存覆盖（#82 的不可逆点）。
+    final bool backupExists = await tester.runAsync(
+          () => File('$roomsPath$roomStoreCorruptSuffix').exists(),
+        ) ??
+        false;
+    final String? backupContent = await tester.runAsync(
+      () => File('$roomsPath$roomStoreCorruptSuffix').readAsString(),
+    );
+    expect(backupExists, isTrue, reason: '坏文件要先留存再返回空列表');
+    expect(backupContent, '{broken', reason: '留存件必须是损坏前的原始字节');
+    expect(await tester.runAsync(() => File(roomsPath).exists()), isFalse);
+
+    // 排掉 initState 里悬浮窗状态探测的 1s 延时（_overlayAliveProbeDelay），
+    // 否则用例结束时会因悬挂定时器报「Pending timers」。
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(seconds: 2));
+  });
 }
