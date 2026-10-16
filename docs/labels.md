@@ -44,6 +44,7 @@
 
 | 标签 | 颜色 | 含义 |
 | --- | --- | --- |
+| `needs-human-triage` | `#f9d0c4` | **新建 Issue 的默认状态**：等待维护者人工分诊、定级与分配。还带着它 = 还没打算交给 Agent，Agent 完全无视；由维护者分诊后摘除，并在 `agent:ready` / `agent:skip` / `agent:needs-review` 之间流转 |
 | `待验证` | `#fef2c0` | 结论来自静态代码审查，尚未通过测试或真机确认。确认（或证伪）后请**移除**该标签，避免它长期挂在已确认的 Issue 上 |
 
 另有一组**面向 Agent 的流转标签**（`agent:ready` / `agent:skip` / `agent:needs-review` /
@@ -66,10 +67,13 @@
 
 | 模板 | 文件 | 默认标签 |
 | --- | --- | --- |
-| 缺陷报告 | `.github/ISSUE_TEMPLATE/bug_report.yml` | `bug` |
-| 功能建议 | `.github/ISSUE_TEMPLATE/feature_request.yml` | `feature` |
+| 缺陷报告 | `.github/ISSUE_TEMPLATE/bug_report.yml` | `bug`、`needs-human-triage` |
+| 功能建议 | `.github/ISSUE_TEMPLATE/feature_request.yml` | `feature`、`needs-human-triage` |
 
-模板只会自动带上这两个标签；优先级、性质、区域由维护者在确认后补加。
+模板只会自动带上这些标签；优先级、性质、区域由维护者在确认后补加。
+`needs-human-triage` 是「还没分诊」的显式标记：**任何新建 Issue 都先带着它**，
+等维护者定级、加区域、决定是否交给 Agent 之后再摘掉——这样「待分配」在列表里可见，
+不会被误当成已分派的 Issue。Agent 用 `gh issue create` 代提 Issue 时也必须显式带上它。
 
 ## 七、维护命令
 
@@ -81,6 +85,8 @@ gh label list --repo ASDW51/DanmuFloat --limit 100
 
 # 新建 / 改名（改名会同步更新所有已打该标签的 Issue）
 gh label create "P2 · 中" --color fbca04 --description "边界场景、健壮性、性能与一致性问题"
+gh label create needs-human-triage --color f9d0c4 \
+  --description "新建 Issue 的默认状态：等待维护者人工分诊、定级与分配（Agent 不处理）"
 gh label edit enhancement --name feature
 
 # 给 Issue 打标签 / 移除
