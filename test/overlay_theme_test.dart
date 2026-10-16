@@ -36,7 +36,7 @@ List<int> _argbOf(OverlayPalette palette) => <int>[
 ];
 
 void main() {
-  test(悬浮窗运行时调色板初值取自主题预设，且与旧常量逐位相等, () {
+  test('悬浮窗运行时调色板初值取自主题预设，且与旧常量逐位相等', () {
     // 旧常量还在文件里，很容易被当成「拿调色板」的入口；这条钉子把运行时初值
     // 钉在主题产出上，同时保证默认外观零突变（与旧常量逐位相等）。
     final OverlayPalette initial = overlayPaletteNotifier.value;
