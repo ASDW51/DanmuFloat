@@ -18,8 +18,11 @@ Issue 才可以自动开工；带 `agent:read-comments` 的必须先读评论区
 | `agent:in-progress` | `#1D76DB` | 正在处理中（防止并发重复） | 其他 Agent 跳过 |
 | `agent:done` | `#8250DF` | 已处理完成 | 不再读取 |
 | `agent:read-comments` | `#0F766E` | 修复注意点在评论区 | 读取时**强制**拉取 comments 字段 |
+| `needs-human-triage` | `#F9D0C4` | 新建 Issue 的默认状态：等待维护者人工分诊与分配 | 视为**未分诊**，完全无视 |
 
 `agent:read-comments` 是**修饰标签**：它自己不代表可处理，也不会让一个 `skip` 的 Issue 变成可处理。
+`needs-human-triage` 不是 `agent:*` 一族：它标记的是「**还没分诊**」，由维护者分诊后摘除，
+再决定加 `agent:ready` / `agent:skip` / `agent:needs-review`。
 
 ## 二、判定顺序（多个标签并存时按此裁决）
 
@@ -28,7 +31,9 @@ Issue 才可以自动开工；带 `agent:read-comments` 的必须先读评论区
 3. `agent:in-progress` —— 已有 Agent 在做，跳过（避免重复改动互相踩）；
 4. `agent:done` —— 已完结，不再读取；
 5. `agent:ready` —— 可以开工；
-6. **无任何 `agent:*` 标签 → 完全无视**：不入队、不处理、也不留提示（未分诊的 Issue 视为
+6. 只有 `needs-human-triage`（没有任何 `agent:*`）—— **完全无视**：这是新建 Issue 的默认状态，
+   等维护者分诊后摘掉它并补上 `agent:*`；
+7. **无任何 `agent:*` 标签 → 完全无视**：不入队、不处理、也不留提示（未分诊的 Issue 视为
    还没打算交给 Agent，等人工补标签即可；见第九节决策 1）。
 
 裁决顺序存在的意义：标签是人工随手加的，冲突一定会发生（例如先标 `ready` 后来又发现要
@@ -41,10 +46,12 @@ Issue 才可以自动开工；带 `agent:read-comments` 的必须先读评论区
 | --- | --- | --- |
 | `agent:ready`、`agent:skip`、`agent:needs-review`、`agent:read-comments` | 维护者（人工） | 分诊 Issue 时 |
 | `agent:in-progress`、`agent:done` | Agent | 开工时 / 完成时 |
+| `needs-human-triage` | 模板自动带上（Agent 代提 Issue 时由 Agent 显式带上） | 新建 Issue；**由维护者摘除** |
 
 - Agent **不得**自行把 Issue 标成 `ready`（否则等于自己给自己派活，人工分诊失效）；
-- Agent **不得**擅自移除人工设置的 `skip` / `needs-review` / `done`（发现判断有误时，留评论
-  交回人工）；
+- Agent **不得**擅自移除人工设置的 `skip` / `needs-review` / `done`，也不得摘除
+  `needs-human-triage`（摘掉它等于自行认定「已分诊」）；
+- Agent 用 `gh issue create` 新建 Issue 时**必须**带 `--label needs-human-triage`；
 - 处理结束必须摘掉 `agent:in-progress`（它是租约，不是历史记录）。
 
 ## 四、标准流程
@@ -75,12 +82,23 @@ gh issue view <n> --repo "$R" --json labels --jq '[.labels[].name]|join(",")'
 # 4) 仅当带 agent:read-comments 时：读全评论区
 gh issue view <n> --repo "$R" --comments
 
+# 4') 新建 Issue（Agent 代提时）：必须带 needs-human-triage，等维护者分诊
+gh issue create --repo "$R" --label "needs-human-triage" --title "…" --body "…"
+
 # 5) 收尾（成功）
 gh issue edit <n> --repo "$R" --add-label "agent:done" --remove-label "agent:in-progress"
 
-# 5') 收尾（失败 / 阻塞 / 需要人工决策）
-gh issue comment <n> --repo "$R" --body "阻塞原因：…（已尝试 …，建议 …）"
+# 5') 收尾（失败 / 阻塞 / 需要人工决策）；评论必须以 Agent 标识开头（第六节第 10 条）
+gh issue comment <n> --repo "$R" --body "$MARK
+
+阻塞原因：…（已尝试 …，建议 …）"
 gh issue edit <n> --repo "$R" --add-label "agent:needs-review" --remove-label "agent:in-progress"
+```
+
+其中 `MARK` 是统一的评论标识，动手前先定义好，之后所有 Issue / PR 评论都复用它：
+
+```bash
+MARK='> 🤖 **本条评论由 Agent 自动生成**（非维护者人工回复），请以维护者后续结论为准。'
 ```
 
 ## 五、并发保护：为什么必须「先标后干」
@@ -125,6 +143,16 @@ gh issue edit <n> --repo "$R" --remove-label "agent:in-progress"
    表达，再叠一套标签只会与 Issue 的语义混淆。
 9. **`done` 之后不自动返工**（第九节决策 5）：复查发现问题时由维护者摘掉 `done` 并重新标
    `ready`，不新增 `agent:reopen`；Agent 不得自行摘 `done`。
+10. **评论必须标明「来自 Agent」**：Agent 在 Issue / PR 上留下的每一条评论（含 PR review），
+    正文第一行固定写下面这行标识，方便维护者一眼区分人工结论与自动结论：
+
+    ```markdown
+    > 🤖 **本条评论由 Agent 自动生成**（非维护者人工回复），请以维护者后续结论为准。
+    ```
+
+    缺这行标识的评论**不要发**（宁可合并到上一条带标识的评论里）。标识只表明来源，不改内容。
+11. **新建 Issue 必须带 `needs-human-triage`**：见第三节。Agent 不自建标签、不自行摘除该标签；
+    若目标仓库还没有这个标签，先按 [docs/labels.md](labels.md) 第七节的命令建好再用。
 
 ## 七、完成的定义
 
@@ -133,6 +161,7 @@ gh issue edit <n> --repo "$R" --remove-label "agent:in-progress"
 - 有对应 PR，且 PR 正文写了 `Closes #<n>`（或 `Fixes #<n>`）；
 - PR 上的 CI（`flutter analyze` + `flutter test`）**绿**；
 - 若原 Issue 带 `待验证` 标签：只有在测试或真机确认后才移除它（没验证就留着）；
+- 收尾评论（说明改了什么 / 为什么保留 `待验证`）**必须带第六节第 10 条的 Agent 标识**；
 - 收尾标签：`+agent:done` / `-agent:in-progress`。
 
 ## 八、与其它标签维度的配合
@@ -142,6 +171,7 @@ gh issue edit <n> --repo "$R" --remove-label "agent:in-progress"
 | 优先级 `P0`–`P3` | 决定处理顺序；`P0 · 紧急` 应立即处理或先回人工 |
 | 性质（`性能` / `健壮性` / `数据完整性` / `测试` / `隐私与合规`） | 决定要注意的点；`隐私与合规` 直接转人工 |
 | 区域（`区域: …`） | 决定先读哪些目录，缩小检索范围 |
+| `needs-human-triage` | 未分诊标记：带着它就**不入队**，等维护者摘除并补 `agent:*` |
 | `待验证` | 参与完成定义（第七节） |
 | `good first issue` | 说明改动面小，适合新手或轻量 Agent |
 
