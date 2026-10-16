@@ -107,15 +107,27 @@ class RoomInfoClient {
     Abogus Function()? abogusFactory,
     this.requestTimeout = defaultRoomInfoTimeout,
   })  : _transport = transport ?? IoHttpTransport(),
-        _cookieProvider =
-            cookieProvider ?? CookieProvider(transport: transport),
-        _abogusFactory = abogusFactory ?? Abogus.new;
+        _ownsTransport = transport == null,
+        _ownsCookieProvider = cookieProvider == null,
+        _abogusFactory = abogusFactory ?? Abogus.new {
+    // 内建 CookieProvider 复用同一个 transport（#95）。旧写法把**构造入参** transport
+    // （默认路径下为 null）透传下去，CookieProvider 会自己再建一个 —— 一次
+    // `RoomInfoClient()` 就落地两个 HttpClient 与两份连接池，且其中一个无人关闭。
+    _cookieProvider = cookieProvider ?? CookieProvider(transport: _transport);
+  }
 
   static const String _enterPath = '/webcast/room/web/enter/';
 
   final HttpTransport _transport;
-  final CookieProvider _cookieProvider;
+  late final CookieProvider _cookieProvider;
   final Abogus Function() _abogusFactory;
+
+  /// [HttpTransport] / [CookieProvider] 是否由本实例自建（#95）。
+  ///
+  /// 注入的那份归创建者管（对照首页 `_roomInfoClient`、栏位 `widget.roomInfoClient`
+  /// 的「谁 new 谁 close」约定），[close] 不能替别人关连接池。
+  final bool _ownsTransport;
+  final bool _ownsCookieProvider;
 
   /// 接口超时阈值（测试注入更短的值）。
   final Duration requestTimeout;
@@ -164,7 +176,14 @@ class RoomInfoClient {
     }
   }
 
-  void close() => _transport.close();
+  /// 释放自建资源（#95）：内建 [CookieProvider] 与自建传输。
+  ///
+  /// 注入的实例一律不动——它们由创建者负责关闭（首页自建自关；栏位 / 会话里注入的
+  /// 假实现归测试管）。可重复调用。
+  void close() {
+    if (_ownsCookieProvider) _cookieProvider.close();
+    if (_ownsTransport) _transport.close();
+  }
 }
 
 Map<String, dynamic>? _asMap(Object? value) {

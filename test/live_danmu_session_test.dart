@@ -16,6 +16,14 @@ class FakeRoomInfoClient extends RoomInfoClient {
   final RoomInfo result;
   Object? error;
 
+  /// close 调用次数：注入的实例不该被会话关闭（#95「谁 new 谁 close」）。
+  int closeCount = 0;
+
+  @override
+  void close() {
+    closeCount++;
+  }
+
   /// 非空时请求挂起，直到测试放行：用于观察「请求已发出、还没回来」的中间态。
   Completer<RoomInfo>? gate;
   final List<String> calls = <String>[];
@@ -59,11 +67,19 @@ class FakeCookieProvider extends CookieProvider {
   Object? error;
   int calls = 0;
 
+  /// close 调用次数：注入的实例不该被会话关闭（#95）。
+  int closeCount = 0;
+
   @override
   Future<String> getCookies() async {
     calls++;
     if (error != null) throw error!;
     return 'ttwid=t1';
+  }
+
+  @override
+  void close() {
+    closeCount++;
   }
 }
 
@@ -74,11 +90,19 @@ class FakeSigner implements DanmuSigner {
   Object? error;
   Map<String, String>? lastParams;
 
+  /// dispose 调用次数：自建的签名器要被释放、注入的不该被释放（#77）。
+  int disposeCount = 0;
+
   @override
   Future<String> sign(Map<String, String> params) async {
     lastParams = params;
     if (error != null) throw error!;
     return signature;
+  }
+
+  @override
+  FutureOr<void> dispose() {
+    disposeCount++;
   }
 }
 
@@ -625,6 +649,86 @@ void main() {
           reason: '$stage 阶段不该出现重试入口',
         );
       }
+    });
+  });
+
+  group('会话终态释放外部资源（#77 / #95）', () {
+    /// 用假 socket 建一个只连一次就能跑完 start 的会话。
+    LiveDanmuSession buildWithFakes({
+      required FakeRoomInfoClient client,
+      required FakeCookieProvider cookieProvider,
+      required FakeSigner signer,
+    }) =>
+        LiveDanmuSession(
+          webRid: '12345',
+          roomInfoClient: client,
+          cookieProvider: cookieProvider,
+          signer: signer,
+          socketFactory: ({
+            required String liveId,
+            required String userUniqueId,
+            required String signature,
+            required String cookies,
+          }) =>
+              FakeSocket(
+            liveId: liveId,
+            userUniqueId: userUniqueId,
+            signature: signature,
+            cookies: cookies,
+          ),
+        );
+
+    test('stop() 不关注入的客户端 / Cookie 提供者 / 签名器（谁 new 谁 close）', () async {
+      final FakeRoomInfoClient client = FakeRoomInfoClient(_livingRoom());
+      final FakeCookieProvider cookieProvider = FakeCookieProvider();
+      final FakeSigner signer = FakeSigner();
+      final LiveDanmuSession session = buildWithFakes(
+        client: client,
+        cookieProvider: cookieProvider,
+        signer: signer,
+      );
+
+      await session.start();
+      await session.stop();
+
+      // 注入的实例归调用者管（栏位传入的 roomInfoClient、单测的假实现）：
+      // 会话若顺手关掉，会把别人还在用的连接池 / 签名器关掉。
+      expect(client.closeCount, 0);
+      expect(cookieProvider.closeCount, 0);
+      expect(signer.disposeCount, 0);
+    });
+
+    test('restart() 是复用路径，不释放资源；只有 stop() 才是终态', () async {
+      final FakeRoomInfoClient client = FakeRoomInfoClient(_livingRoom());
+      final FakeCookieProvider cookieProvider = FakeCookieProvider();
+      final FakeSigner signer = FakeSigner();
+      final LiveDanmuSession session = buildWithFakes(
+        client: client,
+        cookieProvider: cookieProvider,
+        signer: signer,
+      );
+
+      await session.start();
+      await session.restart();
+
+      expect(signer.disposeCount, 0, reason: '重试后会话还要继续用');
+      expect(client.closeCount, 0);
+      expect(cookieProvider.closeCount, 0);
+
+      await session.stop();
+    });
+
+    test('自建资源的会话 stop() 能正常走完释放路径（#77 / #95）', () async {
+      // 不注入任何外部资源：会话自建 RoomInfoClient / CookieProvider / 签名器，
+      // 这条路径上 stop() 会真的去 close / dispose（自建的 HttpClient 会在这里被关），
+      // 不能抛异常——否则栏位 dispose 时会崩。不 start，避免真网络请求。
+      final LiveDanmuSession session = LiveDanmuSession(webRid: '12345');
+
+      await session.stop();
+
+      expect(session.stage, LiveSessionStage.idle);
+      // stop() 幂等：栏位 dispose 与显式关闭可能都会调到。
+      await session.stop();
     });
   });
 }
