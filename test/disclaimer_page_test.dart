@@ -102,4 +102,53 @@ void main() {
       reason: 'prd F25 硬要求：未勾选不可进入主界面',
     );
   });
+
+  testWidgets('同意回调失败时复位按钮并提示重试，不静默卡死（#106）', (WidgetTester tester) async {
+    int calls = 0;
+    bool failing = true;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DisclaimerPage(
+          onAgree: () async {
+            calls++;
+            if (failing) throw StateError('磁盘已满');
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('我已阅读并同意上述声明'));
+    await tester.pump();
+    await tester.tap(find.text('同意并继续'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(calls, 1);
+    expect(
+      find.text('保存失败，请重试'),
+      findsOneWidget,
+      reason: '同意没写进磁盘要明说，否则用户以为已同意、重启却又回到本页',
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '同意并继续'))
+          .onPressed,
+      isNotNull,
+      reason: '提交标志必须异常安全复位，否则按钮永久禁用并挂转圈（首启时本页无返回栈）',
+    );
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    // 重试：写盘恢复后应能正常提交，不必重新勾选。
+    failing = false;
+    await tester.tap(find.text('同意并继续'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(calls, 2);
+    expect(
+      find.byType(CircularProgressIndicator),
+      findsNothing,
+      reason: '提交成功后也要把转圈收掉（首启时本页是根路由，无返回栈）',
+    );
+  });
 }

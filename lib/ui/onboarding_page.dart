@@ -98,12 +98,22 @@ class _OnboardingPageState extends State<OnboardingPage>
 
   Future<void> _openAppSettings() => systemPermissions.openAppSettings();
 
+  /// 「完成 / 稍后设置」：写回引导完成状态后由外层切到首页。
+  ///
+  /// 与免责声明页同型的问题（#106）：`_finishing` 一旦因落盘异常卡住，「完成」与
+  /// 「稍后设置」两个按钮会同时永久禁用，首启流程直接死锁，所以复位必须放在 finally。
   Future<void> _finish() async {
     if (_finishing) return;
     setState(() => _finishing = true);
-    await widget.onDone();
-    if (!mounted) return;
-    setState(() => _finishing = false);
+    try {
+      await widget.onDone();
+    } on Object catch (exception) {
+      debugPrint('提交引导完成失败: $exception');
+      if (!mounted) return;
+      _snack('保存失败，请重试');
+    } finally {
+      if (mounted && _finishing) setState(() => _finishing = false);
+    }
   }
 
   void _snack(String message) {

@@ -183,6 +183,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(done, 2);
   });
+
+  testWidgets('完成回调失败时两个按钮都恢复可用并提示重试（#106）', (WidgetTester tester) async {
+    _useTallScreen(tester);
+    int calls = 0;
+    await tester.pumpWidget(_wrap(() async {
+      calls++;
+      throw StateError('磁盘已满');
+    }));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, '完成'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(calls, 1);
+    expect(find.text('保存失败，请重试'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '完成'))
+          .onPressed,
+      isNotNull,
+      reason: '落盘异常卡住 _finishing 会让「完成」与「稍后设置」同时永久禁用',
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '稍后设置'))
+          .onPressed,
+      isNotNull,
+      reason: '两个按钮共用 _finishing，复位必须异常安全',
+    );
+    expect(
+      find.byType(CircularProgressIndicator),
+      findsNothing,
+      reason: '转圈不复位就是首启流程死锁',
+    );
+  });
 }
 
 /// 引导页 5 行步骤比默认测试视口高，ListView 懒加载要求视口足够高。
