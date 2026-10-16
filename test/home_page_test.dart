@@ -16,6 +16,7 @@ import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/system/system_permissions.dart';
 import 'package:danmu_float/ui/home_page.dart';
+import 'package:danmu_float/ui/settings_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -129,6 +130,18 @@ class _MemoryCredentialBackend implements CredentialBackend {
 
   @override
   Future<void> delete() async => _stored = null;
+}
+
+/// 删除必失败的凭证后端：模拟清除本地数据时密文删不掉（#92）。
+class _FailingDeleteCredentialBackend implements CredentialBackend {
+  @override
+  Future<String?> read() async => null;
+
+  @override
+  Future<void> write(String value) async {}
+
+  @override
+  Future<void> delete() async => throw const FileSystemException('denied');
 }
 
 /// 假房间信息客户端：记录调用顺序，一律返回「直播中」。
@@ -1030,6 +1043,68 @@ void main() {
 
     // 排掉 initState 里悬浮窗状态探测的 1s 延时（_overlayAliveProbeDelay），
     // 否则用例结束时会因悬挂定时器报「Pending timers」。
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('清除本地数据失败时不宣布重置，并明示失败项（#92）', (WidgetTester tester) async {
+    final Directory dir =
+        Directory.systemTemp.createTempSync('danmu_float_reset_fail');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: false);
+
+    int resets = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: HomePage(
+        directoryResolver: () async => dir,
+        // 凭证密文删除必失败：模拟 Keystore / 磁盘层面的删除失败。
+        credentialStore: CredentialStore(backend: _FailingDeleteCredentialBackend()),
+        onResetAll: () => resets++,
+      ),
+    ));
+    await _pumpUntil(tester, () => find.byTooltip('设置').evaluate().isNotEmpty);
+
+    // 走真实入口：设置页 → 数据与隐私 → 清除所有本地数据。
+    await tester.tap(find.byTooltip('设置'));
+    await _pumpUntil(
+      tester,
+      () => find.byType(SettingsPage).evaluate().isNotEmpty,
+    );
+    // 等设置页入场动画走完再滚动/点击，避免按到动画中的位置。
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.scrollUntilVisible(
+      find.text('清除所有本地数据'),
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byType(SettingsPage),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(find.text('清除所有本地数据'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.widgetWithText(FilledButton, '清除并重置'));
+
+    await _pumpUntil(
+      tester,
+      () => find.textContaining('未能清除').evaluate().isNotEmpty,
+    );
+    // 等设置页的退场动画走完，否则残留的设置页会让下面的断言数出两份文案。
+    await tester.pump(const Duration(milliseconds: 600));
+
+    // 失败必须可见，且不能假装已恢复初始状态。
+    expect(find.textContaining('清除未完成'), findsOneWidget);
+    expect(find.textContaining('凭证密文'), findsOneWidget);
+    expect(
+      resets,
+      0,
+      reason: '没清干净就不能回调外层切回免责声明页，否则界面口径与磁盘事实分裂',
+    );
+    // 设置页已弹回首页，用户能在首页看到失败原因。
+    expect(find.text('清除所有本地数据'), findsNothing);
+    // 排掉悬浮窗状态探测延时，避免悬挂定时器。
     await tester.pump(const Duration(seconds: 2));
     await tester.pump(const Duration(seconds: 2));
   });

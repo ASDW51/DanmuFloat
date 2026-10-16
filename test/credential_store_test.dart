@@ -14,6 +14,9 @@ class FakeBackend implements CredentialBackend {
   /// 读取时抛出的异常，用来模拟解密失败。
   Object? readError;
 
+  /// 非空时删除抛错（#92：删除失败必须能被调用方看见，不能再静默）。
+  Object? deleteError;
+
   @override
   Future<String?> read() async {
     final Object? error = readError;
@@ -25,7 +28,11 @@ class FakeBackend implements CredentialBackend {
   Future<void> write(String value) async => stored = value;
 
   @override
-  Future<void> delete() async => stored = null;
+  Future<void> delete() async {
+    final Object? error = deleteError;
+    if (error != null) throw error;
+    stored = null;
+  }
 }
 
 /// 记录请求的假传输层，用于验证「指定凭证优先」时不联网。
@@ -199,10 +206,28 @@ void main() {
       final CredentialStore store = CredentialStore(backend: backend);
       await store.saveProfile(name: '主号', raw: 'ttwid=a');
 
-      await store.clearAll();
+      expect(await store.clearAll(), isNull, reason: '成功时返回 null');
       expect(backend.stored, isNull);
       expect(store.hasProfiles, isFalse);
       expect(store.profiles, isEmpty);
+    });
+
+    test('clearAll 删除密文失败时返回错误提示，但内存仍清空（#92）', () async {
+      final FakeBackend backend = FakeBackend()..deleteError = Exception('keystore 不可用');
+      final CredentialStore store = CredentialStore(backend: backend);
+      await store.saveProfile(name: '主号', raw: 'ttwid=a');
+
+      final String? error = await store.clearAll();
+
+      // 「清除所有本地数据」据此判断「含凭证密文」这句承诺有没有兑现。
+      expect(error, isNotNull);
+      expect(error, contains('凭证密文清除失败'));
+      expect(backend.stored, isNotNull, reason: '删除确实失败了，密文还在磁盘上');
+      expect(
+        store.hasProfiles,
+        isFalse,
+        reason: '内存仍要回到匿名，避免界面继续使用一个已被要求删除的凭证',
+      );
     });
 
     test('解密失败不静默降级：标记失败并回落空列表', () async {
