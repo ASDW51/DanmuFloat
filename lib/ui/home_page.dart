@@ -645,10 +645,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 清除所有本地数据（prd F26 硬要求）：
   /// 先关闭悬浮窗断开全部连接，再清空持久化数据，最后回到免责声明页。
+  ///
+  /// 清除失败时不宣布重置（#92）：磁盘数据还在却显示「已恢复初始状态」，
+  /// 会让用户在错误认知下处置设备；合规状态残留更会让下次冷启动直接
+  /// 跳过免责声明页，静默击穿 AGENTS.md 第 1 节的硬边界。
   Future<void> _clearAllData() async {
     await teardownOverlay();
-    await _dataReset.clearAll();
+    final LocalDataResetResult result = await _dataReset.clearAll();
     if (!mounted) return;
+    if (!result.clean) {
+      // 悬浮窗已按顺序关闭，这一步不可逆也没关系；但内存态不能装作已重置，
+      // 否则界面口径与磁盘事实分裂。
+      _snack(
+        result.complianceRemains
+            ? '合规状态未能清除，本次重置已中止；请重试，否则重启后可能跳过免责声明页'
+            : '清除未完成：${result.targets} 未能清除，请重试；'
+                '若反复失败，请先在设置页导出备份',
+      );
+      return;
+    }
     // 主题偏好文件已被删掉，界面上的主题也一并复位（prd F20）。
     appThemeMode.value = ThemeMode.system;
     setState(() {
