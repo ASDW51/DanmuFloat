@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/net/http_transport.dart';
 import 'package:danmu_float/room/room_info.dart';
@@ -186,6 +188,41 @@ void main() {
       expect(
         transport.requestHeaders.last['cookie'],
         'ttwid=user; msToken=abc',
+      );
+    });
+
+    test('接口永不返回时按超时抛 RoomInfoException，不再永久挂住（#76）', () async {
+      // 永不返回的接口：模拟 DNS 挂起 / 服务端接受连接后不响应。
+      final Completer<HttpResponseData> pending = Completer<HttpResponseData>();
+      final FakeTransport transport = FakeTransport((Uri uri, _) {
+        if (uri.path == '/') {
+          return Future<HttpResponseData>.value(
+            const HttpResponseData(
+              statusCode: 200,
+              body: '',
+              setCookie: <String>['ttwid=t1; Path=/'],
+            ),
+          );
+        }
+        return pending.future;
+      });
+      final RoomInfoClient client = RoomInfoClient(
+        transport: transport,
+        cookieProvider: CookieProvider(transport: transport),
+        abogusFactory: () => _testAbogus('UA-TEST'),
+        // 阈值取短值：让超时在用例内落地（否则 flutter_test 会以悬挂定时器判失败）。
+        requestTimeout: const Duration(milliseconds: 30),
+      );
+
+      await expectLater(
+        client.fetchByWebRid('123456789'),
+        throwsA(
+          isA<RoomInfoException>().having(
+            (RoomInfoException error) => error.message,
+            'message',
+            contains('超时'),
+          ),
+        ),
       );
     });
   });

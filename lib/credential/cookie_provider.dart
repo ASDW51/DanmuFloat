@@ -3,6 +3,8 @@
 // 依据 design.md 2.2：
 // - 请求 https://live.douyin.com/（桌面版 UA），从响应 set-cookie 提取并拼接为 Cookie 串；
 // - 内存缓存 6 小时；若新响应不含 ttwid 且已有缓存，复用上次缓存。
+import 'dart:async';
+
 import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/net/http_transport.dart';
 
@@ -10,6 +12,12 @@ import 'package:danmu_float/net/http_transport.dart';
 const String defaultDesktopUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
     '(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
+
+/// 匿名 ttwid 获取的超时阈值（#76）。
+///
+/// 取凭证是房间解析的第一步：这一步挂起同样会让栏位永久停在「解析房间…」，
+/// 而且它与接口请求各自独立，两层都要有失败出口。
+const Duration defaultCookieFetchTimeout = Duration(seconds: 8);
 
 class CookieFetchException implements Exception {
   CookieFetchException(this.message);
@@ -85,6 +93,7 @@ class CookieProvider {
     HttpTransport? transport,
     this.cacheTtl = const Duration(hours: 6),
     this.userAgent = defaultDesktopUserAgent,
+    this.fetchTimeout = defaultCookieFetchTimeout,
     String? credentialCookies,
     DateTime Function()? now,
   })  : _transport = transport ?? IoHttpTransport(),
@@ -97,6 +106,9 @@ class CookieProvider {
   final Duration cacheTtl;
   final String userAgent;
   final DateTime Function() _now;
+
+  /// 取匿名凭证的超时阈值（测试注入更短的值）。
+  final Duration fetchTimeout;
 
   /// 固定的用户配置凭证；非空时优先于匿名自动获取，不再联网。
   final String? _credentialCookies;
@@ -137,10 +149,7 @@ class CookieProvider {
   }
 
   Future<String> _fetchCookies() async {
-    final HttpResponseData response = await _transport.get(
-      _entryUri,
-      headers: <String, String>{'User-Agent': userAgent},
-    );
+    final HttpResponseData response = await _requestEntry();
     if (response.setCookie.isEmpty) {
       throw CookieFetchException('响应缺少 set-cookie，无法获取 ttwid');
     }
@@ -149,5 +158,24 @@ class CookieProvider {
       throw CookieFetchException('set-cookie 解析结果为空，无法获取 ttwid');
     }
     return cookies;
+  }
+
+  /// 请求入口页取 set-cookie；超时按取凭证失败处理（#76）。
+  ///
+  /// 不设阈值时这一步会永久挂起：调用方（房间解析）会一直等在「解析房间…」，
+  /// 而它没有任何失败出口或重试入口。
+  Future<HttpResponseData> _requestEntry() async {
+    try {
+      return await _transport
+          .get(
+            _entryUri,
+            headers: <String, String>{'User-Agent': userAgent},
+          )
+          .timeout(fetchTimeout);
+    } on TimeoutException {
+      throw CookieFetchException(
+        '获取匿名凭证超时（${fetchTimeout.inSeconds} 秒），请检查网络后重试',
+      );
+    }
   }
 }

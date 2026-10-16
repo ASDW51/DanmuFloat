@@ -43,9 +43,15 @@ class FakeChannelFactory {
   /// 为真时每次建连都抛错，用于验证重连次数达上限进入 failed。
   bool alwaysFail = false;
 
+  /// 非空时每次建连都抛该异常（如握手超时）：验证异常落入既有失败/重连路径。
+  Object? failWith;
+
   Future<DanmuChannel> call(Uri uri, Map<String, String> header) async {
     uris.add(uri);
     headers.add(header);
+    if (failWith != null) {
+      throw failWith!;
+    }
     if (alwaysFail) {
       throw StateError('connect failed');
     }
@@ -306,6 +312,62 @@ void main() {
 
       expect(client.lastError, isNull);
       await client.stop();
+    });
+
+    test('握手超时按建连失败处理：记入 lastError 并进入重连预算（#96）', () async {
+      final FakeChannelFactory factory = FakeChannelFactory()
+        ..failWith = DanmuHandshakeTimeoutException(const Duration(seconds: 10));
+      final ConnectionStateMachine stateMachine = ConnectionStateMachine(
+        maxReconnectAttempts: 3,
+        reconnectInterval: const Duration(milliseconds: 50),
+      );
+      final DanmuSocketClient client = build(factory, stateMachine: stateMachine);
+      client.start();
+      await _tick();
+
+      expect(client.state, DanmuConnectionState.reconnecting);
+      expect(client.lastError, contains('握手超时'));
+      expect(factory.uris, hasLength(1));
+
+      await _tick(60);
+      expect(
+        factory.uris.length,
+        2,
+        reason: '握手超时不能让会话停在「连接中」：必须触发既有的重连路径',
+      );
+      await client.stop();
+    });
+
+    test('等待 WS 握手：超时抛异常并释放半开连接（#96）', () async {
+      final Completer<void> never = Completer<void>();
+      bool released = false;
+
+      await expectLater(
+        awaitWebSocketHandshake(
+          never.future,
+          const Duration(milliseconds: 30),
+          onTimeout: () async {
+            released = true;
+          },
+        ),
+        throwsA(isA<DanmuHandshakeTimeoutException>()),
+      );
+
+      expect(released, isTrue, reason: '半开连接必须被关掉，不能一直占着 socket');
+    });
+
+    test('等待 WS 握手：正常完成时不抛异常也不释放连接（#96）', () async {
+      bool released = false;
+
+      await awaitWebSocketHandshake(
+        Future<void>.value(),
+        const Duration(seconds: 1),
+        onTimeout: () async {
+          released = true;
+        },
+      );
+
+      expect(released, isFalse);
     });
 
     test('通道带关闭码断开时把关闭码记入 lastError', () async {

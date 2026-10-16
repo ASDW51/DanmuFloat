@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/net/http_transport.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -104,6 +106,26 @@ void main() {
       expect(
         transport.requestHeaders.single['User-Agent'],
         defaultDesktopUserAgent,
+      );
+    });
+
+    test('取匿名凭证永不返回时按超时抛 CookieFetchException（#76）', () async {
+      final Completer<HttpResponseData> pending = Completer<HttpResponseData>();
+      final CookieProvider provider = CookieProvider(
+        transport: FakeTransport((Uri uri, _) => pending.future),
+        // 阈值取短值：让超时在用例内落地。
+        fetchTimeout: const Duration(milliseconds: 30),
+      );
+
+      await expectLater(
+        provider.getCookies(),
+        throwsA(
+          isA<CookieFetchException>().having(
+            (CookieFetchException error) => error.message,
+            'message',
+            contains('超时'),
+          ),
+        ),
       );
     });
   });

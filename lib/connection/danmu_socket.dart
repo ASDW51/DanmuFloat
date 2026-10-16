@@ -16,6 +16,42 @@ import 'package:web_socket_channel/io.dart';
 /// 弹幕 WS 默认主机（与参考实现一致）。
 const String defaultDanmuHost = 'webcast100-ws-web-hl.douyin.com';
 
+/// WS 握手超时（#96）。
+///
+/// `IOWebSocketChannel.connect` 本身没有握手超时参数：TCP 能建连但 HTTP Upgrade
+/// 一直不完成（代理半通、TLS 中间设备挂起）时，`await channel.ready` 永不返回，
+/// 会话会永久停在「连接中」——握手之后才启动的心跳与失联看门狗都覆盖不到这一步。
+const Duration defaultHandshakeTimeout = Duration(seconds: 10);
+
+/// WS 握手超时（#96）：抛给 `_connect` 的 catch，走既有的断线/重连计数路径。
+class DanmuHandshakeTimeoutException implements Exception {
+  DanmuHandshakeTimeoutException(this.timeout);
+
+  final Duration timeout;
+
+  @override
+  String toString() => 'WebSocket 握手超时（${timeout.inSeconds} 秒），请检查网络后重试';
+}
+
+/// 等待 WS 握手完成，超时先释放半开连接再抛 [DanmuHandshakeTimeoutException]。
+///
+/// 抽成独立函数是为了能在单测里注入「永不完成」的握手 Future（#96）。
+Future<T> awaitWebSocketHandshake<T>(
+  Future<T> ready,
+  Duration timeout, {
+  Future<void> Function()? onTimeout,
+}) async {
+  try {
+    return await ready.timeout(timeout);
+  } on TimeoutException {
+    if (onTimeout != null) {
+      // 半开连接不会自己消失：不关掉会一直占着 socket 与内核缓冲（#96）。
+      await onTimeout();
+    }
+    throw DanmuHandshakeTimeoutException(timeout);
+  }
+}
+
 /// 心跳文本帧。
 const String danmuHeartbeatText = ':\u0002hb';
 
@@ -132,13 +168,21 @@ class IoDanmuChannel implements DanmuChannel, DanmuChannelCloseInfo {
 
   static Future<DanmuChannel> connect(
     Uri uri,
-    Map<String, String> headers,
-  ) async {
+    Map<String, String> headers, {
+    Duration handshakeTimeout = defaultHandshakeTimeout,
+  }) async {
     final IOWebSocketChannel channel = IOWebSocketChannel.connect(
       uri,
       headers: headers,
     );
-    await channel.ready;
+    // 握手必须有失败出口：否则会话永远等不到 connected 或 error 中的任何一个（#96）。
+    await awaitWebSocketHandshake(
+      channel.ready,
+      handshakeTimeout,
+      onTimeout: () async {
+        await channel.sink.close();
+      },
+    );
     return IoDanmuChannel(channel);
   }
 
