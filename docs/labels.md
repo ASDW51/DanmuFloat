@@ -46,6 +46,11 @@
 | --- | --- | --- |
 | `待验证` | `#fef2c0` | 结论来自静态代码审查，尚未通过测试或真机确认。确认（或证伪）后请**移除**该标签，避免它长期挂在已确认的 Issue 上 |
 
+另有一组**面向 Agent 的流转标签**（`agent:ready` / `agent:skip` / `agent:needs-review` /
+`agent:in-progress` / `agent:done` / `agent:read-comments`）：它们表示的不是问题的性质，而是
+「这个 Issue 该不该交给 Agent 处理、处理到哪一步」。语义、判定顺序、并发保护与注意事项见
+[docs/agent-issue-protocol.md](agent-issue-protocol.md)。
+
 ## 五、GitHub 默认标签
 
 `bug`、`documentation`、`duplicate`、`invalid`、`question`、`wontfix`、`help wanted`、
