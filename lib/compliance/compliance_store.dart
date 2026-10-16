@@ -95,4 +95,10 @@ class ComplianceStore {
     final File file = await _file();
     if (await file.exists()) await file.delete();
   }
+
+  /// 状态文件是否仍在磁盘上（#92：删除返回「成功」不代表文件真没了）。
+  ///
+  /// 「清除所有本地数据」删除后必须复核：残留的 `disclaimerAccepted: true`
+  /// 会让下次冷启动直接跳过免责声明页，静默击穿 AGENTS.md 第 1 节的硬边界。
+  Future<bool> exists() async => (await _file()).exists();
 }

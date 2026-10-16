@@ -9,6 +9,7 @@
 // - 不展示完整凭证明文（设置页输入框用 obscure，不回显）
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Cookie 名允许的字符集（RFC 6265 的 token）。
@@ -283,14 +284,20 @@ class CredentialStore {
   /// 清除全部本地凭证（prd F26「清除本地凭证」）：删除密文，回到匿名自动获取。
   ///
   /// 只影响凭证，不动主播列表 / 样式偏好 / 合规状态。
-  Future<void> clearAll() async {
+  /// 返回错误提示，成功返回 null（与本文件 [deleteProfile] / [_persist] 同口径）：
+  /// 「清除所有本地数据」要据此判断「含凭证密文」这句承诺有没有兑现（#92）。
+  Future<String?> clearAll() async {
+    String? error;
     try {
       await _backend.delete();
-    } on Object {
-      // 密文可能本就不存在或设备已卸载过 Keystore 条目，清内存即可。
+    } on Object catch (exception) {
+      // 删除失败不再静默：密文可能仍在磁盘上，而用户被告知「已清除」是隐私承诺失真。
+      error = '凭证密文清除失败：$exception';
+      debugPrint(error);
     }
     _profiles = const <CredentialProfile>[];
     _decryptFailed = false;
+    return error;
   }
 
   Future<String?> _persist(List<CredentialProfile> profiles) async {
