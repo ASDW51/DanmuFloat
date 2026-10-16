@@ -5,14 +5,18 @@
 // 也不含弹幕缓存（那是运行期数据，没有迁移价值）。
 //
 // 各分区直接沿用已有存储的文件结构（rooms.json / overlay.json / filter.json /
-// theme.json / compliance.json），导入时复用各自的解析函数，避免两套口径走样。
+// theme.json），导入时复用各自的解析函数，避免两套口径走样。
+//
+// **合规状态不参与备份与迁移**（#85）：免责声明的同意是与本机当次操作绑定的授权记录，
+// 一旦能随文件搬运，就等于「外部 JSON 可以把本机直接置为已同意」，踩到 AGENTS.md
+// 「合规入口不可绕过、不可弱化」的硬边界；反向同样有害——缺该分区的备份会把已同意
+// 的用户打回免责声明页。导入端对旧备份里的 compliance 分区一律忽略，不消费也不因此报错。
 //
 // 文件的系统级读写（写公共「下载」目录、从文件选择器读入）走原生通道，实现见
 // android/app/src/main/kotlin/.../MainActivity.kt；两条路都不需要存储权限。
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:danmu_float/compliance/compliance_store.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/room/managed_room.dart';
 import 'package:danmu_float/storage/filter_store.dart';
@@ -28,11 +32,12 @@ const String dataBundleAppId = 'danmu-float';
 const int dataBundleVersion = 1;
 
 /// 各分区的用户可读名：导入失败与回滚结果都要写给用户看，不能只报内部字段名（#84）。
+///
+/// 合规状态没有对应的分区名：它不参与备份与迁移（#85），所以既不写入也不读取。
 const String dataSectionRooms = '主播列表';
 const String dataSectionPrefs = '悬浮窗偏好';
 const String dataSectionFilter = '过滤设置';
 const String dataSectionTheme = '主题';
-const String dataSectionCompliance = '合规状态';
 
 /// 备份文件原生通道名（与 MainActivity 约定）。
 const String dataFileChannelName = 'danmu_float/data_file';
@@ -100,14 +105,12 @@ class DataBundle {
     required this.prefs,
     required this.filter,
     required this.themeMode,
-    required this.compliance,
   });
 
   final List<ManagedRoom> rooms;
   final OverlayPrefs prefs;
   final FilterPrefs filter;
   final ThemeMode themeMode;
-  final ComplianceState compliance;
 }
 
 /// 备份文件名：danmu_float_backup_年月日_时分秒.json。
@@ -119,12 +122,15 @@ String backupFileName(DateTime now) {
 }
 
 /// 组装备份 JSON 文本。
+///
+/// **不含合规状态**（#85）：同意是与本机当次操作绑定的授权记录，随备份搬运既能让外部
+/// JSON 把本机置为「已同意」，也能把已同意的用户打回免责声明页；旧版本备份里带的
+/// `compliance` 分区在导入端被忽略。
 String encodeDataBundle({
   required List<ManagedRoom> rooms,
   required OverlayPrefs prefs,
   required FilterPrefs filter,
   required ThemeMode themeMode,
-  required ComplianceState compliance,
   DateTime? exportedAt,
 }) =>
     const JsonEncoder.withIndent('  ').convert(<String, Object?>{
@@ -139,7 +145,6 @@ String encodeDataBundle({
       'overlayPrefs': prefs.toJson(),
       'filter': filter.toJson(),
       'theme': <String, Object?>{'themeMode': themeMode.name},
-      'compliance': compliance.toJson(),
     });
 
 /// 解析备份文本；不是本 App 的备份或结构对不上时抛 [DataTransferException]。
@@ -187,8 +192,6 @@ DataBundle decodeDataBundle(String raw) {
         const OverlayPrefs(),
     filter: decodeFilterPrefs(_section(decoded['filter'])),
     themeMode: decodeThemeMode(_section(decoded['theme'])),
-    compliance:
-        ComplianceState.tryParse(decoded['compliance']) ?? const ComplianceState(),
   );
 }
 
@@ -199,10 +202,12 @@ String _section(Object? value) => jsonEncode(value ?? const <String, Object?>{})
 ///
 /// 判定分两层：分区在备份里一律是 JSON 对象，**不是对象**（字符串 / 数组 / 数字）时各解析器
 /// 只会回落默认值；是对象时再看该分区的解析器有没有明确说「读不出来」（`rooms` 的
-/// [tryDecodeRooms]、`overlayPrefs` 的 [decodeOverlayPrefs]、合规状态的
-/// `ComplianceState.tryParse` 都会返回 null；过滤与主题没有这种信号，只能做字段级检查）。
+/// [tryDecodeRooms]、`overlayPrefs` 的 [decodeOverlayPrefs] 都会返回 null；过滤与主题没有
+/// 这种信号，只能做字段级检查）。
 ///
 /// 缺失的分区**不算**损坏：老备份局部缺字段是正常的，取默认值即可。
+/// 不再随备份搬运的分区（如旧版本写下的 `compliance`，见 #85）也不检查：它不参与导入，
+/// 拿它中止导入只会让旧备份变得无法恢复。
 List<String> unreadableDataSections(Object? decoded) {
   if (decoded is! Map) return const <String>[];
   final List<String> unreadable = <String>[];
@@ -228,11 +233,6 @@ List<String> unreadableDataSections(Object? decoded) {
   );
   check('filter', dataSectionFilter, _filterSectionReadable);
   check('theme', dataSectionTheme, _themeSectionReadable);
-  check(
-    'compliance',
-    dataSectionCompliance,
-    (Map<dynamic, dynamic> value) => ComplianceState.tryParse(value) != null,
-  );
   return unreadable;
 }
 
@@ -279,20 +279,21 @@ class DataImportSummary {
 }
 
 /// 本地数据的备份与恢复。
+///
+/// 不注入合规状态存储（#85）：它既不该出现在备份里，也不该被导入改写——把能力收掉，
+/// 比留一个参数再靠自觉不用更可靠。
 class LocalDataTransfer {
   LocalDataTransfer({
     RoomStore? roomStore,
     OverlayPrefsStore? prefsStore,
     FilterStore? filterStore,
     ThemeStore? themeStore,
-    ComplianceStore? complianceStore,
     Future<Directory> Function()? directoryResolver,
     SaveTextToDownloads? saveToDownloads,
   })  : _roomStore = roomStore ?? RoomStore(),
         _prefsStore = prefsStore ?? OverlayPrefsStore(),
         _filterStore = filterStore ?? FilterStore(),
         _themeStore = themeStore ?? ThemeStore(),
-        _complianceStore = complianceStore ?? ComplianceStore(),
         _directoryResolver = directoryResolver ?? getApplicationSupportDirectory,
         _saveToDownloads = saveToDownloads ?? saveTextToDownloads;
 
@@ -300,17 +301,17 @@ class LocalDataTransfer {
   final OverlayPrefsStore _prefsStore;
   final FilterStore _filterStore;
   final ThemeStore _themeStore;
-  final ComplianceStore _complianceStore;
   final Future<Directory> Function() _directoryResolver;
   final SaveTextToDownloads _saveToDownloads;
 
   /// 读回全部本地数据并组装成备份文本。
+  ///
+  /// 不读合规状态（#85）：它不随备份搬运，读进来也没人会写出去。
   Future<String> exportJson() async => encodeDataBundle(
         rooms: await _roomStore.load(),
         prefs: await _prefsStore.load(),
         filter: await _filterStore.load(),
         themeMode: await _themeStore.load(),
-        compliance: await _complianceStore.load(),
       );
 
   /// 备份文本另存到系统公共「下载」目录，返回展示给用户的位置。
@@ -377,9 +378,9 @@ class LocalDataTransfer {
         await _readBefore(dataSectionFilter, _filterStore.load);
     final ThemeMode? themeBefore =
         await _readBefore(dataSectionTheme, _themeStore.load);
-    final ComplianceState? complianceBefore =
-        await _readBefore(dataSectionCompliance, _complianceStore.load);
 
+    // 逐个分区覆盖；合规状态**不在**这张表里（#85）：同意是本机行为，导入不得改写它，
+    // 旧备份里的 compliance 分区在解析阶段就被丢弃。
     final List<_ImportStep> steps = <_ImportStep>[
       _ImportStep(
         dataSectionRooms,
@@ -400,13 +401,6 @@ class LocalDataTransfer {
         dataSectionTheme,
         () => _themeStore.save(bundle.themeMode),
         themeBefore == null ? null : () => _themeStore.save(themeBefore),
-      ),
-      _ImportStep(
-        dataSectionCompliance,
-        () => _complianceStore.save(bundle.compliance),
-        complianceBefore == null
-            ? null
-            : () => _complianceStore.save(complianceBefore),
       ),
     ];
 

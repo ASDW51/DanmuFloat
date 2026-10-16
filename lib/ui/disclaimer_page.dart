@@ -20,10 +20,21 @@ const List<String> _privacyPoints = <String>[
 ];
 
 class DisclaimerPage extends StatefulWidget {
-  const DisclaimerPage({super.key, required this.onAgree});
+  const DisclaimerPage({
+    super.key,
+    required this.onAgree,
+    this.reviewMode = false,
+  });
 
   /// 用户点击「同意并继续」后的持久化动作（写合规状态）。
   final Future<void> Function() onAgree;
+
+  /// 已同意者从设置页重进时的只读模式（#85）。
+  ///
+  /// 同意是与本机当次操作绑定的授权记录，重进只应是「查看」：此前它照样显示未勾选的
+  /// 勾选框与禁用的「同意并继续」，看着像还没同意过，也让人以为还能改。此模式只展示
+  /// 「已同意」，不提供任何改状态的入口（首次启动的强制勾选路径不受影响）。
+  final bool reviewMode;
 
   @override
   State<DisclaimerPage> createState() => _DisclaimerPageState();
@@ -45,6 +56,59 @@ class _DisclaimerPageState extends State<DisclaimerPage> {
     }
     setState(() => _submitting = false);
   }
+
+  /// 首次启动的同意区：不勾选不可继续（prd F25 硬要求）。
+  Widget _buildAgreeFooter() => Column(
+        children: <Widget>[
+          CheckboxListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            value: _checked,
+            onChanged: _submitting
+                ? null
+                : (bool? value) => setState(() => _checked = value ?? false),
+            title: const Text('我已阅读并同意上述声明'),
+          ),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: (!_checked || _submitting) ? null : _agree,
+              child: _submitting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('同意并继续'),
+            ),
+          ),
+        ],
+      );
+
+  /// 已同意者重进时的只读区（#85）：状态照实显示为「已同意」，且没有可改它的控件。
+  Widget _buildAcceptedFooter() => Column(
+        children: <Widget>[
+          const ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.check_circle_outline),
+            title: Text('已同意上述声明'),
+            subtitle: Text('首次启动时勾选，之后不可修改'),
+          ),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: () {
+                if (Navigator.of(context).canPop()) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: const Text('关闭'),
+            ),
+          ),
+        ],
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -83,36 +147,9 @@ class _DisclaimerPageState extends State<DisclaimerPage> {
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: Column(
-              children: <Widget>[
-                CheckboxListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  value: _checked,
-                  onChanged: _submitting
-                      ? null
-                      : (bool? value) =>
-                          setState(() => _checked = value ?? false),
-                  title: const Text('我已阅读并同意上述声明'),
-                ),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    // 未勾选不可继续（prd F25 硬要求）。
-                    onPressed:
-                        (!_checked || _submitting) ? null : _agree,
-                    child: _submitting
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('同意并继续'),
-                  ),
-                ),
-              ],
-            ),
+            child: widget.reviewMode
+                ? _buildAcceptedFooter()
+                : _buildAgreeFooter(),
           ),
         ],
       ),

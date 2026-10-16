@@ -473,7 +473,9 @@ class _SettingsPageState extends State<SettingsPage> {
           ListTile(
             leading: const Icon(Icons.gavel_outlined),
             title: const Text('查看免责声明'),
-            subtitle: const Text('首次启动需勾选同意，此处可随时重看'),
+            // 能进到设置页就说明首次启动时已同意（main.dart 的硬门禁），所以这里照实写
+            // 「已同意」：同意是本机当次操作留下的授权记录，状态不可修改、也不随备份搬运（#85）。
+            subtitle: const Text('当前状态：已同意（首次启动时勾选，不可修改）'),
             trailing: const Icon(Icons.chevron_right),
             onTap: _openDisclaimer,
           ),
@@ -507,11 +509,17 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  /// 从设置页重进免责声明（prd F25）；已同意过，同意动作只做幂等写回。
+  /// 从设置页重进免责声明（prd F25）：已同意过，按只读模式打开（#85）。
+  ///
+  /// 进来是「查看」不是「再同意一次」，所以既不该显示待勾选的勾选框，也不该出现任何能
+  /// 改状态的入口；[reviewMode] 只影响展示，首次启动的强制勾选路径不受影响。
   void _openDisclaimer() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (BuildContext context) => DisclaimerPage(onAgree: _noopAgree),
+        builder: (BuildContext context) => DisclaimerPage(
+          onAgree: _noopAgree,
+          reviewMode: true,
+        ),
       ),
     );
   }
@@ -591,8 +599,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
     final bool confirmed = await _confirm(
       title: '导入数据',
+      // 逐项列清会被覆盖的分区，并点明合规同意状态不在其列（#85）：用户此前无法预知
+      // 「导入会不会改掉我的同意记录」，这里给出明确答案。
       content:
           '将用备份覆盖当前的主播列表、悬浮窗样式、过滤设置与主题。'
+          '免责声明的同意状态不随备份变化，不会被改写。'
           '此操作不可撤销。',
       confirmText: '覆盖导入',
     );

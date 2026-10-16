@@ -483,6 +483,27 @@ void main() {
     expect(find.text('这不是 DanmuFloat 的备份文件'), findsOneWidget);
     expect(find.textContaining('备份有效'), findsNothing);
   });
+
+  testWidgets('合规分区写明「已同意」且重进为只读（#85）', (WidgetTester tester) async {
+    _useTallScreen(tester);
+    await tester.pumpWidget(_wrapFull(prefs: const OverlayPrefs()));
+
+    // 列表较长，先把合规分区滚进视野。
+    await tester.scrollUntilVisible(
+      find.text('查看免责声明'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('当前状态：已同意（首次启动时勾选，不可修改）'), findsOneWidget);
+
+    await tester.tap(find.text('查看免责声明'));
+    await tester.pumpAndSettle();
+
+    // 重进是查看：显示已同意，且没有任何能改状态的控件。
+    expect(find.text('已同意上述声明'), findsOneWidget);
+    expect(find.byType(CheckboxListTile), findsNothing);
+    expect(find.text('同意并继续'), findsNothing);
+  });
 }
 
 /// 假的备份器：widget 测试跑在 FakeAsync 下，真实文件 IO 无法完成，
