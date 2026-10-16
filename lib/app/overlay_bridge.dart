@@ -397,6 +397,9 @@ class OverlayConfig {
     this.paneStyles = const <String, PaneStyle>{},
     this.roomOptions = const <RoomOption>[],
     this.lightTheme = false,
+    this.themeId,
+    this.colorOverrides = const <String, int>{},
+    this.contrastPolicy = overlayStyleAdjustPolicy,
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
     this.dragLocked = false,
@@ -428,7 +431,22 @@ class OverlayConfig {
   final List<RoomOption> roomOptions;
 
   /// 悬浮窗是否为浅色皮肤（prd F20 样式预设）；false 为默认深色。
+  ///
+  /// 只保留深浅两态，供旧版本回滚与「只看深浅」的渲染分支使用；
+  /// 完整皮肤（sepia / contrast）看 [themeId]。
   final bool lightTheme;
+
+  /// 主题标识（#98）。老 payload 没有这个字段，由 [lightTheme] 推导。
+  ///
+  /// config 也带上它，是因为 config 是**重排路径**（首页删在播主播 → `resizeOverlay`）
+  /// 唯一的消息：不带就会把 sepia / contrast 坍缩成 dark，而磁盘上仍是 sepia。
+  final String? themeId;
+
+  /// 角色级颜色覆盖：角色名 → 不透明 ARGB（#98，与 [OverlayStyle] 同口径）。
+  final Map<String, int> colorOverrides;
+
+  /// 对比度策略：adjust 校正到可读 / warn 提示但不改 / allow 原样渲染（#98）。
+  final String contrastPolicy;
 
   /// 是否显示栏目标识行（prd F6）；false 时标题行不渲染，弹幕占满整栏。
   final bool showTitleBar;
@@ -466,6 +484,11 @@ class OverlayConfig {
     'paneStyles': encodePaneStyles(paneStyles),
     'roomOptions': encodeRoomOptions(roomOptions),
     'lightTheme': lightTheme,
+    // 与 style 消息同口径写出皮肤字段（#98）：新字段旧进程读到会忽略，不会解析失败。
+    'themeId':
+        themeId ?? (lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId),
+    'colorOverrides': colorOverrides,
+    'contrastPolicy': contrastPolicy,
     'showTitleBar': showTitleBar,
     'focusBehavior': clampFocusBehavior(focusBehavior),
     'dragLocked': dragLocked,
@@ -507,6 +530,12 @@ class OverlayConfig {
       paneStyles: parsePaneStyles(raw['paneStyles']),
       roomOptions: parseRoomOptions(raw['roomOptions']),
       lightTheme: raw['lightTheme'] == true,
+      themeId: resolveThemeId(
+        themeId: _rawThemeId(raw['themeId']),
+        lightTheme: raw['lightTheme'] == true,
+      ),
+      colorOverrides: parseColorOverrides(raw['colorOverrides']),
+      contrastPolicy: clampOverlayStyleContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
       dragLocked: raw['dragLocked'] == true,
@@ -650,13 +679,19 @@ String clampOverlayStyleContrastPolicy(Object? raw) =>
     ? raw! as String
     : overlayStyleAdjustPolicy;
 
-/// 解析主题标识：没有 themeId 的老 payload 由 lightTheme 推导，语义与旧版一致。
-String _parseStyleThemeId(Map<dynamic, dynamic> raw) {
-  final Object? id = raw['themeId'];
-  if (id is String && id.isNotEmpty) return id;
-  return raw['lightTheme'] == true
-      ? overlayStyleLightThemeId
-      : overlayStyleDarkThemeId;
+/// 从 payload 里取显式的 themeId；缺失或空白返回 null。
+String? _rawThemeId(Object? raw) =>
+    raw is String && raw.trim().isNotEmpty ? raw : null;
+
+/// 取一条消息要生效的主题标识（#98）：显式 themeId 优先，老 payload 由 lightTheme 推导。
+///
+/// config 与 style 两条消息共用这一个口径。此前两边各写一遍：style 走完整主题，
+/// config 只把 lightTheme 折算成 dark/light，于是任何只发 config 的路径
+/// （首页删在播主播触发的重排）都会把 sepia / contrast 静默换掉。
+String resolveThemeId({String? themeId, required bool lightTheme}) {
+  final String? explicit = _rawThemeId(themeId);
+  if (explicit != null) return explicit;
+  return lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId;
 }
 
 class OverlayStyle {
@@ -751,7 +786,10 @@ class OverlayStyle {
           : defaultDanmuScrollSpeed,
       paneStyles: parsePaneStyles(raw['paneStyles']),
       lightTheme: raw['lightTheme'] == true,
-      themeId: _parseStyleThemeId(raw),
+      themeId: resolveThemeId(
+        themeId: _rawThemeId(raw['themeId']),
+        lightTheme: raw['lightTheme'] == true,
+      ),
       colorOverrides: parseColorOverrides(raw['colorOverrides']),
       contrastPolicy: clampOverlayStyleContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,

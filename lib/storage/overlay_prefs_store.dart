@@ -247,6 +247,11 @@ class OverlayPrefs {
     paneStyles: _stylesFor(rooms),
     roomOptions: roomOptions,
     lightTheme: lightTheme,
+    // config 也带上完整皮肤（#98）：它经 `resizeOverlay` 走出去时是那条路径上唯一的
+    // 消息（如首页删除在播主播后的重排），不带就会把 sepia / contrast 换成 dark。
+    themeId: themeId,
+    colorOverrides: colorOverrides,
+    contrastPolicy: contrastPolicy,
     showTitleBar: showTitleBar,
     focusBehavior: clampFocusBehavior(focusBehavior),
     dragLocked: dragLocked,

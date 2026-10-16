@@ -519,8 +519,10 @@ class _OverlayPageState extends State<OverlayPage> {
         _scrollSpeed = style.scrollSpeed;
         _paneStyles = style.paneStyles;
         _lightTheme = style.lightTheme;
-        _themeId = style.themeId ??
-            (_lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId);
+        _themeId = resolveThemeId(
+          themeId: style.themeId,
+          lightTheme: _lightTheme,
+        );
         _colorOverrides = style.colorOverrides;
         _contrastPolicy = style.contrastPolicy;
         _publishPalette();
@@ -586,7 +588,15 @@ class _OverlayPageState extends State<OverlayPage> {
       _paneStyles = config.paneStyles;
       _roomOptions = config.roomOptions;
       _lightTheme = config.lightTheme;
-      _themeId = _lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId;
+      // 用消息给的 themeId，而不是把 lightTheme 折算成 dark/light（#98）：
+      // config 是重排路径（首页删在播主播 → resizeOverlay）唯一的消息，折算会把
+      // sepia / contrast 静默换成 dark，磁盘上却仍是 sepia —— 显示与设置入口两个真相。
+      _themeId = resolveThemeId(
+        themeId: config.themeId,
+        lightTheme: _lightTheme,
+      );
+      _colorOverrides = config.colorOverrides;
+      _contrastPolicy = config.contrastPolicy;
       _publishPalette();
       _showTitleBar = config.showTitleBar;
       _focusBehavior = config.focusBehavior;
