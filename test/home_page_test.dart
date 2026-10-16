@@ -1027,5 +1027,10 @@ void main() {
     expect(backupExists, isTrue, reason: '坏文件要先留存再返回空列表');
     expect(backupContent, '{broken', reason: '留存件必须是损坏前的原始字节');
     expect(await tester.runAsync(() => File(roomsPath).exists()), isFalse);
+
+    // 排掉 initState 里悬浮窗状态探测的 1s 延时（_overlayAliveProbeDelay），
+    // 否则用例结束时会因悬挂定时器报「Pending timers」。
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(seconds: 2));
   });
 }
