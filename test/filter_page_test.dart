@@ -140,6 +140,47 @@ void main() {
     expect(find.text('• (未闭合'), findsOneWidget);
   });
 
+  testWidgets('有回溯风险的规则在添加时就被拦下（#79）', (WidgetTester tester) async {
+    _useTallScreen(tester);
+    final List<FilterPrefs> changes = <FilterPrefs>[];
+    await tester.pumpWidget(_wrapFilter(
+      prefs: const FilterPrefs(regexEnabled: true),
+      onChanged: changes.add,
+    ));
+    await tester.pumpAndSettle();
+
+    // (a+)+ 写法合法，但配一条构造过的弹幕就能打满 UI 线程，不允许存进来。
+    await tester.enterText(find.byType(TextField).first, r'(a+)+');
+    await tester.tap(find.text('添加').first);
+    await tester.pumpAndSettle();
+
+    expect(changes, isEmpty, reason: '风险规则不该落盘，否则只会被静默跳过');
+    expect(find.textContaining('可能卡住界面'), findsOneWidget);
+    // 线性写法照旧可添加。
+    await tester.enterText(find.byType(TextField).first, r'^6{3,}$');
+    await tester.tap(find.text('添加').first);
+    await tester.pumpAndSettle();
+    expect(changes.last.blockedKeywords, <String>[r'^6{3,}$']);
+  });
+
+  testWidgets('存量风险规则会在页面顶部单独列出（#79）', (WidgetTester tester) async {
+    _useTallScreen(tester);
+    await tester.pumpWidget(_wrapFilter(
+      prefs: const FilterPrefs(
+        blockedKeywords: <String>[r'(a+)+'],
+        highlightKeywords: <String>[r'(抽奖|福利)+'],
+        regexEnabled: true,
+      ),
+      onChanged: _ignore,
+    ));
+    await tester.pumpAndSettle();
+
+    // 只列有风险的那条：合法且线性的 (抽奖|福利)+ 不能被一起点名。
+    expect(find.text('• (a+)+'), findsOneWidget);
+    expect(find.text('• (抽奖|福利)+'), findsNothing);
+    expect(find.text('以下规则不是合法正则，已跳过（不影响其它规则）：'), findsNothing);
+  });
+
   testWidgets('高亮词与类型多选写回对应字段', (WidgetTester tester) async {
     _useTallScreen(tester);
     final List<FilterPrefs> changes = <FilterPrefs>[];
