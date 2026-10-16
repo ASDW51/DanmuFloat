@@ -93,6 +93,7 @@ class DanmuPage extends StatefulWidget {
     required this.webRid,
     this.title,
     this.onFilterChanged,
+    this.sessionFactory,
   });
 
   /// 要连接的直播间号。
@@ -104,6 +105,11 @@ class DanmuPage extends StatefulWidget {
   /// 过滤偏好改动回调：带上「本页当时的旧值」与「改动后的新值」，由首页在当前权威值上
   /// 合并后统一落盘（#97）。为 null 时本页自行落盘（单测 / 独立挂载场景）。
   final void Function(FilterPrefs previous, FilterPrefs next)? onFilterChanged;
+
+  /// 弹幕会话工厂可注入（默认建真实会话）；单测用它接假客户端 / 假 socket，
+  /// 不依赖真实网络与签名器（#99 的「清空确认」计数口径要在页面级验证）。
+  @visibleForTesting
+  final LiveDanmuSession Function()? sessionFactory;
 
   @override
   State<DanmuPage> createState() => _DanmuPageState();
@@ -288,11 +294,12 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   }
 
   Future<void> _connect() async {
-    final LiveDanmuSession session = LiveDanmuSession(
-      webRid: widget.webRid,
-      // 首页已建立「主播 → 凭证」绑定；本主播指定了凭证就用它，否则匿名自动获取。
-      credentialCookies: roomCookiesFor(widget.webRid),
-    );
+    final LiveDanmuSession session = widget.sessionFactory?.call() ??
+        LiveDanmuSession(
+          webRid: widget.webRid,
+          // 首页已建立「主播 → 凭证」绑定；本主播指定了凭证就用它，否则匿名自动获取。
+          credentialCookies: roomCookiesFor(widget.webRid),
+        );
     _session = session;
     _stageSubscription = session.stages.listen((LiveSessionStage stage) {
       if (!mounted) return;
@@ -589,19 +596,23 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
           IconButton(
             tooltip: '清空',
             icon: const Icon(Icons.delete_outline),
-            onPressed: () => setState(() {
+            onPressed: () {
               // UX-23b：清空会丢掉当前会话全部弹幕且不可撤销，先确认。
               // 用 .then 而非 await，避免 await 之后再碰 context（零告警门禁）。
               unawaited(
                 showClearDanmakuConfirmDialog(context).then((bool? ok) {
                   if (!shouldClearDanmakuOnConfirm(ok)) return;
+                  if (!mounted) return;
+                  // 列表与计数必须在同一个 setState 里归零（#99）：取消 / 点遮罩时列表
+                  // 原样保留，若先把「已收」清零，状态栏与列表的口径就此分裂，还会把这个
+                  // 错误的 0 带进「复制诊断」的摘要里误导排查。
                   setState(() {
                     _raw.clear();
+                    _received = 0;
                   });
                 }),
               );
-              _received = 0;
-            }),
+            },
           ),
         ],
       ),
