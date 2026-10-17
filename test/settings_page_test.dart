@@ -688,48 +688,6 @@ void main() {
       );
     });
   });
-}
-
-/// 假的备份器：widget 测试跑在 FakeAsync 下，真实文件 IO 无法完成，
-/// 这里只验证设置页的交互接线；真实编解码与落盘由 data_transfer_test 覆盖。
-class FakeDataTransfer implements LocalDataTransfer {
-  FakeDataTransfer({
-    this.exportPayload = '{"app":"danmu-float","version":1}',
-    this.importError,
-  });
-
-  final String exportPayload;
-  final String? importError;
-  String? importedRaw;
-  int exportToDownloadsCalls = 0;
-  int exportToFileCalls = 0;
-
-  @override
-  Future<String> exportJson() async => exportPayload;
-
-  @override
-  Future<String?> exportToDownloads(String json) async {
-    exportToDownloadsCalls++;
-    return '下载/${backupFileName(DateTime(2026, 9, 28, 1, 2, 3))}';
-  }
-
-  @override
-  Future<String?> exportToFile(String json) async {
-    exportToFileCalls++;
-    return '/tmp/${backupFileName(DateTime(2026, 9, 28, 1, 2, 3))}';
-  }
-
-  @override
-  Future<DataImportSummary> importJson(String raw) async {
-    importedRaw = raw;
-    if (importError != null) throw DataTransferException(importError!);
-    return const DataImportSummary(
-      rooms: 1,
-      blockedKeywords: 1,
-      highlightKeywords: 0,
-      regexEnabled: false,
-    );
-  }
 
   testWidgets('关于分区显示注入的版本号，点一下可复制（#166）', (WidgetTester tester) async {
     _useLongScreen(tester);
@@ -779,6 +737,49 @@ class FakeDataTransfer implements LocalDataTransfer {
     );
     expect(find.text('已复制版本号'), findsOneWidget);
   });
+}
+
+/// 假的备份器：widget 测试跑在 FakeAsync 下，真实文件 IO 无法完成，
+/// 这里只验证设置页的交互接线；真实编解码与落盘由 data_transfer_test 覆盖。
+class FakeDataTransfer implements LocalDataTransfer {
+  FakeDataTransfer({
+    this.exportPayload = '{"app":"danmu-float","version":1}',
+    this.importError,
+  });
+
+  final String exportPayload;
+  final String? importError;
+  String? importedRaw;
+  int exportToDownloadsCalls = 0;
+  int exportToFileCalls = 0;
+
+  @override
+  Future<String> exportJson() async => exportPayload;
+
+  @override
+  Future<String?> exportToDownloads(String json) async {
+    exportToDownloadsCalls++;
+    return '下载/${backupFileName(DateTime(2026, 9, 28, 1, 2, 3))}';
+  }
+
+  @override
+  Future<String?> exportToFile(String json) async {
+    exportToFileCalls++;
+    return '/tmp/${backupFileName(DateTime(2026, 9, 28, 1, 2, 3))}';
+  }
+
+  @override
+  Future<DataImportSummary> importJson(String raw) async {
+    importedRaw = raw;
+    if (importError != null) throw DataTransferException(importError!);
+    return const DataImportSummary(
+      rooms: 1,
+      blockedKeywords: 1,
+      highlightKeywords: 0,
+      regexEnabled: false,
+    );
+  }
+
 }
 
 /// 测试环境的逻辑屏幕尺寸（Flutter 测试默认 800×600）。
