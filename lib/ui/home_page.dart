@@ -189,6 +189,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 的操作冲掉（表现为「点了没反应」）。一旦动过就不再接受读盘结果。
   bool _viewPrefsTouched = false;
 
+  /// 多选模式（#140）：进入后行内出现勾选框，AppBar 换成批量操作。
+  bool _selecting = false;
+
+  /// 当前勾选的主播（webRid 集合）。
+  final Set<String> _selectedWebRids = <String>{};
+
   /// 当前搜索词（仅本次会话有效，不落盘）。
   String _searchQuery = '';
 
@@ -473,6 +479,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 selected: _sortMode == mode,
                 onSelected: (bool _) => _setSortMode(mode),
               ),
+            // 搜索栏展开时顺带给一个多选入口：先筛出要处理的那批，再整体勾选（#140）。
+            TextButton.icon(
+              key: const ValueKey<String>('homeEnterSelection'),
+              onPressed: _rooms.isEmpty ? null : _enterSelection,
+              icon: const Icon(Icons.checklist, size: 16),
+              label: const Text('多选'),
+            ),
           ],
         ),
       ],
@@ -1019,6 +1032,218 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (mounted) _snack(group.isEmpty ? '已移出分组' : '已归入「$group」');
   }
 
+  /// 多选模式下的 AppBar 动作（#140）。
+  ///
+  /// 进入多选后原来那一排入口整组换成批量动作：图标数量没有变多（窄屏 360dp 上
+  /// 已有溢出风险，#148 钉过），标题也让位给「已选 N 项」。
+  List<Widget> _buildSelectionActions() => <Widget>[
+    IconButton(
+      tooltip: _selectedWebRids.length == _visibleRooms.length ? '取消全选' : '全选',
+      icon: Icon(
+        _selectedWebRids.length == _visibleRooms.length
+            ? Icons.deselect
+            : Icons.select_all,
+      ),
+      onPressed: _visibleRooms.isEmpty ? null : _toggleSelectAll,
+    ),
+    IconButton(
+      tooltip: '刷新所选',
+      icon: _refreshAllRunning
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.refresh),
+      onPressed: _selectedWebRids.isEmpty || _refreshAllRunning
+          ? null
+          : _refreshSelected,
+    ),
+    IconButton(
+      tooltip: '设置分组',
+      icon: const Icon(Icons.folder_outlined),
+      onPressed: _selectedWebRids.isEmpty ? null : _setGroupForSelected,
+    ),
+    IconButton(
+      tooltip: '移除所选',
+      icon: const Icon(Icons.delete_outline),
+      onPressed: _selectedWebRids.isEmpty ? null : _removeSelected,
+    ),
+  ];
+
+  void _enterSelection() {
+    setState(() {
+      _selecting = true;
+      _selectedWebRids.clear();
+    });
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selecting = false;
+      _selectedWebRids.clear();
+    });
+  }
+
+  void _toggleSelected(String webRid) {
+    setState(() {
+      if (!_selectedWebRids.remove(webRid)) _selectedWebRids.add(webRid);
+    });
+  }
+
+  /// 全选 / 取消全选只作用于**当前可见**的行（搜索过滤后全选不该悄悄选上隐藏项）。
+  void _toggleSelectAll() {
+    final List<String> visible = <String>[
+      for (final ManagedRoom room in _visibleRooms) room.webRid,
+    ];
+    setState(() {
+      if (_selectedWebRids.length == visible.length) {
+        _selectedWebRids.clear();
+      } else {
+        _selectedWebRids
+          ..clear()
+          ..addAll(visible);
+      }
+    });
+  }
+
+  /// 批量刷新所选（#140）：与「刷新全部」同一条安静刷新路径，整批只落盘一次。
+  Future<void> _refreshSelected() async {
+    if (_refreshAllRunning) return;
+    final List<ManagedRoom> targets = <ManagedRoom>[
+      for (final ManagedRoom room in _rooms)
+        if (_selectedWebRids.contains(room.webRid) &&
+            !_refreshing.contains(room.webRid) &&
+            !_autoRefreshing.contains(room.webRid))
+          room,
+    ];
+    if (targets.isEmpty) {
+      _snack('所选主播都在刷新中');
+      return;
+    }
+    setState(() {
+      _refreshAllRunning = true;
+      _refreshAllDone = 0;
+      _refreshAllTotal = targets.length;
+    });
+    int ok = 0;
+    int failed = 0;
+    for (final ManagedRoom room in targets) {
+      final String? error = await _refreshRoomQuiet(
+        room.webRid,
+        persist: false,
+      );
+      if (!mounted) return;
+      if (error == null) {
+        ok++;
+      } else {
+        failed++;
+      }
+      setState(() => _refreshAllDone++);
+    }
+    if (!mounted) return;
+    // 整批刷完只落盘一次（UX-11），与「刷新全部」口径一致。
+    await _persistRooms(_rooms);
+    if (!mounted) return;
+    setState(() => _refreshAllRunning = false);
+    _syncOverlayRooms();
+    _snack(
+      failed == 0 ? '已刷新所选 $ok 个主播' : '刷新完成：成功 $ok 个，失败 $failed 个',
+    );
+  }
+
+  /// 批量设置分组（#140）：一次落盘改完所有选中项；留空表示移出分组。
+  Future<void> _setGroupForSelected() async {
+    final int count = _selectedWebRids.length;
+    final String? group = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => _GroupDialog(
+        title: '$count 个直播间',
+        current: '',
+        groups: _groups,
+      ),
+    );
+    if (group == null || !mounted) return;
+    final List<ManagedRoom> next = _rooms
+        .map(
+          (ManagedRoom room) => _selectedWebRids.contains(room.webRid)
+              ? room.copyWith(group: group)
+              : room,
+        )
+        .toList(growable: false);
+    setState(() => _rooms = next);
+    await _persistRooms(next);
+    _syncOverlayRooms();
+    if (!mounted) return;
+    _snack(
+      group.isEmpty ? '已把 $count 个直播间移出分组' : '已把 $count 个直播间归到「$group」',
+    );
+  }
+
+  /// 批量移除（#140）。
+  ///
+  /// 必须复用 [_unbindRoomFromOverlay]：它负责「剔除该栏 → 用剩余栏位重排窗口」，
+  /// 全部剔完就关窗。绕过它直接改 _rooms 会让悬浮窗继续显示已删除的主播（PM-002）。
+  Future<void> _removeSelected() async {
+    final List<ManagedRoom> targets = <ManagedRoom>[
+      for (final ManagedRoom room in _rooms)
+        if (_selectedWebRids.contains(room.webRid)) room,
+    ];
+    if (targets.isEmpty) return;
+    final int shown = targets
+        .where(
+          (ManagedRoom room) =>
+              _overlayVisible && _prefs.webRids.contains(room.webRid),
+        )
+        .length;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text('移除 ${targets.length} 个直播间'),
+        content: Text(
+          shown == 0
+              ? '这 ${targets.length} 个主播会从列表里删掉，此操作不可撤销。'
+              : '这 ${targets.length} 个主播会从列表里删掉，其中 $shown 个正在悬浮窗中显示，'
+                    '会被一并移出栏位。此操作不可撤销。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('移除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final Set<String> removed = <String>{
+      for (final ManagedRoom room in targets) room.webRid,
+    };
+    final List<ManagedRoom> next = _rooms
+        .where((ManagedRoom room) => !removed.contains(room.webRid))
+        .toList(growable: false);
+    setState(() {
+      _rooms = next;
+      _selecting = false;
+      _selectedWebRids.clear();
+    });
+    // 一次落盘，再逐栏解绑：解绑内部会把剩余栏位重新下发，最后一次剔完即关窗。
+    await _persistRooms(next);
+    for (final String webRid in removed) {
+      await _unbindRoomFromOverlay(webRid);
+    }
+    _syncCredentialBindings();
+    _syncOverlayRooms();
+    if (!mounted) return;
+    _snack(
+      shown == 0 ? '已移除 ${targets.length} 个直播间' : '已移除 ${targets.length} 个直播间（含 $shown 个栏位）',
+    );
+  }
+
   /// 分组操作菜单（#140）：重命名 / 合并 / 解散。
   ///
   /// 分组在数据层是从各主播的 `group` 推导出来的，没有独立实体——所以这三个操作
@@ -1445,8 +1670,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _syncWindowSizeWithScreen(MediaQuery.sizeOf(context));
     return Scaffold(
       appBar: AppBar(
-        title: const Text('主播管理'),
-        actions: <Widget>[
+        // 多选模式下标题让位给「已选 N 项」，左侧给退出入口（#140）。
+        leading: _selecting
+            ? IconButton(
+                tooltip: '退出多选',
+                icon: const Icon(Icons.close),
+                onPressed: _exitSelection,
+              )
+            : null,
+        title: Text(_selecting ? '已选 ${_selectedWebRids.length} 项' : '主播管理'),
+        actions: _selecting ? _buildSelectionActions() : <Widget>[
           if (_overlayVisible)
             IconButton(
               tooltip: '关闭悬浮窗',
@@ -1816,22 +2049,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       room.lastRefreshedAt,
       now: DateTime.now(),
     );
+    // 多选模式下行首变成勾选框，整行点击改为切换勾选（不再直接连接）；
+    // 长按菜单在该模式下没有意义，一并让位（#140）。
+    final bool selected = _selectedWebRids.contains(room.webRid);
     return ListTile(
-      onTap: () => _connectSingle(room),
-      onLongPress: () => _showRoomActions(room),
+      onTap: _selecting
+          ? () => _toggleSelected(room.webRid)
+          : () => _connectSingle(room),
+      onLongPress: _selecting ? null : () => _showRoomActions(room),
+      selected: _selecting && selected,
       // 头像底色是开播状态的唯一编码（#135）：色觉障碍与屏幕阅读器用户拿不到
       // 这层信息，补等价文本，视觉不变。
-      leading: Semantics(
-        label: living == true ? '直播中' : '未开播',
-        excludeSemantics: true,
-        child: CircleAvatar(
-          backgroundColor: roomAvatarBackgroundColor(living: living),
-          child: Text(
-            room.displayName.characters.first,
-            style: TextStyle(color: roomAvatarForegroundColor()),
-          ),
-        ),
-      ),
+      leading: _selecting
+          ? Checkbox(
+              value: selected,
+              onChanged: (bool? _) => _toggleSelected(room.webRid),
+            )
+          : Semantics(
+              label: living == true ? '直播中' : '未开播',
+              excludeSemantics: true,
+              child: CircleAvatar(
+                backgroundColor: roomAvatarBackgroundColor(living: living),
+                child: Text(
+                  room.displayName.characters.first,
+                  style: TextStyle(color: roomAvatarForegroundColor()),
+                ),
+              ),
+            ),
       title: Text(
         room.displayName,
         maxLines: 1,
@@ -2028,6 +2272,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               onTap: () => Navigator.of(context).pop('credential'),
             ),
             ListTile(
+              // 批量操作的入口放在这里而不是 AppBar：标题栏已有 6 个图标，窄屏
+              // 360dp 再加一个会挤掉标题（#148），而长按行本来就是「对这个主播还能
+              // 做什么」的入口（#140）。
+              leading: const Icon(Icons.checklist),
+              title: const Text('多选'),
+              subtitle: const Text('勾选多个主播后批量刷新 / 分组 / 移除'),
+              onTap: () => Navigator.of(context).pop('select'),
+            ),
+            ListTile(
               leading: const Icon(Icons.delete_outline),
               title: const Text('移除主播'),
               onTap: () => Navigator.of(context).pop('remove'),
@@ -2042,6 +2295,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (action == 'group') await _editGroup(room);
     if (action == 'credential') await _editCredential(room);
     if (action == 'remove') await _confirmRemove(room);
+    if (action == 'select') {
+      _enterSelection();
+      _toggleSelected(room.webRid);
+    }
   }
 }
 

@@ -1741,4 +1741,157 @@ void main() {
       await tester.pump(const Duration(seconds: 10));
     });
   });
+  group('批量操作（#140）', () {
+    /// 三个主播：甲 / 乙 一组，丙单独。
+    Future<Directory> seedBatch(
+      WidgetTester tester, {
+      List<String> boundWebRids = const <String>[],
+    }) => _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '111',
+          name: '主播甲',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+        ManagedRoom(
+          webRid: '222',
+          name: '主播乙',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+        ManagedRoom(
+          webRid: '333',
+          name: '主播丙',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+      boundWebRids: boundWebRids,
+    );
+
+    /// 长按行的「更多操作」→ 多选：入口挂在长按菜单里，不走 AppBar（#148）。
+    Future<void> enterSelection(WidgetTester tester) async {
+      await tester.tap(find.byTooltip('更多操作').first);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text('多选'));
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    testWidgets('勾选两个主播批量移除：只删所选，栏位一并卸载并关窗', (
+      WidgetTester tester,
+    ) async {
+      final Directory dir = await seedBatch(
+        tester,
+        boundWebRids: <String>['111', '222'],
+      );
+      _mockPathProvider(tester, dir);
+      _mockOverlayChannels(tester, active: true);
+      _mockMessengerReplies(tester);
+      _markOverlayShown();
+      await _withTallViewport(tester);
+      await _pumpHomeWithDir(tester, dir);
+      _overlayCalls.clear();
+
+      await enterSelection(tester);
+      expect(find.text('已选 1 项'), findsOneWidget, reason: '进来的那行默认选中');
+
+      // 点整行切换勾选（多选模式下不再直接连接）。
+      await tester.tap(find.text('主播乙'));
+      await tester.pump();
+      expect(find.text('已选 2 项'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('移除所选'));
+      await tester.pump(const Duration(milliseconds: 500));
+      // 确认文案要说清「几个」以及「其中几个正在悬浮窗里」。
+      expect(find.textContaining('其中 2 个正在悬浮窗中显示'), findsOneWidget);
+      await tester.tap(find.text('移除'));
+
+      // 全部剔完必须关窗：解绑链路走到底会 _closeOverlay。
+      await _pumpUntil(
+        tester,
+        () => _overlayCalls.any(
+          (MethodCall call) => call.method == 'closeOverlay',
+        ),
+      );
+
+      expect(find.text('主播甲'), findsNothing);
+      expect(find.text('主播乙'), findsNothing);
+      expect(find.text('主播丙'), findsOneWidget, reason: '没勾的不动');
+      expect(
+        find.text('已选 2 项'),
+        findsNothing,
+        reason: '移除后退出多选，标题回到「主播管理」',
+      );
+      expect(find.text('主播管理'), findsOneWidget);
+
+      // 落盘的房间列表只剩丙。
+      List<ManagedRoom> saved = const <ManagedRoom>[];
+      for (int i = 0; i < 20; i++) {
+        saved =
+            await tester.runAsync(
+              () => RoomStore(directoryResolver: () async => dir).load(),
+            ) ??
+            const <ManagedRoom>[];
+        if (saved.length == 1) break;
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)),
+        );
+        await tester.pump();
+      }
+      expect(saved.length, 1);
+      expect(saved.single.webRid, '333');
+    });
+
+    testWidgets('勾选两个主播批量设置分组：一次落盘改完，未勾选的不动', (
+      WidgetTester tester,
+    ) async {
+      final Directory dir = await seedBatch(tester);
+      _mockPathProvider(tester, dir);
+      _mockOverlayChannels(tester, active: false);
+      _mockMessengerReplies(tester);
+      await _withTallViewport(tester);
+      await _pumpHomeWithDir(tester, dir);
+
+      await enterSelection(tester);
+      await tester.tap(find.text('主播乙'));
+      await tester.pump();
+      expect(find.text('已选 2 项'), findsOneWidget);
+      expect(find.byTooltip('刷新所选'), findsOneWidget, reason: '批量刷新入口在');
+
+      await tester.tap(find.byTooltip('设置分组'));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.enterText(find.byType(TextField).last, '游戏');
+      await tester.pump();
+      await tester.tap(find.text('保存'));
+      await _pumpUntil(
+        tester,
+        () => find.text('游戏 · 2 个直播间').evaluate().isNotEmpty,
+      );
+
+      List<ManagedRoom> saved = const <ManagedRoom>[];
+      for (int i = 0; i < 20; i++) {
+        saved =
+            await tester.runAsync(
+              () => RoomStore(directoryResolver: () async => dir).load(),
+            ) ??
+            const <ManagedRoom>[];
+        if (saved.where((ManagedRoom room) => room.group == '游戏').length == 2) {
+          break;
+        }
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)),
+        );
+        await tester.pump();
+      }
+      expect(saved.where((ManagedRoom room) => room.group == '游戏').length, 2);
+      expect(
+        saved
+            .firstWhere((ManagedRoom room) => room.webRid == '333')
+            .group
+            .isEmpty,
+        isTrue,
+        reason: '没勾选的丙不该被归进分组',
+      );
+    });
+  });
+
 }
