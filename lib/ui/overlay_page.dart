@@ -10,6 +10,7 @@ import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
 import 'package:danmu_float/ui/overlay_color_section.dart';
+import 'package:danmu_float/storage/my_theme.dart';
 import 'package:danmu_float/ui/overlay_theme.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/danmu/auto_scroll.dart';
@@ -372,6 +373,9 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 角色级颜色覆盖：空表表示完全跟随主题。
   Map<String, int> _colorOverrides = const <String, int>{};
 
+  /// 用户另存的具名主题（#147）：随 config / style 下发，供窗内配色弹窗列出。
+  List<MyTheme> _myThemes = const <MyTheme>[];
+
   /// 当前对比度策略：只有 adjust 会校正文字色，warn/allow 保留用户原色。
   String _contrastPolicy = overlayStyleAdjustPolicy;
 
@@ -528,6 +532,7 @@ class _OverlayPageState extends State<OverlayPage> {
           lightTheme: _lightTheme,
         );
         _colorOverrides = style.colorOverrides;
+        _myThemes = style.myThemes;
         _contrastPolicy = style.contrastPolicy;
         _publishPalette();
         _showTitleBar = style.showTitleBar;
@@ -600,6 +605,7 @@ class _OverlayPageState extends State<OverlayPage> {
         lightTheme: _lightTheme,
       );
       _colorOverrides = config.colorOverrides;
+      _myThemes = config.myThemes;
       _contrastPolicy = config.contrastPolicy;
       _publishPalette();
       _showTitleBar = config.showTitleBar;
@@ -1137,18 +1143,23 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 行高下限 28dp（UX-21）：旧版 `padding.vertical: 2` 配 `minimumSize: Size.zero`
   /// 让单栏字号只有 11dp 时行高 ≈17dp，菜单里每一条都点不准。宽度仍按内容自适应，
   /// 命中区不做 48dp——悬浮窗最小只有 200×150，48dp 一行会把菜单撑爆。
-  /// 悬浮球菜单里的「配色」：窗内只给整套预设与「全部跟随主题」，细调在主 App。
+  /// 悬浮球菜单里的「配色」：整套预设 + 「全部跟随主题」+ 用户另存的「我的主题」
+  /// （#147）；逐元素细调仍在主 App。
   Future<void> _pickOverlayColor() async {
     final OverlayColorChoice? choice = await showOverlayColorDialog(
       context,
       themeId: _themeId,
       overrideCount: _colorOverrides.length,
+      myThemes: _myThemes,
     );
     if (choice == null || !mounted) return;
     setState(() {
       _themeId = choice.themeId;
       if (choice.resetOverrides) {
         _colorOverrides = const <String, int>{};
+      } else if (choice.overrides.isNotEmpty) {
+        // 选中「我的主题」：整套覆盖表一次换上，与设置页「应用」同一份数据。
+        _colorOverrides = choice.overrides;
       }
     });
     // 窗内立刻生效（点完就该看到），同时把增量交给主 App 落盘，
@@ -1156,7 +1167,9 @@ class _OverlayPageState extends State<OverlayPage> {
     _publishPalette();
     _mergePatch(
       themeId: choice.themeId,
-      colorOverrides: choice.resetOverrides ? const <String, int>{} : null,
+      colorOverrides: choice.resetOverrides
+          ? const <String, int>{}
+          : (choice.overrides.isNotEmpty ? choice.overrides : null),
     );
   }
 

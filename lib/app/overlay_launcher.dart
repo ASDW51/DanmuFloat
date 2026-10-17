@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
+import 'package:danmu_float/storage/my_theme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
@@ -198,6 +199,7 @@ Future<void> shareOverlayStyle({
   bool lightTheme = false,
   String? themeId,
   Map<String, int> colorOverrides = const <String, int>{},
+  List<MyTheme> myThemes = const <MyTheme>[],
   String contrastPolicy = overlayStyleAdjustPolicy,
   bool showTitleBar = true,
   String focusBehavior = defaultFocusBehavior,
@@ -219,6 +221,7 @@ Future<void> shareOverlayStyle({
       lightTheme: lightTheme,
       themeId: themeId,
       colorOverrides: colorOverrides,
+      myThemes: myThemes,
       showTitleBar: showTitleBar,
       focusBehavior: focusBehavior,
       dragLocked: dragLocked,

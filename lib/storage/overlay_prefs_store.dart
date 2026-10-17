@@ -9,6 +9,9 @@ import 'dart:io';
 
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
+import 'package:danmu_float/storage/my_theme.dart';
+
+export 'package:danmu_float/storage/my_theme.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// 分栏配置文件名。
@@ -72,80 +75,6 @@ List<int> _parseRecentColors(Object? raw) {
     if (result.contains(item)) continue;
     result.add(item);
     if (result.length >= maxRecentOverlayColors) break;
-  }
-  return result;
-}
-
-/// 自定义主题（「我的主题」）的上限，与 [maxRecentOverlayColors] 取同一个数量级：
-/// 8 套已经够「白天 / 夜里 / 护眼 / 投影」这类场景，再多选择器自己也会变难用。
-const int maxMyThemes = 8;
-
-/// 自定义主题名的长度上限（字数，非字节）。
-const int myThemeMaxNameLength = 20;
-
-/// 用户另存的具名主题（#147）：一份「基础预设 + 整份角色覆盖表」的快照。
-///
-/// 为什么不把自定义主题的 id 塞进 [OverlayPrefs.themeId]：那条解析规则是「未知标识
-/// 一律回落 dark」（[_parseThemeId] 的上游 clamp），于是旧版本代码、旧备份、任何笔误
-/// 都会把一个自定义主题静默变成 dark。所以 themeId 继续只存预设 id，应用自定义主题
-/// 时一次性写回「基础预设 + 覆盖表」两件事。
-class MyTheme {
-  const MyTheme({
-    required this.id,
-    required this.name,
-    required this.baseThemeId,
-    required this.overrides,
-  });
-
-  /// 本地稳定标识（创建时的毫秒时间戳字符串）：重命名 / 用当前配色更新都不改它，
-  /// 否则列表项会在用户眼皮底下换位置。
-  final String id;
-  final String name;
-
-  /// 快照当时的基础预设 id（只可能在四个预设里，见 overlay_theme.dart 的 preset()）。
-  final String baseThemeId;
-
-  /// 角色名 → ARGB 的整份覆盖表，取值口径与 [OverlayPrefs.colorOverrides] 一致。
-  final Map<String, int> overrides;
-
-  Map<String, Object?> toJson() => <String, Object?>{
-    'id': id,
-    'name': name,
-    'baseThemeId': baseThemeId,
-    'overrides': overrides,
-  };
-
-  /// 解析单条自定义主题：任何一项不合法都返回 null，由调用方「逐条丢弃」，
-  /// 而不是让整张表失效（沿用 colorOverrides / resolve() 的既有口径）。
-  static MyTheme? tryParse(Object? raw) {
-    if (raw is! Map) return null;
-    final Object? id = raw['id'];
-    final Object? name = raw['name'];
-    final Object? baseThemeId = raw['baseThemeId'];
-    if (id is! String || id.isEmpty) return null;
-    if (name is! String || name.trim().isEmpty) return null;
-    if (name.length > myThemeMaxNameLength) return null;
-    if (baseThemeId is! String || baseThemeId.isEmpty) return null;
-    final Map<String, int> overrides = parseColorOverrides(raw['overrides']);
-    return MyTheme(
-      id: id,
-      name: name.trim(),
-      baseThemeId: baseThemeId,
-      overrides: overrides,
-    );
-  }
-}
-
-/// 解析自定义主题表：缺字段 → 空表（旧 JSON / 旧备份照常可读）；
-/// 单条非法 → 丢掉那条，其余保留；同 id 只留第一条。
-List<MyTheme> _parseMyThemes(Object? raw) {
-  if (raw is! List) return const <MyTheme>[];
-  final List<MyTheme> result = <MyTheme>[];
-  for (final Object? item in raw) {
-    final MyTheme? parsed = MyTheme.tryParse(item);
-    if (parsed == null) continue;
-    if (result.any((MyTheme theme) => theme.id == parsed.id)) continue;
-    result.add(parsed);
   }
   return result;
 }
@@ -349,6 +278,7 @@ class OverlayPrefs {
     // 消息（如首页删除在播主播后的重排），不带就会把 sepia / contrast 换成 dark。
     themeId: themeId,
     colorOverrides: colorOverrides,
+    myThemes: myThemes,
     contrastPolicy: contrastPolicy,
     showTitleBar: showTitleBar,
     focusBehavior: clampFocusBehavior(focusBehavior),
@@ -546,7 +476,7 @@ class OverlayPrefs {
       themeId: _parseThemeId(raw),
       colorOverrides: parseColorOverrides(raw['colorOverrides']),
       recentColors: _parseRecentColors(raw['recentColors']),
-      myThemes: _parseMyThemes(raw['myThemes']),
+      myThemes: parseMyThemes(raw['myThemes']),
       contrastPolicy: clampOverlayContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),

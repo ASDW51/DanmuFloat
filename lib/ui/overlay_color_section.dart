@@ -627,12 +627,18 @@ class OverlayColorChoice {
   const OverlayColorChoice({
     required this.themeId,
     required this.resetOverrides,
+    this.overrides = const <String, int>{},
   });
 
   final String themeId;
 
   /// 是否要求「全部跟随主题」——即清空主 App 里设过的角色级覆盖。
   final bool resetOverrides;
+
+  /// 选中「我的主题」时的整份覆盖表（#147）。非空表示这次选择来自自定义主题：
+  /// 窗内按「基础预设 + 本表」渲染，主 App 落盘也按这两件事写回，与设置页
+  /// 「应用」走同一条数据路径，不引入第二套口径。
+  final Map<String, int> overrides;
 }
 
 /// 悬浮窗内的配色入口。
@@ -646,11 +652,13 @@ Future<OverlayColorChoice?> showOverlayColorDialog(
   BuildContext context, {
   required String themeId,
   required int overrideCount,
+  List<MyTheme> myThemes = const <MyTheme>[],
 }) => showDialog<OverlayColorChoice>(
   context: context,
   builder: (BuildContext context) => _OverlayColorChoiceDialog(
     themeId: themeId,
     overrideCount: overrideCount,
+    myThemes: myThemes,
   ),
 );
 
@@ -658,10 +666,15 @@ class _OverlayColorChoiceDialog extends StatefulWidget {
   const _OverlayColorChoiceDialog({
     required this.themeId,
     required this.overrideCount,
+    required this.myThemes,
   });
 
   final String themeId;
   final int overrideCount;
+
+  /// 用户在设置页另存的具名主题（#147）。为空时这一块整段不渲染，旧的调用方
+  /// （只认四个预设）行为完全不变。
+  final List<MyTheme> myThemes;
 
   @override
   State<_OverlayColorChoiceDialog> createState() =>
@@ -671,6 +684,9 @@ class _OverlayColorChoiceDialog extends StatefulWidget {
 class _OverlayColorChoiceDialogState extends State<_OverlayColorChoiceDialog> {
   late String _themeId = OverlayTheme.preset(widget.themeId).id;
   late bool _reset = false;
+
+  /// 选中的自定义主题 id（#147）；null 表示选的是预设。
+  String? _myThemeId;
 
   @override
   Widget build(BuildContext context) {
@@ -692,10 +708,46 @@ class _OverlayColorChoiceDialogState extends State<_OverlayColorChoiceDialog> {
                   key: ValueKey<String>('overlayColorChoice_${preset.id}'),
                   label: Text(overlayThemeLabels[preset.id] ?? preset.id),
                   selected: preset.id == _themeId,
-                  onSelected: (_) => setState(() => _themeId = preset.id),
+                  onSelected: (_) => setState(() {
+                    _themeId = preset.id;
+                    // 选预设即放弃自定义主题的选择（两者互斥，避免「看着是预设、
+                    // 确定后却是自定义配色」）。
+                    _myThemeId = null;
+                  }),
                 ),
             ],
           ),
+          if (widget.myThemes.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              '我的主题',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).hintColor,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                for (final MyTheme saved in widget.myThemes)
+                  ChoiceChip(
+                    key: ValueKey<String>('overlayColorMyTheme_${saved.id}'),
+                    label: Text(
+                      saved.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    selected: saved.id == _myThemeId,
+                    onSelected: (_) => setState(() {
+                      _myThemeId = saved.id;
+                      _themeId = OverlayTheme.preset(saved.baseThemeId).id;
+                    }),
+                  ),
+              ],
+            ),
+          ],
           const SizedBox(height: 8),
           CheckboxListTile(
             key: const ValueKey<String>('overlayColorResetAll'),
@@ -721,12 +773,31 @@ class _OverlayColorChoiceDialogState extends State<_OverlayColorChoiceDialog> {
         ),
         TextButton(
           key: const ValueKey<String>('overlayColorConfirm'),
-          onPressed: () => Navigator.of(context).pop(
-            OverlayColorChoice(themeId: _themeId, resetOverrides: _reset),
-          ),
+          onPressed: () => Navigator.of(context).pop(_choice()),
           child: const Text('确定'),
         ),
       ],
     );
+  }
+
+  /// 把当前选择收敛成结果：选中自定义主题时返回「基础预设 + 覆盖表」，
+  /// 选中预设时沿用原来的两种语义（换预设 / 全部跟随主题）（#147）。
+  OverlayColorChoice _choice() {
+    // 「全部跟随主题」优先：用户勾了它就是要清空覆盖，自定义主题不再生效。
+    if (_reset) {
+      return OverlayColorChoice(themeId: _themeId, resetOverrides: true);
+    }
+    final String? myThemeId = _myThemeId;
+    if (myThemeId != null) {
+      for (final MyTheme saved in widget.myThemes) {
+        if (saved.id != myThemeId) continue;
+        return OverlayColorChoice(
+          themeId: OverlayTheme.preset(saved.baseThemeId).id,
+          resetOverrides: false,
+          overrides: saved.overrides,
+        );
+      }
+    }
+    return OverlayColorChoice(themeId: _themeId, resetOverrides: _reset);
   }
 }
