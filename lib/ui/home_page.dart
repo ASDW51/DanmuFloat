@@ -374,66 +374,70 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  /// 搜索与排序共用一个 AppBar 入口：五个既有动作已经占满一行，再塞两个图标会把
-  /// 360dp 机型挤到溢出（#148 的窄屏用例就是钉这个）。所以搜索框与排序都从这一个
-  /// 菜单进出，既有入口一个不动。
-  void _onListMenu(String value) {
-    if (value == 'search') {
-      setState(() => _searching = true);
-      return;
-    }
-    if (value.startsWith('sort:')) _setSortMode(value.substring(5));
-  }
-
-  Widget _buildListMenu() => PopupMenuButton<String>(
-    tooltip: '搜索与排序',
-    icon: const Icon(Icons.search),
-    onSelected: _onListMenu,
-    itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-      const PopupMenuItem<String>(value: 'search', child: Text('搜索直播间')),
-      const PopupMenuDivider(),
-      for (final String mode in homeSortModes)
-        CheckedPopupMenuItem<String>(
-          value: 'sort:$mode',
-          checked: mode == _sortMode,
-          child: Text(homeSortLabels[mode] ?? mode),
-        ),
-    ],
-  );
-
-  /// 搜索栏：结果计数 + 清除按钮；搜索态下每行的刷新 / 更多操作照旧可用。
-  Widget _buildSearchBar() => Padding(
+  /// 列表工具条：搜索框 + 三种排序（#139）。
+  ///
+  /// 为什么不做成弹出菜单：AppBar 已有五个动作，再并排加两个图标会在 360dp 上溢出
+  /// （#148 的窄屏用例就是钉这个），而弹出菜单要把排序藏进二级、看不到当前选择。
+  /// 这里用一个图标就地展开工具条：搜索框常驻当前会话、排序 chip 直接把「现在按
+  /// 什么排」摆在眼前，点一下即切换，没有路由动画也不遮挡列表。
+  Widget _buildListTools() => Padding(
     padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-    child: Row(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Expanded(
-          child: TextField(
-            key: const ValueKey<String>('homeSearchField'),
-            controller: _searchController,
-            autofocus: true,
-            decoration: InputDecoration(
-              isDense: true,
-              prefixIcon: const Icon(Icons.search, size: 18),
-              hintText: '搜索主播名 / 房间标题 / 房间号 / 分组',
-              border: const OutlineInputBorder(),
-              suffixText: _searchQuery.trim().isEmpty
-                  ? null
-                  : '${_visibleRooms.length} / ${_rooms.length}',
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: TextField(
+                key: const ValueKey<String>('homeSearchField'),
+                controller: _searchController,
+                decoration: InputDecoration(
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search, size: 18),
+                  hintText: '搜索主播名 / 房间标题 / 房间号 / 分组',
+                  border: const OutlineInputBorder(),
+                  suffixText: _searchQuery.trim().isEmpty
+                      ? null
+                      : '${_visibleRooms.length} / ${_rooms.length}',
+                ),
+                onChanged: (String value) =>
+                    setState(() => _searchQuery = value),
+              ),
             ),
-            onChanged: (String value) => setState(() => _searchQuery = value),
-          ),
+            IconButton(
+              key: const ValueKey<String>('homeSearchClose'),
+              tooltip: '退出搜索',
+              icon: const Icon(Icons.close),
+              onPressed: () {
+                _searchController.clear();
+                setState(() {
+                  _searchQuery = '';
+                  _searching = false;
+                });
+              },
+            ),
+          ],
         ),
-        IconButton(
-          key: const ValueKey<String>('homeSearchClose'),
-          tooltip: '退出搜索',
-          icon: const Icon(Icons.close),
-          onPressed: () {
-            _searchController.clear();
-            setState(() {
-              _searchQuery = '';
-              _searching = false;
-            });
-          },
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            Text(
+              '排序',
+              style: TextStyle(
+                fontSize: 12,
+                color: secondaryTextColor(Theme.of(context).brightness),
+              ),
+            ),
+            for (final String mode in homeSortModes)
+              ChoiceChip(
+                key: ValueKey<String>('homeSort_$mode'),
+                label: Text(homeSortLabels[mode] ?? mode),
+                selected: _sortMode == mode,
+                onSelected: (bool _) => _setSortMode(mode),
+              ),
+          ],
         ),
       ],
     ),
@@ -1258,7 +1262,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               icon: const Icon(Icons.close),
               onPressed: _closeOverlay,
             ),
-          _buildListMenu(),
+          IconButton(
+            tooltip: '搜索与排序',
+            icon: const Icon(Icons.search),
+            onPressed: () => setState(() => _searching = !_searching),
+          ),
           IconButton(
             tooltip: '刷新全部',
             icon: _refreshAllRunning
@@ -1294,7 +1302,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           // 数据是否还在比权限更要紧，排在权限提示之后、进度条之前（#82）。
           if (_roomsLoadWarning != null) _buildRoomsLoadWarning(),
           if (_refreshAllRunning) _buildRefreshAllProgress(),
-          if (_searching) _buildSearchBar(),
+          if (_searching) _buildListTools(),
           Expanded(child: _buildBody()),
         ],
       ),
