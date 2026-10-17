@@ -1326,6 +1326,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final bool refreshing = _refreshing.contains(room.webRid);
     final bool? living = room.living;
     final String? credentialName = _credentialNameOf(room);
+    // 这一栏当前是否正在悬浮窗里显示（prd F8 / F15 的状态回报已写进 _prefs.webRids，
+    // 与「多栏连接」弹窗同源）。用户挂机看几个直播间、回到首页想确认「在看哪几个」时，
+    // 这是唯一能直接回答的地方——窗内「栏位状态」藏在悬浮球菜单里（#144）。
+    // 关窗后 _overlayVisible 为 false，标识必须跟着消失，否则会出现「窗没了标记还挂着」。
+    final bool inOverlay =
+        _overlayVisible && _prefs.webRids.contains(room.webRid);
     // 数据新旧直接影响「要不要再刷一次」的判断，行内必须能看出来（UX-04）。
     final String refreshedAgo = formatRefreshedAgo(
       room.lastRefreshedAt,
@@ -1349,6 +1355,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          if (inOverlay)
+            // 放 subtitle 而不是 trailing：行内已有「刷新」「连接弹幕」「更多操作」，
+            // 360dp 窄屏再往 trailing 塞文字必然溢出（UX-07 的教训）。
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  Icons.push_pin_outlined,
+                  size: 12,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    '悬浮窗显示中',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           Text(
             '${room.webRid} · ${_livingLabel(living)}',
             style: const TextStyle(fontSize: 12),

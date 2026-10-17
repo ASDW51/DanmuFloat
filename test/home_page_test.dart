@@ -1202,4 +1202,124 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
     await tester.pump(const Duration(seconds: 2));
   });
+
+  testWidgets('悬浮窗正在显示的直播间在行内标出，换绑/关窗后立即更新（#144）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '111',
+          name: '主播甲',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+        ManagedRoom(
+          webRid: '222',
+          name: '主播乙',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+        ManagedRoom(
+          webRid: '333',
+          name: '主播丙',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+      boundWebRids: <String>['111', '222'],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: true);
+    _mockMessengerReplies(tester);
+    _markOverlayShown();
+    await _withTallViewport(tester);
+
+    await _pumpHomeWithDir(tester, dir);
+    await _pumpUntil(
+      tester,
+      () => find.byTooltip('关闭悬浮窗').evaluate().isNotEmpty,
+    );
+    expect(find.byTooltip('关闭悬浮窗'), findsOneWidget, reason: '前置：首页已认为悬浮窗开着');
+
+    Finder tileOf(String name) =>
+        find.ancestor(of: find.text(name), matching: find.byType(ListTile));
+    expect(
+      find.descendant(of: tileOf('主播甲'), matching: find.text('悬浮窗显示中')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: tileOf('主播乙'), matching: find.text('悬浮窗显示中')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: tileOf('主播丙'), matching: find.text('悬浮窗显示中')),
+      findsNothing,
+      reason: '没绑在栏位里的主播不能被标成「显示中」',
+    );
+    expect(find.text('悬浮窗显示中'), findsNWidgets(2));
+
+    // 窗内换绑走既有上报链路（不新增通道 / 协议字段）：丙接替甲。
+    pushOverlayStatusForTest(const OverlayStatus(
+      stage: LiveSessionStage.live,
+      received: 10,
+      webRids: <String>['222', '333'],
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      find.descendant(of: tileOf('主播丙'), matching: find.text('悬浮窗显示中')),
+      findsOneWidget,
+      reason: '窗内换绑后标识要跟着换，否则又变成第二套绑定口径',
+    );
+    expect(
+      find.descendant(of: tileOf('主播甲'), matching: find.text('悬浮窗显示中')),
+      findsNothing,
+    );
+
+    // 关窗：标记必须跟着消失，否则「窗已经关了，标记还挂着」。
+    pushOverlayStatusForTest(const OverlayStatus(
+      stage: LiveSessionStage.idle,
+      received: 0,
+      closed: true,
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('悬浮窗显示中'), findsNothing);
+  });
+
+  testWidgets('窄屏 360dp 加「悬浮窗显示中」标识不溢出，既有入口不被挤掉（#144）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '111',
+          name: '主播甲',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+      boundWebRids: <String>['111'],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: true);
+    _mockMessengerReplies(tester);
+    _markOverlayShown();
+    // trailing 已经有两个按钮 + 「更多」，标识只能放 subtitle：360dp 是最紧的常见宽度。
+    tester.view.physicalSize = const Size(360, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await _pumpHomeWithDir(tester, dir);
+    await _pumpUntil(
+      tester,
+      () => find.text('悬浮窗显示中').evaluate().isNotEmpty,
+    );
+
+    expect(tester.takeException(), isNull, reason: '加标识不能溢出（UX-07 的窄屏教训）');
+    expect(find.text('悬浮窗显示中'), findsOneWidget);
+    expect(
+      tester.widget<TextButton>(find.widgetWithText(TextButton, '刷新')).onPressed,
+      isNotNull,
+      reason: '既有的刷新入口必须仍然可点（AGENTS.md 要求不删既有入口）',
+    );
+    expect(find.byTooltip('更多操作'), findsOneWidget);
+  });
 }
