@@ -1694,6 +1694,11 @@ void main() {
       expect(find.text('游戏 · 2 个直播间'), findsOneWidget);
       expect(find.text('主播甲'), findsOneWidget);
 
+      // 标题可能落在视口外：先滚进视口再点，否则 tap 打不中（只发警告不生效）。
+      await tester.ensureVisible(
+        find.byKey(const ValueKey<String>('groupHeader_游戏')),
+      );
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey<String>('groupHeader_游戏')));
       await tester.pump();
 
@@ -1747,6 +1752,13 @@ void main() {
         1,
         reason: '整组改名必须一次落盘，中途写两次会出现两个分组并存',
       );
+      // 落盘是真实文件 I/O：先排空真实事件循环把写操作跑完，再读回来。
+      for (int i = 0; i < 3; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)),
+        );
+        await tester.pump();
+      }
       final List<ManagedRoom> saved =
           await tester.runAsync(
             () => RoomStore(directoryResolver: () async => dir).load(),
@@ -1796,6 +1808,13 @@ void main() {
       expect(find.text('主播甲'), findsOneWidget, reason: '解散分组不删直播间');
       expect(find.text('主播乙'), findsOneWidget);
 
+      // 落盘是真实文件 I/O：先排空真实事件循环把写操作跑完，再读回来。
+      for (int i = 0; i < 3; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)),
+        );
+        await tester.pump();
+      }
       final List<ManagedRoom> saved =
           await tester.runAsync(
             () => RoomStore(directoryResolver: () async => dir).load(),
