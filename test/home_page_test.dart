@@ -1710,7 +1710,7 @@ void main() {
 
       tester.widget<InkWell>(header).onTap!.call();
       await tester.pump();
-      expect(find.text(主播甲), findsOneWidget, reason: 再点一次恢复渲染);
+      expect(find.text('主播甲'), findsOneWidget, reason: '再点一次恢复渲染');
 
       // 折叠状态会落盘（真实文件写），收尾前给它时间跑完。
       await tester.pump(const Duration(seconds: 1));
