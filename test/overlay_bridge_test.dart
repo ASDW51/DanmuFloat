@@ -1042,4 +1042,65 @@ void main() {
       expect(needsHighPerformanceConfirm(9), isTrue);
     });
   });
+
+  group('分栏方向（#141）', () {
+    test('自动：与历史取值逐字段一致', () {
+      expect(const OverlayGrid(1).columns, 1);
+      expect(const OverlayGrid(1).rows, 1);
+      expect(const OverlayGrid(3).columns, 2);
+      expect(const OverlayGrid(3).rows, 2);
+      expect(const OverlayGrid(4).columns, 2);
+      expect(const OverlayGrid(5).columns, 3);
+      expect(const OverlayGrid(5).rows, 2);
+      expect(const OverlayGrid(0).rows, 0);
+      expect(const OverlayGrid(0).columns, 1);
+    });
+
+    test('纵向堆叠 = 单列 N 行；横向并排 = 单行 N 列', () {
+      const OverlayGrid vertical = OverlayGrid(
+        3,
+        direction: overlayGridVertical,
+      );
+      expect(vertical.columns, 1);
+      expect(vertical.rows, 3);
+
+      const OverlayGrid horizontal = OverlayGrid(
+        3,
+        direction: overlayGridHorizontal,
+      );
+      expect(horizontal.columns, 3);
+      expect(horizontal.rows, 1);
+
+      // 单栏时三档相同：只有一个栏位，方向没有意义。
+      for (final String direction in overlayGridDirections) {
+        expect(OverlayGrid(1, direction: direction).columns, 1);
+        expect(OverlayGrid(1, direction: direction).rows, 1);
+      }
+    });
+
+    test('未知 / 缺失取值回落自动，绝不抛', () {
+      expect(parseGridDirection(null), overlayGridAuto);
+      expect(parseGridDirection('diagonal'), overlayGridAuto);
+      expect(parseGridDirection(3), overlayGridAuto);
+      expect(parseGridDirection(overlayGridVertical), overlayGridVertical);
+    });
+
+    test('OverlayConfig 往返一致；缺字段与未知取值都回落自动', () {
+      final OverlayConfig config = OverlayConfig(
+        webRids: const <String>['1', '2', '3'],
+        gridDirection: overlayGridVertical,
+      );
+      final Map<String, Object?> json = config.toJson();
+      expect(
+        OverlayConfig.tryParse(json)!.gridDirection,
+        overlayGridVertical,
+      );
+
+      json['gridDirection'] = 'diagonal';
+      expect(OverlayConfig.tryParse(json)!.gridDirection, overlayGridAuto);
+
+      json.remove('gridDirection');
+      expect(OverlayConfig.tryParse(json)!.gridDirection, overlayGridAuto);
+    });
+  });
 }

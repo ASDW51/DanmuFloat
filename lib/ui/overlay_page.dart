@@ -352,7 +352,8 @@ class _OverlayPageState extends State<OverlayPage> {
   ///
   /// 不再跟着 config 下发缓存成字段：本地增 / 减栏位后布局必须立刻生效，
   /// 否则新增的栏位会被旧网格的行列数裁掉，看起来「栏位加了但没显示」。
-  OverlayGrid get _grid => OverlayGrid(_webRids.length);
+  OverlayGrid get _grid =>
+      OverlayGrid(_webRids.length, direction: _gridDirection);
 
   double _opacity = defaultOverlayOpacity;
   double _fontSize = defaultDanmuFontSize;
@@ -375,6 +376,9 @@ class _OverlayPageState extends State<OverlayPage> {
 
   /// 用户另存的具名主题（#147）：随 config / style 下发，供窗内配色弹窗列出。
   List<MyTheme> _myThemes = const <MyTheme>[];
+
+  /// 分栏方向（#141）：由 config 下发，缺字段即自动 = 历史外观。
+  String _gridDirection = overlayGridAuto;
 
   /// 当前对比度策略：只有 adjust 会校正文字色，warn/allow 保留用户原色。
   String _contrastPolicy = overlayStyleAdjustPolicy;
@@ -606,6 +610,7 @@ class _OverlayPageState extends State<OverlayPage> {
       );
       _colorOverrides = config.colorOverrides;
       _myThemes = config.myThemes;
+      _gridDirection = config.gridDirection;
       _contrastPolicy = config.contrastPolicy;
       _publishPalette();
       _showTitleBar = config.showTitleBar;
