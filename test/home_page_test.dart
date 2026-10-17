@@ -1617,6 +1617,12 @@ void main() {
     expect(dyOf('主播丙'), lessThan(dyOf('主播甲')), reason: '3000 比 1000 新');
     expect(dyOf('主播甲'), lessThan(dyOf('主播乙')), reason: '从未刷新的排最后');
 
+    // 落盘是真实文件 I/O：先给真实事件循环一点时间把写操作走完，否则重建页面会
+    // 在写完成之前就去读，读到默认值（测试里的竞态，不是产品逻辑问题）。
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 200)),
+    );
+
     // 排序偏好必须落盘：重建页面后仍按「最近刷新」排列（#139）。
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
