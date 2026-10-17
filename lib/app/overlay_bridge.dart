@@ -981,6 +981,7 @@ class OverlayPrefsPatch {
   const OverlayPrefsPatch({
     this.opacity,
     this.fontSize,
+    this.scrollSpeed,
     this.windowWidth,
     this.windowHeight,
     this.dragLocked,
@@ -995,6 +996,9 @@ class OverlayPrefsPatch {
 
   final double? opacity;
   final double? fontSize;
+
+  /// 弹幕滚动速度（#145）：弹幕页就地调节面板与设置页共用同一字段。
+  final double? scrollSpeed;
   final double? windowWidth;
   final double? windowHeight;
   final bool? dragLocked;
@@ -1018,6 +1022,7 @@ class OverlayPrefsPatch {
   bool get isEmpty =>
       opacity == null &&
       fontSize == null &&
+      scrollSpeed == null &&
       windowWidth == null &&
       windowHeight == null &&
       dragLocked == null &&
@@ -1032,6 +1037,8 @@ class OverlayPrefsPatch {
   Map<String, Object?> toJson() => <String, Object?>{
     if (opacity != null) 'opacity': clampOverlayOpacity(opacity!),
     if (fontSize != null) 'fontSize': clampDanmuFontSize(fontSize!),
+    if (scrollSpeed != null)
+      'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed!),
     if (windowWidth != null) 'windowWidth': clampOverlayWidth(windowWidth!),
     if (windowHeight != null) 'windowHeight': clampOverlayHeight(windowHeight!),
     if (dragLocked != null) 'dragLocked': dragLocked,
@@ -1050,6 +1057,7 @@ class OverlayPrefsPatch {
     if (raw is! Map) return null;
     final Object? opacity = raw['opacity'];
     final Object? fontSize = raw['fontSize'];
+    final Object? scrollSpeed = raw['scrollSpeed'];
     final Object? windowWidth = raw['windowWidth'];
     final Object? windowHeight = raw['windowHeight'];
     final Object? dragLocked = raw['dragLocked'];
@@ -1073,6 +1081,9 @@ class OverlayPrefsPatch {
       opacity: opacity is num ? clampOverlayOpacity(opacity.toDouble()) : null,
       fontSize: fontSize is num
           ? clampDanmuFontSize(fontSize.toDouble())
+          : null,
+      scrollSpeed: scrollSpeed is num
+          ? clampDanmuScrollSpeed(scrollSpeed.toDouble())
           : null,
       windowWidth: windowWidth is num
           ? clampOverlayWidth(windowWidth.toDouble())
