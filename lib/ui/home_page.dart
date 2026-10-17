@@ -1275,19 +1275,72 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    const Text('还没有主播'),
-                    const SizedBox(height: 8),
+                    Icon(
+                      Icons.live_tv,
+                      size: 56,
+                      color: secondaryTextColor(Theme.of(context).brightness),
+                    ),
+                    const SizedBox(height: 12),
                     Text(
-                      // 文件损坏时列表为空是「读不出来」而不是「真没有」，此时再引导
-                      // 用户添加等于坐实数据丢失（#82）。
-                      _roomsLoadWarning != null
-                          ? '主播列表读取失败，请先按上方提示处理，暂不要添加新主播'
-                          : '点击右上角 + 添加直播间号 / 链接 / 抖音号',
-                      style: TextStyle(
-                        color: secondaryTextColor(Theme.of(context).brightness),
-                        fontSize: 12,
+                      // 文件损坏时列表为空是「读不出来」而不是「真没有」：此时引导添加
+                      // 等于坐实数据丢失（#82），所以只给标题与提示，不给主按钮。
+                      _roomsLoadWarning != null ? '主播列表读取失败' : '还没有直播间',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    if (_roomsLoadWarning != null)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          '主播列表读取失败，请先按上方提示处理，暂不要添加新主播',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: secondaryTextColor(
+                              Theme.of(context).brightness,
+                            ),
+                            fontSize: 12,
+                          ),
+                        ),
+                      )
+                    else ...<Widget>[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          // 第一屏是唯一一次讲清价值主张的机会：必须点明弹幕是
+                          // 「悬浮在其他应用之上」，否则用户不知道加完会发生什么。
+                          '保存直播间后，弹幕会悬浮在其他应用之上显示，'
+                          '一边看直播一边刷弹幕，不打断当前操作。',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: secondaryTextColor(
+                              Theme.of(context).brightness,
+                            ),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        // 与右上角 + 走同一个 _add()：只包一层按钮，不新增添加路径。
+                        key: const ValueKey<String>('addFirstRoom'),
+                        onPressed: _add,
+                        icon: const Icon(Icons.add),
+                        label: const Text('添加第一个直播间'),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        '支持直播间号 / 分享链接 / 抖音号',
+                        style: TextStyle(
+                          color: secondaryTextColor(
+                            Theme.of(context).brightness,
+                          ),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
