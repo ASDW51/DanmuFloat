@@ -8,12 +8,14 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:danmu_float/app/app_version.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
 import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/room/managed_room.dart';
+import 'package:danmu_float/net/update_checker.dart';
 import 'package:danmu_float/room/room_info.dart';
 import 'package:danmu_float/room/room_info_client.dart';
 import 'package:danmu_float/storage/filter_store.dart';
@@ -22,6 +24,7 @@ import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/home_view_prefs.dart';
 import 'package:danmu_float/storage/prefs_merge.dart';
 import 'package:danmu_float/storage/room_store.dart';
+import 'package:danmu_float/storage/update_prefs.dart';
 import 'package:danmu_float/storage/theme_store.dart';
 import 'package:danmu_float/system/system_permissions.dart';
 import 'package:danmu_float/ui/add_room_dialog.dart';
@@ -94,6 +97,8 @@ class HomePage extends StatefulWidget {
     this.credentialStore,
     this.roomInfoClient,
     this.store,
+    this.updateChecker,
+    this.updatePrefsStore,
   });
 
   /// 「清除所有本地数据」完成后回调外层，把入口切回免责声明页（prd F26）。
@@ -115,6 +120,13 @@ class HomePage extends StatefulWidget {
   @visibleForTesting
   final RoomStore? store;
 
+  /// 检查更新的客户端与偏好存储（#166）：单测注入假 transport / 临时目录。
+  @visibleForTesting
+  final UpdateChecker? updateChecker;
+
+  @visibleForTesting
+  final UpdatePrefsStore? updatePrefsStore;
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -125,6 +137,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final RoomStore _store;
   late final OverlayPrefsStore _prefsStore;
   late final HomeViewPrefsStore _viewPrefsStore;
+
+  /// 自动检查更新（#166）：默认关闭，开启后每 24 小时最多一次。
+  late final bool _ownsUpdateChecker = widget.updateChecker == null;
+  late final UpdateChecker _updateChecker =
+      widget.updateChecker ?? UpdateChecker();
+  late final UpdatePrefsStore _updatePrefsStore =
+      widget.updatePrefsStore ?? UpdatePrefsStore();
 
   /// 凭证存储：用户配置的多份凭证加密落盘，启动时读回；主播可分别指定使用哪份。
   late final CredentialStore _credentialStore;
@@ -291,6 +310,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     unawaited(_load());
     unawaited(_loadPrefs());
     unawaited(_loadViewPrefs());
+    // 自动检查更新（#166）：挂在首帧之后，绝不阻塞启动——#86 的教训是启动链路上
+    // 任何异常都必须还能走到界面，这里同理（失败静默、不重试）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_maybeAutoCheckUpdate());
+    });
     unawaited(_loadFilter());
     // 凭证要先于任何连接读回：刷新房间信息与弹幕连接都按同一份取值。
     unawaited(_loadCredentials());
@@ -308,6 +332,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _searchController.dispose();
     _filterSubscription?.cancel();
     _roomInfoClient.close();
+    if (_ownsUpdateChecker) _updateChecker.close();
     super.dispose();
   }
 
@@ -365,6 +390,38 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return a.displayName.compareTo(b.displayName);
     });
     return sorted;
+  }
+
+  /// 自动检查更新（#166）。
+  ///
+  /// 只在用户显式开启时发请求；同一版本只提醒一次（落盘 lastNotifiedVersion），
+  /// 失败也写时间戳——弱网下不会每次回前台都重打一遍。全程静默，不弹错误。
+  Future<void> _maybeAutoCheckUpdate() async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final UpdatePrefs prefs = await _updatePrefsStore.load();
+    if (!mounted) return;
+    if (!shouldCheckForUpdate(
+      prefs.lastCheckedAt,
+      now,
+      enabled: prefs.autoCheck,
+    )) {
+      return;
+    }
+    final ReleaseInfo? release = await _updateChecker.fetchLatest();
+    if (!mounted) return;
+    // 成功失败都记时间：失败不写会退化成「每次回前台重试」。
+    await _updatePrefsStore.save(prefs.copyWith(lastCheckedAt: now));
+    if (!mounted || release == null) return;
+    if (!hasNewerVersion(release.version, appVersion)) return;
+    if (prefs.lastNotifiedVersion == release.version) return;
+    await _updatePrefsStore.save(
+      prefs.copyWith(
+        lastCheckedAt: now,
+        lastNotifiedVersion: release.version,
+      ),
+    );
+    if (!mounted) return;
+    _snack('发现新版本 v${release.version}，可在 设置 → 关于 查看更新日志');
   }
 
   /// 读回视图偏好（#139 / #140）；失败按默认值继续，不阻塞列表。
