@@ -663,7 +663,7 @@ void main() {
 
       await tester.pumpWidget(_wrapWithStore(const OverlayPrefs(), _noop, store));
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey<String>('settingsSection_弹幕字号')));
+      await tester.tap(find.byKey(const ValueKey<String>('settingsSection_悬浮窗样式')));
       await tester.pump();
 
       // 落盘是真实文件 I/O：给真实事件循环一点时间写完，再用同一份存储读回来。
@@ -674,12 +674,12 @@ void main() {
           const SettingsViewPrefs();
       expect(
         saved.collapsedSections,
-        contains('fontSize'),
-        reason: '收起「弹幕字号」后必须落盘，重进页面才能保持',
+        contains('style'),
+        reason: '收起「悬浮窗样式」后必须落盘，重进页面才能保持',
       );
       expect(
         saved.collapsedSections,
-        isNot(contains('style')),
+        isNot(contains('fontSize')),
         reason: '没碰过的分区不该被顺手记成收起',
       );
     });
