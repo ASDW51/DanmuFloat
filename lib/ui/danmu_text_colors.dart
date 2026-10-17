@@ -98,7 +98,7 @@ Color stageTextColor(LiveSessionStage stage, Brightness brightness) {
 Color danmuTypeColor(DanmakuKind kind, Brightness brightness) {
   final OverlayTheme theme = OverlayTheme.preset(
     brightness == Brightness.dark
-        ? defaultOverlayThemeId
+        ? overlayStyleDarkThemeId
         : overlayStyleLightThemeId,
   );
   return switch (kind) {

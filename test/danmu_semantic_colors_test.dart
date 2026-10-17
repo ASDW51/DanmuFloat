@@ -77,7 +77,7 @@ void main() {
     });
 
     test('类型前缀色直接取自 OverlayTheme，不再有第二份色表', () {
-      final OverlayTheme dark = OverlayTheme.preset(defaultOverlayThemeId);
+      final OverlayTheme dark = OverlayTheme.preset(overlayStyleDarkThemeId);
       final OverlayTheme light = OverlayTheme.preset(overlayStyleLightThemeId);
       expect(
         danmuTypeColor(DanmakuKind.screenChat, Brightness.dark),
