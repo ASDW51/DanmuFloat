@@ -27,6 +27,7 @@ import 'package:danmu_float/system/system_permissions.dart';
 import 'package:danmu_float/ui/add_room_dialog.dart';
 import 'package:danmu_float/ui/danmu_page.dart';
 import 'package:danmu_float/ui/high_performance_dialog.dart';
+import 'package:danmu_float/ui/home_group_ops.dart';
 import 'package:danmu_float/ui/settings_page.dart';
 import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
@@ -1153,12 +1154,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     required String to,
     required String message,
   }) async {
-    final List<ManagedRoom> next = _rooms
-        .map(
-          (ManagedRoom room) =>
-              room.group == from ? room.copyWith(group: to) : room,
-        )
-        .toList(growable: false);
+    final List<ManagedRoom> next = regroupRooms(_rooms, from: from, to: to);
     setState(() => _rooms = next);
     await _persistRooms(next);
     _syncOverlayRooms();
