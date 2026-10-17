@@ -227,7 +227,7 @@ class OverlayPrefs {
     colorOverrides: colorOverrides ?? this.colorOverrides,
     recentColors: recentColors ?? this.recentColors,
     myThemes: myThemes ?? this.myThemes,
-    gridDirection: gridDirection ?? this.gridDirection,
+    gridDirection: gridDirection,
     contrastPolicy: clampOverlayContrastPolicy(contrastPolicy ?? this.contrastPolicy),
     showTitleBar: showTitleBar ?? this.showTitleBar,
     focusBehavior: focusBehavior ?? this.focusBehavior,
