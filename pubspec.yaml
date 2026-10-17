@@ -28,6 +28,9 @@ dependencies:
   # 主播列表持久化：JSON 文件写入 App 私有目录（design.md 2.1 / 2.3）
   path_provider: ^2.1.4
   flutter_secure_storage: ^11.2.0
+  # 打开 GitHub Release 页（#166 第二层方案 B）：纯插件，仓库侧零原生改动。
+  # 只在「关于 → 检查更新」里用于跳转，不参与任何主流程。
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

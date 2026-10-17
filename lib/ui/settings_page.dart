@@ -7,6 +7,7 @@
 import 'dart:async';
 
 import 'package:danmu_float/app/app_version.dart';
+import 'package:danmu_float/net/update_checker.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
@@ -18,9 +19,11 @@ import 'package:danmu_float/storage/settings_view_prefs.dart';
 import 'package:danmu_float/ui/overlay_color_section.dart';
 import 'package:danmu_float/ui/overlay_style_preview.dart';
 import 'package:danmu_float/storage/theme_store.dart';
+import 'package:danmu_float/storage/update_prefs.dart';
 import 'package:danmu_float/ui/disclaimer_page.dart';
 import 'package:danmu_float/ui/filter_page.dart';
 import 'package:danmu_float/ui/onboarding_page.dart';
+import 'package:danmu_float/ui/update_section.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -39,6 +42,9 @@ class SettingsPage extends StatefulWidget {
     this.dataTransfer,
     this.onDataImported,
     this.buildVersion = appVersion,
+    this.updateChecker,
+    this.updatePrefsStore,
+    this.openUrl,
   });
 
   /// 进入页面时的偏好快照。
@@ -71,6 +77,15 @@ class SettingsPage extends StatefulWidget {
 
   /// 当前构建的版本号（#166）；默认取构建注入值，单测可替换。
   final String buildVersion;
+
+  /// 检查更新的网络客户端（#166）；单测注入假 transport。
+  final UpdateChecker? updateChecker;
+
+  /// 检查更新偏好存储（#166）；单测注入临时目录。
+  final UpdatePrefsStore? updatePrefsStore;
+
+  /// 打开外部链接的实现（#166）；单测注入替身，避开 url_launcher 平台通道。
+  final Future<bool> Function(Uri url)? openUrl;
 
   /// 备份 / 恢复本地数据（prd F26 侧能力）；单测可注入临时目录。
   final LocalDataTransfer? dataTransfer;
@@ -105,6 +120,18 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 折叠状态的落盘存储（单独一个文件，避免与主题偏好互相覆盖）。
   late final SettingsViewPrefsStore _viewPrefsStore =
       widget.viewPrefsStore ?? SettingsViewPrefsStore();
+
+  /// 检查更新的网络客户端（#166）：自己创建的要自己关，注入的由调用方负责。
+  late final bool _ownsUpdateChecker = widget.updateChecker == null;
+  late final UpdateChecker _updateChecker =
+      widget.updateChecker ?? UpdateChecker();
+
+  /// 关闭自己创建的 HTTP 客户端（#166）：注入的客户端归调用方所有，不能替它关。
+  @override
+  void dispose() {
+    if (_ownsUpdateChecker) _updateChecker.close();
+    super.dispose();
+  }
 
   /// 读回折叠状态；失败按「全部展开」继续，不阻塞页面。
   Future<void> _loadViewPrefs() async {
@@ -763,6 +790,12 @@ class _SettingsPageState extends State<SettingsPage> {
             trailing: const Icon(Icons.content_copy_outlined, size: 18),
           ),
           const Divider(height: 1),
+          UpdateSection(
+            checker: _updateChecker,
+            prefsStore: widget.updatePrefsStore ?? UpdatePrefsStore(),
+            currentVersion: widget.buildVersion,
+            openUrl: widget.openUrl,
+          ),
           ],
         ],
       ),
