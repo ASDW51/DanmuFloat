@@ -187,7 +187,7 @@ class OverlayPalette {
     maskColor: Colors.white,
     chromeBg: Colors.white70,
     menuBg: Color(0xF0FFFFFF),
-    typeScreenChat: Color(0xFFE65100),
+    typeScreenChat: Color(0xFFB33A00),
     typePrivilegeScreenChat: Color(0xFF2E7D32),
     typeGift: Color(0xFFC2185B),
     typeMember: Color(0xFF00695C),
