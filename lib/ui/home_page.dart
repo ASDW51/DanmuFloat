@@ -19,6 +19,7 @@ import 'package:danmu_float/room/room_info_client.dart';
 import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/local_data_reset.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
+import 'package:danmu_float/storage/home_view_prefs.dart';
 import 'package:danmu_float/storage/prefs_merge.dart';
 import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/storage/theme_store.dart';
@@ -122,6 +123,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 默认走应用私有目录。字段在 [initState] 按 [widget.directoryResolver] 初始化。
   late final RoomStore _store;
   late final OverlayPrefsStore _prefsStore;
+  late final HomeViewPrefsStore _viewPrefsStore;
 
   /// 凭证存储：用户配置的多份凭证加密落盘，启动时读回；主播可分别指定使用哪份。
   late final CredentialStore _credentialStore;
@@ -174,6 +176,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 悬浮窗样式与分栏偏好（透明度、上次勾选的主播）。
   OverlayPrefs _prefs = const OverlayPrefs();
 
+  /// 首页列表排序方式（#139），落盘在 home_view.json；默认添加顺序。
+  String _sortMode = homeSortAdded;
+
+  /// 当前搜索词（仅本次会话有效，不落盘）。
+  String _searchQuery = '';
+
+  /// 搜索栏是否展开。
+  bool _searching = false;
+
+  final TextEditingController _searchController = TextEditingController();
+
   /// 全局过滤偏好（prd F10 / F11 / F13），随建窗配置一并下发。
   final FilterStore _filterStore = FilterStore();
   FilterPrefs _filter = const FilterPrefs();
@@ -221,6 +234,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final Future<Directory> Function()? resolver = widget.directoryResolver;
     _store = widget.store ?? RoomStore(directoryResolver: resolver);
     _prefsStore = OverlayPrefsStore(directoryResolver: resolver);
+    _viewPrefsStore = HomeViewPrefsStore(directoryResolver: resolver);
     _credentialStore = widget.credentialStore ?? CredentialStore();
     WidgetsBinding.instance.addObserver(this);
     _overlaySubscription = overlayStatusStream.listen((OverlayStatus status) {
@@ -260,6 +274,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
     unawaited(_load());
     unawaited(_loadPrefs());
+    unawaited(_loadViewPrefs());
     unawaited(_loadFilter());
     // 凭证要先于任何连接读回：刷新房间信息与弹幕连接都按同一份取值。
     unawaited(_loadCredentials());
@@ -274,6 +289,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _overlaySubscription?.cancel();
+    _searchController.dispose();
     _filterSubscription?.cancel();
     _roomInfoClient.close();
     super.dispose();
@@ -293,6 +309,135 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       unawaited(_refreshStaleRooms());
     }
   }
+
+  /// 搜索词过滤后的房间（#139）：按 主播名 / 房间标题 / webRid / 分组名 做大小写
+  /// 不敏感的子串匹配。空搜索词返回全部，顺序仍是文件顺序（排序在组内做）。
+  List<ManagedRoom> get _visibleRooms {
+    final String query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) return _rooms;
+    return <ManagedRoom>[
+      for (final ManagedRoom room in _rooms)
+        if (room.displayName.toLowerCase().contains(query) ||
+            room.title.toLowerCase().contains(query) ||
+            room.webRid.toLowerCase().contains(query) ||
+            room.group.toLowerCase().contains(query))
+          room,
+    ];
+  }
+
+  /// 组内排序（#139）：分组维度优先于排序维度，与 [_buildGroupedRooms] 口径一致。
+  ///
+  /// 「直播中优先」把未知（null）排在已开播之后、未开播之前：未知是「还没查到」，
+  /// 不该和确认未开播混在一起；同级按名称，避免每次重建顺序抖动。
+  List<ManagedRoom> _sortedInGroup(List<ManagedRoom> rooms) {
+    if (_sortMode == homeSortAdded) return rooms;
+    final List<ManagedRoom> sorted = List<ManagedRoom>.of(rooms);
+    if (_sortMode == homeSortRecentlyRefreshed) {
+      sorted.sort((ManagedRoom a, ManagedRoom b) {
+        final int aAt = a.lastRefreshedAt ?? 0;
+        final int bAt = b.lastRefreshedAt ?? 0;
+        if (aAt != bAt) return bAt.compareTo(aAt);
+        return a.displayName.compareTo(b.displayName);
+      });
+      return sorted;
+    }
+    int rank(ManagedRoom room) =>
+        room.living == true ? 0 : (room.living == null ? 1 : 2);
+    sorted.sort((ManagedRoom a, ManagedRoom b) {
+      final int byLive = rank(a).compareTo(rank(b));
+      if (byLive != 0) return byLive;
+      return a.displayName.compareTo(b.displayName);
+    });
+    return sorted;
+  }
+
+  /// 读回视图偏好（#139）；失败按默认值继续，不阻塞列表。
+  Future<void> _loadViewPrefs() async {
+    final HomeViewPrefs prefs = await _viewPrefsStore.load();
+    if (!mounted) return;
+    setState(() => _sortMode = prefs.sortMode);
+  }
+
+  /// 切换排序并落盘（#139）。落盘失败只记日志：排序是纯视图偏好，
+  /// 失败也不该打断用户当前操作（下次进来回到默认而已）。
+  void _setSortMode(String mode) {
+    if (mode == _sortMode) return;
+    setState(() => _sortMode = parseHomeSortMode(mode));
+    unawaited(_saveSortMode());
+  }
+
+  Future<void> _saveSortMode() async {
+    try {
+      await _viewPrefsStore.save(HomeViewPrefs(sortMode: _sortMode));
+    } on Object catch (exception) {
+      debugPrint('保存首页排序偏好失败: $exception');
+    }
+  }
+
+  /// 搜索与排序共用一个 AppBar 入口：五个既有动作已经占满一行，再塞两个图标会把
+  /// 360dp 机型挤到溢出（#148 的窄屏用例就是钉这个）。所以搜索框与排序都从这一个
+  /// 菜单进出，既有入口一个不动。
+  void _onListMenu(String value) {
+    if (value == 'search') {
+      setState(() => _searching = true);
+      return;
+    }
+    if (value.startsWith('sort:')) _setSortMode(value.substring(5));
+  }
+
+  Widget _buildListMenu() => PopupMenuButton<String>(
+    tooltip: '搜索与排序',
+    icon: const Icon(Icons.search),
+    onSelected: _onListMenu,
+    itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+      const PopupMenuItem<String>(value: 'search', child: Text('搜索直播间')),
+      const PopupMenuDivider(),
+      for (final String mode in homeSortModes)
+        CheckedPopupMenuItem<String>(
+          value: 'sort:$mode',
+          checked: mode == _sortMode,
+          child: Text(homeSortLabels[mode] ?? mode),
+        ),
+    ],
+  );
+
+  /// 搜索栏：结果计数 + 清除按钮；搜索态下每行的刷新 / 更多操作照旧可用。
+  Widget _buildSearchBar() => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+    child: Row(
+      children: <Widget>[
+        Expanded(
+          child: TextField(
+            key: const ValueKey<String>('homeSearchField'),
+            controller: _searchController,
+            autofocus: true,
+            decoration: InputDecoration(
+              isDense: true,
+              prefixIcon: const Icon(Icons.search, size: 18),
+              hintText: '搜索主播名 / 房间标题 / 房间号 / 分组',
+              border: const OutlineInputBorder(),
+              suffixText: _searchQuery.trim().isEmpty
+                  ? null
+                  : '${_visibleRooms.length} / ${_rooms.length}',
+            ),
+            onChanged: (String value) => setState(() => _searchQuery = value),
+          ),
+        ),
+        IconButton(
+          key: const ValueKey<String>('homeSearchClose'),
+          tooltip: '退出搜索',
+          icon: const Icon(Icons.close),
+          onPressed: () {
+            _searchController.clear();
+            setState(() {
+              _searchQuery = '';
+              _searching = false;
+            });
+          },
+        ),
+      ],
+    ),
+  );
 
   /// 回前台静默补刷过期房间（UX-10）。
   ///
@@ -1113,6 +1258,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               icon: const Icon(Icons.close),
               onPressed: _closeOverlay,
             ),
+          _buildListMenu(),
           IconButton(
             tooltip: '刷新全部',
             icon: _refreshAllRunning
@@ -1148,6 +1294,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           // 数据是否还在比权限更要紧，排在权限提示之后、进度条之前（#82）。
           if (_roomsLoadWarning != null) _buildRoomsLoadWarning(),
           if (_refreshAllRunning) _buildRefreshAllProgress(),
+          if (_searching) _buildSearchBar(),
           Expanded(child: _buildBody()),
         ],
       ),
@@ -1349,6 +1496,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       );
     }
+    // 搜索无结果时给一句明确回执：空列表 + 只剩分组标题会让人以为数据丢了（#139）。
+    if (_searchQuery.trim().isNotEmpty && _visibleRooms.isEmpty) {
+      return Center(
+        child: Text(
+          '没有匹配的直播间',
+          style: TextStyle(
+            color: secondaryTextColor(Theme.of(context).brightness),
+          ),
+        ),
+      );
+    }
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
@@ -1360,21 +1518,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 按分组铺开列表（prd F14）：有分组的分组在前、按首次出现顺序，
   /// 「未分组」固定排在最后；只有未分组时不显示分组标题。
+  ///
+  /// 搜索（#139）先过滤再分组：分组标题只在组内还有匹配行时出现，避免出现
+  /// 「有标题、下面一片空白」；排序在组内进行，分组维度优先于排序维度。
   List<Widget> _buildGroupedRooms() {
-    final List<String> groups = _groups;
+    final List<ManagedRoom> visible = _visibleRooms;
+    final List<String> groups = <String>[
+      for (final String group in _groups)
+        if (visible.any((ManagedRoom room) => room.group == group)) group,
+    ];
     final List<Widget> children = <Widget>[];
     for (final String group in groups) {
       children.add(_buildGroupHeader(group));
-      for (final ManagedRoom room in _rooms) {
-        if (room.group != group) continue;
+      final List<ManagedRoom> members = _sortedInGroup(<ManagedRoom>[
+        for (final ManagedRoom room in visible)
+          if (room.group == group) room,
+      ]);
+      for (final ManagedRoom room in members) {
         children.add(_buildRoomTile(room));
         children.add(const Divider(height: 1));
       }
     }
-    final List<ManagedRoom> ungrouped = <ManagedRoom>[
-      for (final ManagedRoom room in _rooms)
+    final List<ManagedRoom> ungrouped = _sortedInGroup(<ManagedRoom>[
+      for (final ManagedRoom room in visible)
         if (room.group.isEmpty) room,
-    ];
+    ]);
     if (ungrouped.isNotEmpty) {
       if (groups.isNotEmpty) children.add(_buildGroupHeader('未分组'));
       for (final ManagedRoom room in ungrouped) {

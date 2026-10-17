@@ -1504,4 +1504,131 @@ void main() {
     );
     expect(find.text('还没有直播间'), findsNothing);
   });
+  testWidgets('搜索按主播名过滤、计数正确、清除后恢复，且行内操作照旧可用（#139）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(webRid: '735', name: '主播甲', addedAt: 1),
+        ManagedRoom(webRid: '736', name: '主播乙', addedAt: 2),
+        ManagedRoom(webRid: '737', name: '游戏主播丙', addedAt: 3),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: false);
+    _mockMessengerReplies(tester);
+    await _pumpHomeWithDir(tester, dir);
+    expect(find.text('主播甲'), findsOneWidget);
+
+    // 搜索与排序共用一个 AppBar 入口（不挤占既有五个动作）。
+    await tester.tap(find.byTooltip('搜索与排序'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('搜索直播间'));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('homeSearchField')),
+      '主播丙',
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('游戏主播丙'), findsOneWidget);
+    expect(find.text('主播甲'), findsNothing, reason: '不匹配的行必须被过滤掉');
+    expect(find.text('1 / 3'), findsOneWidget, reason: '搜索态要给出结果计数');
+    // 过滤只影响可见性，不能把行内操作一起藏掉。
+    expect(find.byTooltip('刷新'), findsOneWidget);
+    expect(find.byTooltip('更多操作'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey<String>('homeSearchClose')));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('主播甲'), findsOneWidget);
+    expect(find.text('游戏主播丙'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('搜索无结果时给出明确回执，不留空白列表（#139）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(webRid: '735', name: '主播甲', addedAt: 1),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: false);
+    _mockMessengerReplies(tester);
+    await _pumpHomeWithDir(tester, dir);
+
+    await tester.tap(find.byTooltip('搜索与排序'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('搜索直播间'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('homeSearchField')),
+      '不存在的房间',
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('没有匹配的直播间'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('排序：直播中优先 / 最近刷新按预期重排，并落盘记住（#139）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '735',
+          name: '主播甲',
+          addedAt: 1,
+          living: false,
+          lastRefreshedAt: 1000,
+        ),
+        ManagedRoom(webRid: '736', name: '主播乙', addedAt: 2, living: true),
+        ManagedRoom(
+          webRid: '737',
+          name: '主播丙',
+          addedAt: 3,
+          lastRefreshedAt: 3000,
+        ),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: false);
+    _mockMessengerReplies(tester);
+    await _pumpHomeWithDir(tester, dir);
+
+    double dyOf(String name) => tester.getTopLeft(find.text(name)).dy;
+
+    await tester.tap(find.byTooltip('搜索与排序'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('直播中优先'));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(dyOf('主播乙'), lessThan(dyOf('主播丙')), reason: '直播中排在未知之前');
+    expect(dyOf('主播丙'), lessThan(dyOf('主播甲')), reason: '未知排在未开播之前');
+
+    await tester.tap(find.byTooltip('搜索与排序'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('最近刷新'));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(dyOf('主播丙'), lessThan(dyOf('主播甲')), reason: '3000 比 1000 新');
+    expect(dyOf('主播甲'), lessThan(dyOf('主播乙')), reason: '从未刷新的排最后');
+
+    // 排序偏好必须落盘：重建页面后仍按「最近刷新」排列（#139）。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    _mockOverlayChannels(tester, active: false);
+    await _pumpHomeWithDir(tester, dir);
+    expect(dyOf('主播丙'), lessThan(dyOf('主播甲')), reason: '重建后应读回落盘的排序');
+
+    await tester.pump(const Duration(seconds: 2));
+  });
 }
