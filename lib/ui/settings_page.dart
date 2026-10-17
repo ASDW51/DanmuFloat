@@ -14,6 +14,7 @@ import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/storage/data_transfer.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/ui/overlay_color_section.dart';
+import 'package:danmu_float/ui/overlay_style_preview.dart';
 import 'package:danmu_float/storage/theme_store.dart';
 import 'package:danmu_float/ui/disclaimer_page.dart';
 import 'package:danmu_float/ui/filter_page.dart';
@@ -282,6 +283,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 _apply(_prefs.copyWith(scrollSpeed: value), persist: false),
             onChangeEnd: (double value) =>
                 _apply(_prefs.copyWith(scrollSpeed: value), persist: true),
+          ),
+          // 样式实时预览（#143）：没开悬浮窗时，改字号 / 透明度 / 配色也能立刻看到效果。
+          OverlayStylePreview(
+            themeId: _prefs.themeId,
+            overrides: _prefs.colorOverrides,
+            opacity: _prefs.opacity,
+            fontSize: _prefs.fontSize,
           ),
           const Divider(height: 1),
           const _SectionTitle('主题与皮肤'),
