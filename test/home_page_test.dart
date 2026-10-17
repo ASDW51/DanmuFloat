@@ -1669,21 +1669,30 @@ void main() {
       _mockPathProvider(tester, dir);
       _mockOverlayChannels(tester, active: false);
       _mockMessengerReplies(tester);
-      // 首页在 600dp 高时分组标题会落在视口外（tap 只发警告不生效），先放大视口。
+      // 首页在 600dp 高时分组标题会落在视口外，先放大视口再挂载。
       await _withTallViewport(tester);
       await _pumpHomeWithDir(tester, dir);
 
+      final Finder header =
+          find.byKey(const ValueKey<String>('groupHeader_游戏'));
       expect(find.text('游戏 · 2 个直播间'), findsOneWidget);
       expect(find.text('主播甲'), findsOneWidget);
-
-      // 标题可能落在视口外：先滚进视口再点，否则 tap 打不中（只发警告不生效）。
-      await tester.ensureVisible(
-        find.byKey(const ValueKey<String>('groupHeader_游戏')),
+      // 展开态是「收起」箭头。
+      expect(
+        find.descendant(of: header, matching: find.byIcon(Icons.expand_less)),
+        findsOneWidget,
       );
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey<String>('groupHeader_游戏')));
+
+      await tester.tap(header);
       await tester.pump();
 
+      // 先钉状态真的变了（箭头翻转），再钉渲染结果——两者分开断言，
+      // 出问题时能立刻看出是「没点到」还是「收起后没少渲染」。
+      expect(
+        find.descendant(of: header, matching: find.byIcon(Icons.expand_more)),
+        findsOneWidget,
+        reason: '点标题应当切到收起态',
+      );
       expect(
         find.text('主播甲'),
         findsNothing,
@@ -1696,9 +1705,9 @@ void main() {
       );
       expect(find.text('主播丙'), findsOneWidget, reason: '别的分组不受影响');
 
-      await tester.tap(find.byKey(const ValueKey<String>('groupHeader_游戏')));
+      await tester.tap(header);
       await tester.pump();
-      expect(find.text('主播甲'), findsOneWidget);
+      expect(find.text('主播甲'), findsOneWidget, reason: '再点一次恢复渲染');
 
       // 折叠状态会落盘（真实文件写），收尾前给它时间跑完。
       await tester.pump(const Duration(seconds: 1));
