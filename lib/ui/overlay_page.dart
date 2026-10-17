@@ -537,6 +537,7 @@ class _OverlayPageState extends State<OverlayPage> {
         );
         _colorOverrides = style.colorOverrides;
         _myThemes = style.myThemes;
+        _gridDirection = style.gridDirection;
         _contrastPolicy = style.contrastPolicy;
         _publishPalette();
         _showTitleBar = style.showTitleBar;
@@ -999,6 +1000,26 @@ class _OverlayPageState extends State<OverlayPage> {
             ),
             const SizedBox(height: 6),
             Text(
+              '分栏方向',
+              style: TextStyle(color: palette.chrome, fontSize: label),
+            ),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: <Widget>[
+                for (final String direction in overlayGridDirections)
+                  _menuButton(
+                    palette,
+                    label,
+                    overlayGridDirectionLabels[direction] ?? direction,
+                    direction == _gridDirection
+                        ? null
+                        : () => _setGridDirection(direction),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
               '悬浮球位置',
               style: TextStyle(color: palette.chrome, fontSize: label),
             ),
@@ -1337,6 +1358,7 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 合并一次待落盘的偏好增量（同字段以最新值为准）。
   void _mergePatch({
     String? themeId,
+    String? gridDirection,
     Map<String, int>? colorOverrides,
     double? opacity,
     double? fontSize,
@@ -1353,6 +1375,7 @@ class _OverlayPageState extends State<OverlayPage> {
       // null 表示「这次不改」：只有窗内配色弹窗会传值，其余菜单动作不能顺手
       // 把主 App 里设好的主题与自定义色冲掉（空表才是「清空」）。
       themeId: themeId ?? base.themeId,
+      gridDirection: gridDirection ?? base.gridDirection,
       colorOverrides: colorOverrides ?? base.colorOverrides,
       opacity: opacity ?? base.opacity,
       fontSize: fontSize ?? base.fontSize,
@@ -1548,13 +1571,30 @@ class _OverlayPageState extends State<OverlayPage> {
     );
     if (result == null || !mounted) return;
     if (_sameWebRids(result, _webRids)) return;
+    // 焦点按 webRid 复原（#141）：只换顺序时用户不必重新点一遍；焦点栏被移除或
+    // 换绑成别的房间时才复位。上报缓存与手势透明度按栏位序号存，重排后序号与房间
+    // 的对应关系已变，只能清空、由各栏下一次上报重建。
+    final String? focusedWebRid =
+        _focusIndex != null && _focusIndex! < _webRids.length
+        ? _webRids[_focusIndex!]
+        : null;
+    final int restored = focusedWebRid == null
+        ? -1
+        : result.indexOf(focusedWebRid);
     setState(() {
       _webRids = result;
       _reports.clear();
-      _focusIndex = null;
+      _focusIndex = restored >= 0 ? restored : null;
       _gestureOpacity.clear();
     });
     _reportState();
+  }
+
+  /// 切换分栏方向（#141）：窗内按新方向立刻重排，同时回报主 App 落盘。
+  void _setGridDirection(String direction) {
+    if (direction == _gridDirection) return;
+    setState(() => _gridDirection = direction);
+    _mergePatch(gridDirection: direction);
   }
 
   bool _sameWebRids(List<String> a, List<String> b) {
@@ -2704,6 +2744,17 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
     setState(() => _webRids.add(picked));
   }
 
+  /// 上移 / 下移一栏（#141）：只换顺序、不换绑定，[PaneStyle] 按 webRid 绑定
+  /// 所以样式与连接都跟着房间走；改完由外层 [_managePanes] 统一落盘并回报状态。
+  void _move(int index, int delta) {
+    final int target = index + delta;
+    if (target < 0 || target >= _webRids.length) return;
+    setState(() {
+      final String moved = _webRids.removeAt(index);
+      _webRids.insert(target, moved);
+    });
+  }
+
   void _removeAt(int index) {
     if (_webRids.length <= 1) return;
     setState(() => _webRids.removeAt(index));
@@ -2757,6 +2808,26 @@ class _PaneManagerDialogState extends State<_PaneManagerDialog> {
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
+                          IconButton(
+                            key: ValueKey<String>('paneMoveUp_$index'),
+                            tooltip: '上移',
+                            iconSize: 18,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: index == 0
+                                ? null
+                                : () => _move(index, -1),
+                            icon: const Icon(Icons.arrow_upward),
+                          ),
+                          IconButton(
+                            key: ValueKey<String>('paneMoveDown_$index'),
+                            tooltip: '下移',
+                            iconSize: 18,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: index == _webRids.length - 1
+                                ? null
+                                : () => _move(index, 1),
+                            icon: const Icon(Icons.arrow_downward),
+                          ),
                           TextButton(
                             onPressed: () => _switch(index),
                             style: TextButton.styleFrom(

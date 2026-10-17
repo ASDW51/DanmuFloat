@@ -499,4 +499,33 @@ void main() {
       );
     });
   });
+
+  group('分栏方向（#141）', () {
+    test('往返一致；缺字段与未知取值回落自动；窗内回报能落到偏好上', () {
+      const OverlayPrefs prefs = OverlayPrefs(
+        gridDirection: overlayGridVertical,
+      );
+      expect(prefs.toJson()['gridDirection'], overlayGridVertical);
+      expect(
+        OverlayPrefs.tryParse(prefs.toJson())!.gridDirection,
+        overlayGridVertical,
+      );
+
+      final Map<String, Object?> legacy = prefs.toJson()
+        ..remove('gridDirection');
+      expect(OverlayPrefs.tryParse(legacy)!.gridDirection, overlayGridAuto);
+
+      final Map<String, Object?> unknown = prefs.toJson()
+        ..['gridDirection'] = 'diagonal';
+      expect(OverlayPrefs.tryParse(unknown)!.gridDirection, overlayGridAuto);
+
+      // 窗内切换方向后回报的增量落到偏好上，其余字段不动。
+      final OverlayPrefs applied = prefs.appliedPatch(
+        const OverlayPrefsPatch(gridDirection: overlayGridHorizontal),
+      );
+      expect(applied.gridDirection, overlayGridHorizontal);
+      expect(applied.opacity, prefs.opacity);
+      expect(applied.fontSize, prefs.fontSize);
+    });
+  });
 }

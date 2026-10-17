@@ -232,6 +232,13 @@ const List<String> overlayGridDirections = <String>[
   overlayGridHorizontal,
 ];
 
+/// 方向的中文名（窗内菜单展示用），与 [overlayGridDirections] 一一对应。
+const Map<String, String> overlayGridDirectionLabels = <String, String>{
+  overlayGridAuto: '自动',
+  overlayGridVertical: '纵向',
+  overlayGridHorizontal: '横向',
+};
+
 /// 解析分栏方向：缺失 / 非字符串 / 不认识都回落自动，绝不抛（#141）。
 String parseGridDirection(Object? raw) =>
     raw is String && overlayGridDirections.contains(raw) ? raw : overlayGridAuto;
@@ -744,6 +751,7 @@ String resolveThemeId({String? themeId, required bool lightTheme}) {
 class OverlayStyle {
   const OverlayStyle({
     required this.opacity,
+    this.gridDirection = overlayGridAuto,
     this.themeId,
     this.colorOverrides = const <String, int>{},
     this.myThemes = const <MyTheme>[],
@@ -799,8 +807,12 @@ class OverlayStyle {
   /// 用户另存的具名主题（#147）：设置页新增 / 删除主题后随 style 消息同步给窗内。
   final List<MyTheme> myThemes;
 
+  /// 分栏方向（#141）：与 config 同口径，缺字段即自动。
+  final String gridDirection;
+
   Map<String, Object?> toJson() => <String, Object?>{
     'type': overlayStyleType,
+    'gridDirection': parseGridDirection(gridDirection),
     'opacity': clampOverlayOpacity(opacity),
     'fontSize': clampDanmuFontSize(fontSize),
     'scrollSpeed': clampDanmuScrollSpeed(scrollSpeed),
@@ -846,6 +858,7 @@ class OverlayStyle {
       ),
       colorOverrides: parseColorOverrides(raw['colorOverrides']),
       myThemes: parseMyThemes(raw['myThemes']),
+      gridDirection: parseGridDirection(raw['gridDirection']),
       contrastPolicy: clampOverlayStyleContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
@@ -975,6 +988,7 @@ class OverlayPrefsPatch {
     this.clickThrough,
     this.themeId,
     this.colorOverrides,
+    this.gridDirection,
     this.windowX,
     this.windowY,
   });
@@ -994,6 +1008,9 @@ class OverlayPrefsPatch {
   final String? themeId;
   final Map<String, int>? colorOverrides;
 
+  /// 分栏方向（#141）：窗内切换方向后回报，null 表示这次不改。
+  final String? gridDirection;
+
   /// 窗口在屏幕上的位置（dp），拖动 / 吸附收敛后由原生上报。
   final double? windowX;
   final double? windowY;
@@ -1008,6 +1025,7 @@ class OverlayPrefsPatch {
       clickThrough == null &&
       themeId == null &&
       colorOverrides == null &&
+      gridDirection == null &&
       windowX == null &&
       windowY == null;
 
@@ -1021,6 +1039,8 @@ class OverlayPrefsPatch {
     if (clickThrough != null) 'clickThrough': clickThrough,
     if (themeId != null) 'themeId': themeId,
     if (colorOverrides != null) 'colorOverrides': colorOverrides,
+    if (gridDirection != null)
+      'gridDirection': parseGridDirection(gridDirection),
     if (windowX != null) 'windowX': windowX,
     if (windowY != null) 'windowY': windowY,
   };
@@ -1045,6 +1065,10 @@ class OverlayPrefsPatch {
       // 用 containsKey 区分「没这个键」与「显式传了空表」：前者不动，后者是清空。
       colorOverrides: raw.containsKey('colorOverrides')
           ? parseColorOverrides(raw['colorOverrides'])
+          : null,
+      // 缺字段即 null（这次不改），未知取值回落自动（#141）。
+      gridDirection: raw['gridDirection'] is String
+          ? parseGridDirection(raw['gridDirection'])
           : null,
       opacity: opacity is num ? clampOverlayOpacity(opacity.toDouble()) : null,
       fontSize: fontSize is num

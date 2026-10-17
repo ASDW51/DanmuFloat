@@ -110,6 +110,7 @@ class OverlayPrefs {
     this.colorOverrides = const <String, int>{},
     this.recentColors = const <int>[],
     this.myThemes = const <MyTheme>[],
+    this.gridDirection = overlayGridAuto,
     this.contrastPolicy = defaultOverlayContrastPolicy,
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
@@ -153,6 +154,9 @@ class OverlayPrefs {
 
   /// 用户另存的具名主题（#147），上限 [maxMyThemes]。
   final List<MyTheme> myThemes;
+
+  /// 分栏方向（#141）：缺字段即自动，旧备份照常可读。
+  final String gridDirection;
 
   /// 对比度策略：adjust / warn / allow，非法值回落 adjust。
   final String contrastPolicy;
@@ -223,6 +227,7 @@ class OverlayPrefs {
     colorOverrides: colorOverrides ?? this.colorOverrides,
     recentColors: recentColors ?? this.recentColors,
     myThemes: myThemes ?? this.myThemes,
+    gridDirection: gridDirection ?? this.gridDirection,
     contrastPolicy: clampOverlayContrastPolicy(contrastPolicy ?? this.contrastPolicy),
     showTitleBar: showTitleBar ?? this.showTitleBar,
     focusBehavior: focusBehavior ?? this.focusBehavior,
@@ -244,6 +249,7 @@ class OverlayPrefs {
     paneStyles: paneStyles,
     themeId: patch.themeId ?? themeId,
     colorOverrides: patch.colorOverrides ?? colorOverrides,
+    gridDirection: patch.gridDirection ?? gridDirection,
     recentColors: recentColors,
     contrastPolicy: contrastPolicy,
     showTitleBar: showTitleBar,
@@ -278,6 +284,7 @@ class OverlayPrefs {
     // 消息（如首页删除在播主播后的重排），不带就会把 sepia / contrast 换成 dark。
     themeId: themeId,
     colorOverrides: colorOverrides,
+    gridDirection: gridDirection,
     myThemes: myThemes,
     contrastPolicy: contrastPolicy,
     showTitleBar: showTitleBar,
@@ -424,6 +431,7 @@ class OverlayPrefs {
     'colorOverrides': colorOverrides,
     'recentColors': recentColors,
     // 自定义主题（#147）：整份快照，缺字段的旧 JSON 读成空表。
+    'gridDirection': parseGridDirection(gridDirection),
     'myThemes': <Object?>[
       for (final MyTheme theme in myThemes) theme.toJson(),
     ],
@@ -476,6 +484,7 @@ class OverlayPrefs {
       themeId: _parseThemeId(raw),
       colorOverrides: parseColorOverrides(raw['colorOverrides']),
       recentColors: _parseRecentColors(raw['recentColors']),
+      gridDirection: parseGridDirection(raw['gridDirection']),
       myThemes: parseMyThemes(raw['myThemes']),
       contrastPolicy: clampOverlayContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,
