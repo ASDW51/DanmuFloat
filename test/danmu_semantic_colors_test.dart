@@ -1,3 +1,4 @@
+import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:danmu_float/ui/overlay_theme.dart';
