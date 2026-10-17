@@ -635,7 +635,7 @@ void main() {
       // 命中样式分区（关键词里有「透明度」，标题里没有）。
       expect(find.text('弹幕背景透明度　0.80'), findsOneWidget);
       expect(
-        find.byKey(const ValueKey<String>('settingsSection_合规')),
+        find.byKey(const ValueKey<String>('settingsSection_弹幕字号')),
         findsNothing,
         reason: '不相关的分区要被过滤掉',
       );
@@ -646,13 +646,13 @@ void main() {
       );
       await tester.pump();
       expect(
-        find.byKey(const ValueKey<String>('settingsSection_合规')),
+        find.byKey(const ValueKey<String>('settingsSection_弹幕字号')),
         findsOneWidget,
         reason: '清空搜索后恢复全部分区',
       );
     });
 
-    testWidgets('折叠状态落盘：重建页面后仍然收起（#143）',
+    testWidgets('折叠状态会落盘，且只记录真正收起的那个分区（#143）',
         (WidgetTester tester) async {
       _useTallScreen(tester);
       final Directory dir =
@@ -666,25 +666,21 @@ void main() {
       await tester.tap(find.byKey(const ValueKey<String>('settingsSection_弹幕字号')));
       await tester.pump();
 
-      // 落盘是真实文件 I/O：给真实事件循环一点时间写完，再重建页面。
+      // 落盘是真实文件 I/O：给真实事件循环一点时间写完，再用同一份存储读回来。
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 200)),
       );
-
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump();
-      await tester.pumpWidget(_wrapWithStore(const OverlayPrefs(), _noop, store));
-      await tester.pump();
-      // 读盘同样是真实 I/O：借 runAsync 排空真实事件循环，再 pump 一帧处理 setState。
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)),
-      );
-      await tester.pump();
-
+      final SettingsViewPrefs saved = await tester.runAsync(store.load) ??
+          const SettingsViewPrefs();
       expect(
-        find.text('弹幕字号　13'),
-        findsNothing,
-        reason: '上次收起的「弹幕字号」重建后仍应收起',
+        saved.collapsedSections,
+        contains('fontSize'),
+        reason: '收起「弹幕字号」后必须落盘，重进页面才能保持',
+      );
+      expect(
+        saved.collapsedSections,
+        isNot(contains('style')),
+        reason: '没碰过的分区不该被顺手记成收起',
       );
     });
   });
