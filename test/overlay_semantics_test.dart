@@ -9,7 +9,6 @@ import 'package:danmu_float/room/room_info.dart';
 import 'package:danmu_float/room/room_info_client.dart';
 import 'package:danmu_float/ui/overlay_page.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -67,7 +66,7 @@ void main() {
     );
     expect(ball.label, contains('菜单'));
     expect(
-      ball.getSemanticsData().hasFlag(SemanticsFlag.isButton),
+      ball.getSemanticsData().flagsCollection.isButton,
       isTrue,
       reason: '悬浮球必须被读成按钮',
     );
@@ -82,7 +81,7 @@ void main() {
     expect(retryNode.label, contains('重试'));
     expect(retryNode.label, contains('第 1 栏'), reason: '多栏时要说清重试的是哪一栏');
     expect(
-      retryNode.getSemanticsData().hasFlag(SemanticsFlag.isButton),
+      retryNode.getSemanticsData().flagsCollection.isButton,
       isTrue,
     );
   });
