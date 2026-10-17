@@ -341,4 +341,70 @@ void main() {
       expect((await store().load()).opacity, defaultOverlayOpacity);
     });
   });
+
+  group('自定义主题「我的主题」（#147）', () {
+    const MyTheme theme = MyTheme(
+      id: '1700000000000',
+      name: '夜间护眼',
+      baseThemeId: 'dark',
+      overrides: <String, int>{'menuBg': 0xFF101820, 'body': 0xFFE0F2F1},
+    );
+
+    test('toJson → tryParse 往返一致（含整份覆盖表）', () {
+      final OverlayPrefs prefs = OverlayPrefs(myThemes: <MyTheme>[theme]);
+      final OverlayPrefs? parsed = OverlayPrefs.tryParse(prefs.toJson());
+      expect(parsed, isNotNull);
+      expect(parsed!.myThemes, hasLength(1));
+      final MyTheme roundTrip = parsed.myThemes.single;
+      expect(roundTrip.id, theme.id);
+      expect(roundTrip.name, theme.name);
+      expect(roundTrip.baseThemeId, theme.baseThemeId);
+      expect(roundTrip.overrides, theme.overrides);
+    });
+
+    test('旧 JSON 缺 myThemes 字段时读成空表（旧备份照常可读）', () {
+      final Map<String, Object?> json = OverlayPrefs().toJson()
+        ..remove('myThemes');
+      expect(OverlayPrefs.tryParse(json)!.myThemes, isEmpty);
+    });
+
+    test('非法条目逐条丢弃，其余保留（不让整表失效）', () {
+      final OverlayPrefs? parsed = OverlayPrefs.tryParse(<String, Object?>{
+        'myThemes': <Object?>[
+          theme.toJson(),
+          // 空 id / 空名 / 缺基础预设 / 名字超长 / 非对象 / 同 id 重复
+          <String, Object?>{'id': '', 'name': '空 id', 'baseThemeId': 'dark'},
+          <String, Object?>{'id': 'x', 'name': '  ', 'baseThemeId': 'dark'},
+          <String, Object?>{'id': 'y', 'name': '缺基础预设'},
+          <String, Object?>{
+            'id': 'z',
+            // 24 字，明确超过 myThemeMaxNameLength（20）。
+            'name': '这是一个非常非常非常非常非常长的主题名字超过上限',
+            'baseThemeId': 'dark',
+          },
+          'not-a-map',
+          theme.toJson(),
+        ],
+      });
+      expect(parsed!.myThemes, hasLength(1));
+      expect(parsed.myThemes.single.id, theme.id);
+    });
+
+    test('覆盖表按 colorOverrides 口径过滤：只留不透明的合法 int 色', () {
+      final MyTheme? parsed = MyTheme.tryParse(<String, Object?>{
+        'id': 'a',
+        'name': 'A',
+        'baseThemeId': 'dark',
+        'overrides': <String, Object?>{
+          'body': 0xFF112233,
+          'halfTransparent': 0x80112233,
+          'outOfRange': 0x1FFFFFFFF,
+          'notInt': 'red',
+          '': 0xFF445566,
+        },
+      });
+      expect(parsed, isNotNull);
+      expect(parsed!.overrides, <String, int>{'body': 0xFF112233});
+    });
+  });
 }
