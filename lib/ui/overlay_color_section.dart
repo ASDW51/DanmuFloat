@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:danmu_float/app/overlay_bridge.dart';
+import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:danmu_float/ui/overlay_theme.dart';
 import 'package:flutter/material.dart';
@@ -118,6 +121,12 @@ class OverlayColorSection extends StatelessWidget {
     required this.contrastPolicy,
     required this.onContrastPolicyChanged,
     this.recentColors = const <int>[],
+    this.myThemes = const <MyTheme>[],
+    this.onSaveMyTheme,
+    this.onApplyMyTheme,
+    this.onRenameMyTheme,
+    this.onUpdateMyTheme,
+    this.onRemoveMyTheme,
   });
 
   /// 当前主题标识（未知值由 [OverlayTheme.preset] 回落深色）。
@@ -139,6 +148,18 @@ class OverlayColorSection extends StatelessWidget {
 
   /// 「最近使用」的颜色（新色在前）。跨主题共用一份，由偏好层维护。
   final List<int> recentColors;
+
+  /// 用户另存的具名主题（#147）。为空时区块只显示一句引导文案。
+  final List<MyTheme> myThemes;
+
+  /// 下面五个回调由设置页注入：保存 / 重命名 / 更新会先在偏好层校验（重名、超上限、
+  /// 覆盖表为空），失败原因由设置页弹 SnackBar——本组件不重复实现业务规则。
+  /// `onSaveMyTheme` 为 null 表示不显示「我的主题」区块（既有 widget 用例不受影响）。
+  final ValueChanged<String>? onSaveMyTheme;
+  final ValueChanged<String>? onApplyMyTheme;
+  final void Function(String id, String name)? onRenameMyTheme;
+  final ValueChanged<String>? onUpdateMyTheme;
+  final ValueChanged<String>? onRemoveMyTheme;
 
   @override
   Widget build(BuildContext context) {
@@ -207,6 +228,89 @@ class OverlayColorSection extends StatelessWidget {
             ],
           ),
         ),
+        if (onSaveMyTheme != null) ...<Widget>[
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text('我的主题', style: Theme.of(context).textTheme.titleSmall),
+          ),
+          if (myThemes.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text(
+                '调好颜色后点「保存为新主题」，就能在四个预设之外留住这一套（#147）',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: secondaryTextColor(brightness),
+                ),
+              ),
+            ),
+          for (final MyTheme saved in myThemes)
+            ListTile(
+              key: ValueKey<String>('myTheme_${saved.id}'),
+              dense: true,
+              title: Text(
+                saved.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                '基于${overlayThemeLabels[saved.baseThemeId] ?? saved.baseThemeId}'
+                ' · 自定义 ${saved.overrides.length} 个元素',
+                style: const TextStyle(fontSize: 12),
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  TextButton(
+                    key: ValueKey<String>('myThemeApply_${saved.id}'),
+                    onPressed: () => onApplyMyTheme?.call(saved.id),
+                    child: const Text('应用'),
+                  ),
+                  PopupMenuButton<String>(
+                    key: ValueKey<String>('myThemeMenu_${saved.id}'),
+                    tooltip: '主题操作',
+                    onSelected: (String action) {
+                      if (action == 'rename') {
+                        unawaited(_renameSavedTheme(context, saved));
+                      } else if (action == 'update') {
+                        onUpdateMyTheme?.call(saved.id);
+                      } else if (action == 'remove') {
+                        unawaited(_confirmRemoveTheme(context, saved));
+                      }
+                    },
+                    itemBuilder: (BuildContext context) =>
+                        const <PopupMenuEntry<String>>[
+                          PopupMenuItem<String>(
+                            value: 'rename',
+                            child: Text('重命名'),
+                          ),
+                          PopupMenuItem<String>(
+                            value: 'update',
+                            child: Text('用当前配色更新'),
+                          ),
+                          PopupMenuItem<String>(
+                            value: 'remove',
+                            child: Text('删除'),
+                          ),
+                        ],
+                  ),
+                ],
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const ValueKey<String>('myThemeSave'),
+                onPressed: () => unawaited(_saveCurrentAsTheme(context)),
+                icon: const Icon(Icons.bookmark_add_outlined),
+                label: const Text('保存为新主题'),
+              ),
+            ),
+          ),
+        ],
         const Divider(height: 1),
         for (final String role in OverlayTheme.colorKeys)
           _roleTile(context, theme, role),
@@ -214,8 +318,52 @@ class OverlayColorSection extends StatelessWidget {
     );
   }
 
-  Widget _roleTile(BuildContext context, OverlayTheme theme, String role) {
-    final bool followed = !overrides.containsKey(role);
+  /// 把当前配色另存为具名主题：先问名称，再交给设置页落盘（#147）。
+  Future<void> _saveCurrentAsTheme(BuildContext context) async {
+    final String? name = await _askThemeName(context);
+    if (name == null) return;
+    onSaveMyTheme?.call(name);
+  }
+
+  Future<void> _renameSavedTheme(BuildContext context, MyTheme theme) async {
+    final String? name = await _askThemeName(context, initial: theme.name);
+    if (name == null) return;
+    onRenameMyTheme?.call(theme.id, name);
+  }
+
+  /// 删除前二次确认（#147）：删除不可恢复，但**不影响当前配色**——当前颜色是
+  /// `colorOverrides` 的那份快照，删掉主题只是删掉「以后还能找回」的入口。
+  Future<void> _confirmRemoveTheme(BuildContext context, MyTheme theme) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('删除这个主题？'),
+        content: Text('「${theme.name}」删除后无法恢复；当前正在使用的颜色不受影响。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    onRemoveMyTheme?.call(theme.id);
+  }
+
+  /// 主题命名弹窗：返回去掉首尾空白的名称；取消返回 null。
+  Future<String?> _askThemeName(BuildContext context, {String? initial}) {
+    return showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => _MyThemeNameDialog(initial: initial),
+    );
+  }
+
+  Widget _roleTile(BuildContext context, OverlayTheme theme, String role) {    final bool followed = !overrides.containsKey(role);
     final Color color = theme.colorOf(role);
     return ListTile(
       key: ValueKey<String>('overlayRole_$role'),
@@ -397,6 +545,61 @@ class _OverlayColorPickerDialogState extends State<_OverlayColorPickerDialog> {
 }
 
 /// 色块：带一圈描边，避免浅色块在浅色底上「消失」。
+/// 主题命名弹窗（#147）：只负责「不为空才允许确认」与长度提示，
+/// 重名 / 超上限 / 同一套配色等规则统一在偏好层校验，避免两处口径漂移。
+class _MyThemeNameDialog extends StatefulWidget {
+  const _MyThemeNameDialog({this.initial});
+
+  final String? initial;
+
+  @override
+  State<_MyThemeNameDialog> createState() => _MyThemeNameDialogState();
+}
+
+class _MyThemeNameDialogState extends State<_MyThemeNameDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initial ?? '',
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final String trimmed = _controller.text.trim();
+    if (trimmed.isEmpty) return;
+    Navigator.of(context).pop(trimmed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool canSubmit = _controller.text.trim().isNotEmpty;
+    return AlertDialog(
+      title: Text(widget.initial == null ? '保存为新主题' : '重命名主题'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLength: myThemeMaxNameLength,
+        decoration: const InputDecoration(labelText: '主题名称'),
+        onChanged: (_) => setState(() {}),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: canSubmit ? _submit : null,
+          child: const Text('确定'),
+        ),
+      ],
+    );
+  }
+}
+
 class _ColorSwatch extends StatelessWidget {
   const _ColorSwatch({required this.color, this.size = 28});
 

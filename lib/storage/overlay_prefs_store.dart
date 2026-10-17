@@ -150,6 +150,24 @@ List<MyTheme> _parseMyThemes(Object? raw) {
   return result;
 }
 
+/// 校验自定义主题名：返回 null 表示合法，否则是给用户看的中文原因（#147）。
+///
+/// 只在这里定一套口径（保存 / 重命名共用），避免两处校验各自漂移。
+String? _validateMyThemeName(String name) {
+  if (name.isEmpty) return '名称不能为空';
+  if (name.length > myThemeMaxNameLength) return '名称最多 $myThemeMaxNameLength 个字';
+  return null;
+}
+
+/// 两份覆盖表是否逐项相同：「这套配色已经保存过了」的去重判断（#147）。
+bool _sameOverrides(Map<String, int> a, Map<String, int> b) {
+  if (a.length != b.length) return false;
+  for (final MapEntry<String, int> entry in a.entries) {
+    if (b[entry.key] != entry.value) return false;
+  }
+  return true;
+}
+
 class OverlayPrefs {
   const OverlayPrefs({
     this.webRids = const <String>[],
@@ -342,6 +360,113 @@ class OverlayPrefs {
   );
 
   /// 只保留当前绑定的房间的样式，避免下发时带上已解绑房间的冗余覆盖。
+  /// 把当前「基础预设 + 整份覆盖表」另存为具名主题（#147）。
+  ///
+  /// 返回 `(prefs, error)`：成功时 `prefs` 是新偏好、`error` 为 null；失败时 `prefs`
+  /// 为 null、`error` 是给用户看的中文原因——UI 直接弹提示，不靠异常传递。
+  ({OverlayPrefs? prefs, String? error}) saveAsMyTheme({
+    required String id,
+    required String name,
+  }) {
+    final String trimmed = name.trim();
+    final String? invalid = _validateMyThemeName(trimmed);
+    if (invalid != null) return (prefs: null, error: invalid);
+    if (myThemes.length >= maxMyThemes) {
+      return (prefs: null, error: '最多保存 $maxMyThemes 套主题，请先删除一套');
+    }
+    if (colorOverrides.isEmpty) {
+      return (prefs: null, error: '当前没有任何自定义颜色，无需保存');
+    }
+    if (myThemes.any((MyTheme theme) => theme.name == trimmed)) {
+      return (prefs: null, error: '已经有叫「$trimmed」的主题了');
+    }
+    if (myThemes.any(
+      (MyTheme theme) =>
+          theme.baseThemeId == themeId &&
+          _sameOverrides(theme.overrides, colorOverrides),
+    )) {
+      return (prefs: null, error: '这套配色已经保存过了');
+    }
+    final MyTheme created = MyTheme(
+      id: id,
+      name: trimmed,
+      baseThemeId: themeId,
+      overrides: Map<String, int>.unmodifiable(colorOverrides),
+    );
+    return (
+      prefs: copyWith(myThemes: <MyTheme>[...myThemes, created]),
+      error: null,
+    );
+  }
+
+  /// 重命名：只改 `name`，不动 `id` / 基础预设 / 覆盖表（#147）。
+  ({OverlayPrefs? prefs, String? error}) renameMyTheme({
+    required String id,
+    required String name,
+  }) {
+    final int index = myThemes.indexWhere((MyTheme theme) => theme.id == id);
+    if (index < 0) return (prefs: null, error: '这个主题已经不在了');
+    final String trimmed = name.trim();
+    final String? invalid = _validateMyThemeName(trimmed);
+    if (invalid != null) return (prefs: null, error: invalid);
+    if (myThemes.any(
+      (MyTheme theme) => theme.id != id && theme.name == trimmed,
+    )) {
+      return (prefs: null, error: '已经有叫「$trimmed」的主题了');
+    }
+    final List<MyTheme> next = <MyTheme>[...myThemes];
+    final MyTheme old = next[index];
+    next[index] = MyTheme(
+      id: old.id,
+      name: trimmed,
+      baseThemeId: old.baseThemeId,
+      overrides: old.overrides,
+    );
+    return (prefs: copyWith(myThemes: next), error: null);
+  }
+
+  /// 用当前配色覆盖某个已保存主题（#147）：基础预设与覆盖表一起更新。
+  ({OverlayPrefs? prefs, String? error}) updateMyThemeWithCurrent(String id) {
+    final int index = myThemes.indexWhere((MyTheme theme) => theme.id == id);
+    if (index < 0) return (prefs: null, error: '这个主题已经不在了');
+    if (colorOverrides.isEmpty) {
+      return (prefs: null, error: '当前没有任何自定义颜色，无需更新');
+    }
+    final List<MyTheme> next = <MyTheme>[...myThemes];
+    final MyTheme old = next[index];
+    next[index] = MyTheme(
+      id: old.id,
+      name: old.name,
+      baseThemeId: themeId,
+      overrides: Map<String, int>.unmodifiable(colorOverrides),
+    );
+    return (prefs: copyWith(myThemes: next), error: null);
+  }
+
+  /// 删除一条自定义主题（#147）。只动列表；调用方负责先二次确认。
+  OverlayPrefs removeMyTheme(String id) => copyWith(
+    myThemes: <MyTheme>[
+      for (final MyTheme theme in myThemes)
+        if (theme.id != id) theme,
+    ],
+  );
+
+  /// 应用某个已保存主题：把「基础预设 + 覆盖表」一次性写回当前偏好（#147）。
+  ///
+  /// 这正是「不把自定义 id 塞进 themeId」的好处——应用只是一次普通赋值，渲染侧
+  /// 仍走既有 `preset(themeId).resolve(colorOverrides)`，不需要任何新分支。
+  /// 找不到 id 时返回 null（列表已被别处改过，调用方按「主题已经不在了」提示）。
+  OverlayPrefs? applyMyTheme(String id) {
+    for (final MyTheme theme in myThemes) {
+      if (theme.id != id) continue;
+      return copyWith(
+        themeId: theme.baseThemeId,
+        colorOverrides: Map<String, int>.unmodifiable(theme.overrides),
+      );
+    }
+    return null;
+  }
+
   Map<String, PaneStyle> _stylesFor(List<String> rooms) => <String, PaneStyle>{
     for (final String room in rooms)
       if (paneStyles[room] != null) room: paneStyles[room]!,

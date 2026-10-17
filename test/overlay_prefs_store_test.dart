@@ -406,5 +406,97 @@ void main() {
       expect(parsed, isNotNull);
       expect(parsed!.overrides, <String, int>{'body': 0xFF112233});
     });
+
+    test('保存 / 重命名 / 更新 / 删除 / 应用（#147）', () {
+      const OverlayPrefs base = OverlayPrefs(
+        themeId: 'dark',
+        colorOverrides: <String, int>{'body': 0xFF112233},
+      );
+
+      final ({OverlayPrefs? prefs, String? error}) saved = base.saveAsMyTheme(
+        id: 'a',
+        name: '夜间护眼',
+      );
+      expect(saved.error, isNull);
+      final OverlayPrefs withTheme = saved.prefs!;
+      expect(withTheme.myThemes.single.name, '夜间护眼');
+      expect(withTheme.myThemes.single.baseThemeId, 'dark');
+      expect(withTheme.myThemes.single.overrides, base.colorOverrides);
+
+      // 三种拒绝都要给出可读原因，不能静默失败。
+      expect(
+        withTheme.saveAsMyTheme(id: 'b', name: '夜间护眼').error,
+        contains('已经有叫'),
+      );
+      expect(
+        withTheme.saveAsMyTheme(id: 'b', name: '另一套').error,
+        contains('已经保存过'),
+      );
+      expect(
+        const OverlayPrefs().saveAsMyTheme(id: 'c', name: '空').error,
+        contains('没有任何自定义颜色'),
+      );
+
+      // 重命名不动 id / 覆盖表；用当前配色更新同时改基础预设与覆盖表。
+      final OverlayPrefs renamed = withTheme
+          .renameMyTheme(id: 'a', name: '护眼')
+          .prefs!;
+      expect(renamed.myThemes.single.id, 'a');
+      expect(renamed.myThemes.single.name, '护眼');
+      expect(renamed.myThemes.single.overrides, base.colorOverrides);
+      final OverlayPrefs updated = withTheme
+          .copyWith(
+            themeId: 'light',
+            colorOverrides: <String, int>{'body': 0xFF445566},
+          )
+          .updateMyThemeWithCurrent('a')
+          .prefs!;
+      expect(updated.myThemes.single.baseThemeId, 'light');
+      expect(updated.myThemes.single.overrides, <String, int>{
+        'body': 0xFF445566,
+      });
+
+      // 应用 = 一次性写回「基础预设 + 覆盖表」：themeId 里永远不会出现自定义 id。
+      final OverlayPrefs applied = const OverlayPrefs(
+        myThemes: <MyTheme>[
+          MyTheme(
+            id: 'a',
+            name: '夜间护眼',
+            baseThemeId: 'sepia',
+            overrides: <String, int>{'body': 0xFF000000},
+          ),
+        ],
+      ).applyMyTheme('a')!;
+      expect(applied.themeId, 'sepia');
+      expect(applied.colorOverrides, <String, int>{'body': 0xFF000000});
+      expect(const OverlayPrefs().applyMyTheme('missing'), isNull);
+      expect(
+        const OverlayPrefs().renameMyTheme(id: 'x', name: 'y').error,
+        isNotNull,
+      );
+
+      // 删除只动列表。
+      expect(withTheme.removeMyTheme('a').myThemes, isEmpty);
+    });
+
+    test('上限 maxMyThemes：满 8 套后拒绝保存并提示', () {
+      final List<MyTheme> many = <MyTheme>[
+        for (int index = 0; index < maxMyThemes; index++)
+          MyTheme(
+            id: '$index',
+            name: '主题$index',
+            baseThemeId: 'dark',
+            overrides: <String, int>{'body': 0xFF000000 + index},
+          ),
+      ];
+      final OverlayPrefs prefs = OverlayPrefs(
+        colorOverrides: <String, int>{'body': 0xFF999999},
+        myThemes: many,
+      );
+      expect(
+        prefs.saveAsMyTheme(id: 'x', name: '新的').error,
+        contains('$maxMyThemes'),
+      );
+    });
   });
 }

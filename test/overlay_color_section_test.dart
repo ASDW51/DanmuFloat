@@ -1,6 +1,7 @@
 // 第 6 轮 UX-32(D)：主 App 的悬浮窗配色设置区。
 //
 // 这个 widget 被单独抽成公开类就是为了能在这里直接挂载断言，不必先搭起整个设置页。
+import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/ui/overlay_color_section.dart';
 import 'package:danmu_float/ui/overlay_theme.dart';
 import 'package:flutter/material.dart';
@@ -268,6 +269,93 @@ void main() {
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
       expect(calls, isEmpty);
+    });
+  });
+
+  group('我的主题（#147）', () {
+    Widget buildSection({
+      required List<MyTheme> myThemes,
+      ValueChanged<String>? onSaveMyTheme,
+      ValueChanged<String>? onApplyMyTheme,
+      ValueChanged<String>? onRemoveMyTheme,
+    }) {
+      return MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: OverlayColorSection(
+              themeId: 'dark',
+              overrides: const <String, int>{'body': 0xFF112233},
+              contrastPolicy: 'allow',
+              myThemes: myThemes,
+              onContrastPolicyChanged: (String _) {},
+              onThemeChanged: (_) {},
+              onOverrideChanged: (_, _) {},
+              onSaveMyTheme: onSaveMyTheme ?? (_) {},
+              onApplyMyTheme: onApplyMyTheme ?? (_) {},
+              onRenameMyTheme: (_, _) {},
+              onUpdateMyTheme: (_) {},
+              onRemoveMyTheme: onRemoveMyTheme ?? (_) {},
+            ),
+          ),
+        ),
+      );
+    }
+
+    testWidgets('列表展示已保存主题，应用 / 删除回调带回 id', (WidgetTester tester) async {
+      String? appliedId;
+      String? removedId;
+      await tester.pumpWidget(
+        buildSection(
+          myThemes: const <MyTheme>[
+            MyTheme(
+              id: 'a',
+              name: '夜间护眼',
+              baseThemeId: 'dark',
+              overrides: <String, int>{'body': 0xFF112233},
+            ),
+          ],
+          onApplyMyTheme: (String id) => appliedId = id,
+          onRemoveMyTheme: (String id) => removedId = id,
+        ),
+      );
+      await tester.tap(find.text('逐元素取色'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('夜间护眼'), findsOneWidget);
+      expect(find.textContaining('基于'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey<String>('myThemeApply_a')));
+      await tester.pump();
+      expect(appliedId, 'a');
+
+      await tester.tap(find.byKey(const ValueKey<String>('myThemeMenu_a')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除'));
+      await tester.pumpAndSettle();
+      // 二次确认：点菜单项先弹确认框，确认前不回调。
+      expect(removedId, isNull);
+      await tester.tap(find.widgetWithText(FilledButton, '删除'));
+      await tester.pumpAndSettle();
+      expect(removedId, 'a');
+    });
+
+    testWidgets('保存为新主题：输入名称后把名称交给上层', (WidgetTester tester) async {
+      String? savedName;
+      await tester.pumpWidget(
+        buildSection(
+          myThemes: const <MyTheme>[],
+          onSaveMyTheme: (String name) => savedName = name,
+        ),
+      );
+      await tester.tap(find.text('逐元素取色'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey<String>('myThemeSave')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '  夜间护眼  ');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, '确定'));
+      await tester.pumpAndSettle();
+      expect(savedName, '夜间护眼', reason: '首尾空白由弹窗 trim 掉');
     });
   });
 }
