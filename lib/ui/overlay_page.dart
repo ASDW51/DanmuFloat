@@ -18,6 +18,7 @@ import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 import 'package:danmu_float/room/room_info_client.dart';
 import 'package:danmu_float/ui/high_performance_dialog.dart';
+import 'package:danmu_float/ui/danmaku_semantics.dart';
 import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screen_overlay/flutter_screen_overlay.dart';
@@ -716,20 +717,27 @@ class _OverlayPageState extends State<OverlayPage> {
         child: Material(
           color: palette.chromeBg,
           shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: () => setState(() {
-              _menuOpen = !_menuOpen;
-              // 展开时按当前实际窗口尺寸初始化滑杆取值。
-              if (_menuOpen) _windowSize = MediaQuery.sizeOf(context);
-            }),
-            child: SizedBox(
-              width: 24,
-              height: 24,
-              child: Icon(
-                _menuOpen ? Icons.close : Icons.tune,
-                size: 15,
-                color: palette.chrome,
+          // 悬浮球是窗内唯一的菜单入口（#135）：TalkBack 只读出「按钮」的话，
+          // 用户根本不知道点它会怎样，所以标签必须带动作。
+          child: Semantics(
+            button: true,
+            label: _menuOpen ? '悬浮球，关闭菜单' : '悬浮球，打开菜单',
+            excludeSemantics: true,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () => setState(() {
+                _menuOpen = !_menuOpen;
+                // 展开时按当前实际窗口尺寸初始化滑杆取值。
+                if (_menuOpen) _windowSize = MediaQuery.sizeOf(context);
+              }),
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: Icon(
+                  _menuOpen ? Icons.close : Icons.tune,
+                  size: 15,
+                  color: palette.chrome,
+                ),
               ),
             ),
           ),
@@ -974,15 +982,24 @@ class _OverlayPageState extends State<OverlayPage> {
         // 行高下限 28dp（UX-21）：UX-08 的整个承诺是「标识行关掉后，菜单是窗内
         // 唯一能重连的地方」，而这个唯一出口旧版只有 ≈17dp 高。
         if (report?.retryable ?? false)
-          TextButton(
-            onPressed: () => _retryPane(index),
-            style: TextButton.styleFrom(
-              foregroundColor: palette.activeColor,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              minimumSize: const Size(0, 28),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          // 只说「重试」读者不知道重试的是哪一栏（#135）；把栏号与失败原因并进标签。
+          Semantics(
+            button: true,
+            label: '第 ${index + 1} 栏连接失败，点按重试',
+            excludeSemantics: true,
+            child: TextButton(
+              onPressed: () => _retryPane(index),
+              style: TextButton.styleFrom(
+                foregroundColor: palette.activeColor,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 2,
+                ),
+                minimumSize: const Size(0, 28),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text('重试', style: TextStyle(fontSize: fontSize)),
             ),
-            child: Text('重试', style: TextStyle(fontSize: fontSize)),
           ),
       ],
     );
@@ -2086,12 +2103,21 @@ class _OverlayPaneState extends State<_OverlayPane> {
           );
           return Row(
             children: <Widget>[
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: _stageColor(_stage),
-                  shape: BoxShape.circle,
+              // 状态点只有颜色（#135）：色觉障碍与屏幕阅读器用户都拿不到这层
+              // 信息，补一份等价文本，视觉不变。
+              Semantics(
+                label: paneStageSemanticsLabel(
+                  index: widget.index,
+                  stage: _stageText(_stage),
+                ),
+                excludeSemantics: true,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _stageColor(_stage),
+                    shape: BoxShape.circle,
+                  ),
                 ),
               ),
               const SizedBox(width: 5),
@@ -2131,36 +2157,51 @@ class _OverlayPaneState extends State<_OverlayPane> {
                     : label,
               ),
               // 焦点模式（prd F7）：放大本栏 / 还原；单栏布局下没有其它栏可让位，不显示。
+              // 只有图标没有文字（#135）：TalkBack 读不出动作，这里补标签。
               if (showFocus)
-                InkWell(
-                  onTap: widget.onToggleFocus,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 2,
-                    ),
-                    child: Icon(
-                      widget.focused ? Icons.fullscreen_exit : Icons.fullscreen,
-                      size: 14,
-                      color: widget.focused
-                          ? palette.activeColor
-                          : palette.secondary,
+                Semantics(
+                  button: true,
+                  label: widget.focused ? '还原本栏大小' : '放大本栏',
+                  excludeSemantics: true,
+                  child: InkWell(
+                    onTap: widget.onToggleFocus,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      child: Icon(
+                        widget.focused
+                            ? Icons.fullscreen_exit
+                            : Icons.fullscreen,
+                        size: 14,
+                        color: widget.focused
+                            ? palette.activeColor
+                            : palette.secondary,
+                      ),
                     ),
                   ),
                 ),
               // 单栏暂停 / 继续（prd F9）：只影响本栏的自动滚动，不干扰其它栏。
               if (showPause)
-                InkWell(
-                  onTap: _togglePaused,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 2,
-                    ),
-                    child: Icon(
-                      _paused ? Icons.play_arrow : Icons.pause,
-                      size: 14,
-                      color: _paused ? palette.activeColor : palette.secondary,
+                Semantics(
+                  button: true,
+                  label: _paused ? '继续本栏滚动' : '暂停本栏滚动',
+                  excludeSemantics: true,
+                  child: InkWell(
+                    onTap: _togglePaused,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      child: Icon(
+                        _paused ? Icons.play_arrow : Icons.pause,
+                        size: 14,
+                        color: _paused
+                            ? palette.activeColor
+                            : palette.secondary,
+                      ),
                     ),
                   ),
                 ),
@@ -2252,19 +2293,24 @@ class _OverlayPaneState extends State<_OverlayPane> {
               child: Material(
                 color: palette.chromeBg,
                 borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: _backToLatest,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 3,
-                    ),
-                    child: Text(
-                      '回到最新',
-                      style: TextStyle(
-                        color: palette.chrome,
-                        fontSize: smallerFontSize(widget.fontSize, 2),
+                child: Semantics(
+                  button: true,
+                  label: '回到最新弹幕',
+                  excludeSemantics: true,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: _backToLatest,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 3,
+                      ),
+                      child: Text(
+                        '回到最新',
+                        style: TextStyle(
+                          color: palette.chrome,
+                          fontSize: smallerFontSize(widget.fontSize, 2),
+                        ),
                       ),
                     ),
                   ),
@@ -2350,10 +2396,17 @@ class _OverlayPaneState extends State<_OverlayPane> {
     final DanmakuUser user = event.user;
     final String? mark = danmakuTypeLabel(event.kind);
     final Color? markColor = palette.typeColor(event.kind);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => unawaited(_showEventMenu(event)),
-      child: Padding(
+    return Semantics(
+      // 一条弹幕 = 一个语义单位（#135）：不给的话屏幕阅读器会把整栏当成一长串
+      // 无结构文本，既不能按条导航，也分不清哪段是昵称、哪段是正文。
+      container: true,
+      button: true,
+      label: danmakuSemanticsLabel(event),
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => unawaited(_showEventMenu(event)),
+        child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Text.rich(
           TextSpan(
@@ -2409,6 +2462,7 @@ class _OverlayPaneState extends State<_OverlayPane> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
