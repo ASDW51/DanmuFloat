@@ -1439,7 +1439,18 @@ void main() {
   });
   testWidgets('空列表时给出可点的主行动，并点明弹幕悬浮在其他应用之上（#142）',
       (WidgetTester tester) async {
-    await _pumpHome(tester);
+    final Directory dir =
+        Directory.systemTemp.createTempSync('danmu_float_home_empty');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: false);
+
+    await tester.pumpWidget(MaterialApp(
+      home: HomePage(
+        directoryResolver: () async => dir,
+        credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
+      ),
+    ));
     final Finder addFirst =
         find.byKey(const ValueKey<String>('addFirstRoom'));
     await _pumpUntil(tester, () => addFirst.evaluate().isNotEmpty);
