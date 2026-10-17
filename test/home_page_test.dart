@@ -1287,6 +1287,11 @@ void main() {
           )
           .first,
     );
+    // scrollUntilVisible 只保证「进了视口」，可能正好停在底边外 1px（#143 加了预览卡
+    // 后滚动位置变化，这里曾稳定地落在 601.2）。再 ensureVisible 一次，把它完整
+    // 滚进来再点，避免这类与页面高度耦合的偶发失败。
+    await tester.ensureVisible(find.text('清除所有本地数据'));
+    await tester.pump();
     await tester.tap(find.text('清除所有本地数据'));
     await tester.pump(const Duration(milliseconds: 400));
     await tester.tap(find.widgetWithText(FilledButton, '清除并重置'));
