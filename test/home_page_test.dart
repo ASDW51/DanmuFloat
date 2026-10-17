@@ -349,26 +349,6 @@ Future<void> _pumpHomeWithDir(WidgetTester tester, Directory dir) async {
   );
 }
 
-/// 挂到指定目录并注入可计数的 room store（#140：要断言「只落盘一次」）。
-///
-/// 不等待「关闭悬浮窗」入口：那由窗口探测驱动，分组用例并不建窗。
-Future<void> _pumpHomeWithStore(
-  WidgetTester tester,
-  Directory dir,
-  RoomStore store,
-) async {
-  await tester.pumpWidget(MaterialApp(
-    home: HomePage(
-      directoryResolver: () async => dir,
-      credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
-      store: store,
-    ),
-  ));
-  await _pumpUntil(tester, () => find.text('主播甲').evaluate().isNotEmpty);
-  // 排掉 initState 里的悬浮窗存活探测延时常量（1s）。
-  await tester.pump(const Duration(seconds: 2));
-}
-
 /// 模拟「已建窗」的全局状态：真实取值来自建窗动作，测试里直接置位。
 void _markOverlayShown() {
   setOverlayShownForTest(true);
