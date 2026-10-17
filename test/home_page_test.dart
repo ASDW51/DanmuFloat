@@ -1228,6 +1228,11 @@ void main() {
       findsOneWidget,
       reason: '损坏导致的空列表不能引导用户继续添加，否则等于坐实数据丢失',
     );
+    expect(
+      find.byKey(const ValueKey<String>('addFirstRoom')),
+      findsNothing,
+      reason: '损坏导致的空列表不给主行动（#142 / #82）',
+    );
     // 原始字节必须已经被留存下来，不能被后续任何一次保存覆盖（#82 的不可逆点）。
     final bool backupExists = await tester.runAsync(
           () => File('$roomsPath$roomStoreCorruptSuffix').exists(),
@@ -1431,5 +1436,57 @@ void main() {
       reason: '既有的刷新入口必须仍然可点（AGENTS.md 要求不删既有入口）',
     );
     expect(find.byTooltip('更多操作'), findsOneWidget);
+  });
+  testWidgets('空列表时给出可点的主行动，并点明弹幕悬浮在其他应用之上（#142）',
+      (WidgetTester tester) async {
+    await _pumpHome(tester);
+    final Finder addFirst =
+        find.byKey(const ValueKey<String>('addFirstRoom'));
+    await _pumpUntil(tester, () => addFirst.evaluate().isNotEmpty);
+
+    expect(find.text('还没有直播间'), findsOneWidget);
+    expect(
+      find.textContaining('悬浮在其他应用之上'),
+      findsOneWidget,
+      reason: '空状态是唯一一次讲清价值主张的机会，必须说明弹幕悬浮在其他应用之上',
+    );
+    expect(
+      find.textContaining('读取失败'),
+      findsNothing,
+      reason: '没有损坏警告时不该出现损坏文案',
+    );
+
+    // 与右上角 + 走同一个 _add()：点开的是同一个添加对话框，不是第二条路径。
+    await tester.tap(addFirst);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('添加主播'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pump(const Duration(milliseconds: 300));
+  });
+
+  testWidgets('列表非空时不渲染空状态引导块（#142）', (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '735',
+          name: '主播甲',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: false);
+    _mockMessengerReplies(tester);
+    await _pumpHomeWithDir(tester, dir);
+
+    expect(
+      find.byKey(const ValueKey<String>('addFirstRoom')),
+      findsNothing,
+      reason: '列表有数据时不该再显示「添加第一个直播间」的引导',
+    );
+    expect(find.text('还没有直播间'), findsNothing);
   });
 }
