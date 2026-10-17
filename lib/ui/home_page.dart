@@ -367,7 +367,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted || _viewPrefsTouched) return;
     setState(() {
       _sortMode = prefs.sortMode;
-      _collapsedGroups = prefs.collapsedGroups;
+      // 复制成可变集合：解析结果可能是 const 空集，直接持有会在下次折叠时抛
+      // 「Cannot change an unmodifiable set」。
+      _collapsedGroups = <String>{...prefs.collapsedGroups};
     });
   }
 
@@ -387,7 +389,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _toggleGroupCollapsed(String group) {
     _viewPrefsTouched = true;
     setState(() {
-      if (!_collapsedGroups.remove(group)) _collapsedGroups.add(group);
+      // 始终基于副本改动：_collapsedGroups 可能来自不可变集合（默认值或解析结果）。
+      final Set<String> next = <String>{..._collapsedGroups};
+      if (!next.remove(group)) next.add(group);
+      _collapsedGroups = next;
     });
     unawaited(_saveViewPrefs());
   }

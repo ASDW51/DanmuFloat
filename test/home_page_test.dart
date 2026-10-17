@@ -1683,10 +1683,7 @@ void main() {
         findsOneWidget,
       );
 
-      // 直接调用标题的 onTap：首页套着 RefreshIndicator + 可滚动列表，测试环境里
-      // 按坐标点标题不稳定（点不到时只发警告、状态不变），这里钉的是「回调 → 状态 →
-      // 渲染」这条链路本身。
-      tester.widget<InkWell>(header).onTap!.call();
+      await tester.tap(header);
       await tester.pump();
 
       // 先钉状态真的变了（箭头翻转），再钉渲染结果——两者分开断言，
@@ -1708,7 +1705,7 @@ void main() {
       );
       expect(find.text('主播丙'), findsOneWidget, reason: '别的分组不受影响');
 
-      tester.widget<InkWell>(header).onTap!.call();
+      await tester.tap(header);
       await tester.pump();
       expect(find.text('主播甲'), findsOneWidget, reason: '再点一次恢复渲染');
 
