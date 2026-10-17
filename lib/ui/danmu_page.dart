@@ -610,7 +610,6 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
             icon: const Icon(Icons.text_fields),
             onPressed: _openDisplaySheet,
           ),
-        actions: <Widget>[
           IconButton(
             tooltip: _overlayVisible ? '关闭悬浮窗' : '开启悬浮窗',
             icon: Icon(
