@@ -3,7 +3,6 @@
 // 钉子：dark/light 必须与原取值表逐位相等（外观零突变）；sepia 必须整组换掉——
 // 它此前继承深色皮肤的亮色，暖暗底上顶着刺眼前缀，护眼主题在类型弹幕这条路上是半成品。
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
-import 'package:danmu_float/ui/overlay_page.dart';
 import 'package:danmu_float/ui/overlay_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

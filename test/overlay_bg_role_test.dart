@@ -5,7 +5,6 @@
 // 现在改成对照**语义**：即 #68 之前那几句内联三元表达式在各自 isLight 下的分支。
 // 另外补「底色 vs 前景」的实测对比度：对比度守卫只拿文字色比 maskColor（底色角色不在
 // textColorKeys 里），所以「近白面板 + 纯白字」这类问题它一个都发现不了。
-import 'package:danmu_float/ui/overlay_page.dart';
 import 'package:danmu_float/ui/overlay_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
