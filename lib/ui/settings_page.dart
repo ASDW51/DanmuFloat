@@ -6,6 +6,7 @@
 // 免得一次拖动写几十次文件。
 import 'dart:async';
 
+import 'package:danmu_float/app/app_version.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
 import 'package:danmu_float/credential/cookie_provider.dart';
@@ -37,6 +38,7 @@ class SettingsPage extends StatefulWidget {
     this.viewPrefsStore,
     this.dataTransfer,
     this.onDataImported,
+    this.buildVersion = appVersion,
   });
 
   /// 进入页面时的偏好快照。
@@ -66,6 +68,9 @@ class SettingsPage extends StatefulWidget {
 
   /// 折叠状态存储可注入（单测用临时目录隔离，不依赖 path_provider 通道）。
   final SettingsViewPrefsStore? viewPrefsStore;
+
+  /// 当前构建的版本号（#166）；默认取构建注入值，单测可替换。
+  final String buildVersion;
 
   /// 备份 / 恢复本地数据（prd F26 侧能力）；单测可注入临时目录。
   final LocalDataTransfer? dataTransfer;
@@ -740,9 +745,37 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const Divider(height: 1),
           ],
+          // 「关于」（#166）：报障模板要求填版本号，但改造前全 App 没有任何地方
+          // 显示它——用户只能去系统「应用信息」里翻，或者乱填。
+          if (_sectionMatches('about', '关于'))
+            _SectionHeader(
+              title: '关于',
+              expanded: _sectionOpen('about', '关于'),
+              onTap: () => _toggleSection('about'),
+            ),
+          if (_sectionOpen('about', '关于')) ...<Widget>[
+          ListTile(
+            key: const ValueKey<String>('settingsAppVersion'),
+            leading: const Icon(Icons.info_outline),
+            title: const Text('版本'),
+            subtitle: Text(appVersionLabel(widget.buildVersion)),
+            onTap: () => _copyVersion(),
+            trailing: const Icon(Icons.content_copy_outlined, size: 18),
+          ),
+          const Divider(height: 1),
+          ],
         ],
       ),
     );
+  }
+
+  /// 复制版本文案：报障时直接粘进缺陷模板，比手抄可靠（#166）。
+  Future<void> _copyVersion() async {
+    await Clipboard.setData(
+      ClipboardData(text: appVersionLabel(widget.buildVersion)),
+    );
+    if (!mounted) return;
+    _snack('已复制版本号');
   }
 
   /// 从设置页重进首次启动引导（prd 4.10）：首次启动跳过后仍可随时回来补授权。
@@ -1429,6 +1462,7 @@ const Map<String, List<String>> settingsSectionKeywords = <String, List<String>>
   'permission': <String>['权限', '通知', '电池', '白名单'],
   'compliance': <String>['合规', '免责声明', '引导', '隐私'],
   'diagnostics': <String>['诊断', '日志', '复制'],
+  'about': <String>['关于', '版本', '版本号', '更新', '升级'],
 };
 
 /// 可折叠的分区标题（#143）：点标题收起 / 展开该分区。

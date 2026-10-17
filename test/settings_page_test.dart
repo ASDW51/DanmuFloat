@@ -783,6 +783,55 @@ void _useLongScreen(WidgetTester tester) {
   tester.view.physicalSize = const Size(_screenWidth, 3200);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
+  testWidgets('关于分区显示注入的版本号，点一下可复制（#166）', (WidgetTester tester) async {
+    _useLongScreen(tester);
+    final List<MethodCall> platformCalls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall call) async {
+        platformCalls.add(call);
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: SettingsPage(
+        prefs: const OverlayPrefs(),
+        onChanged: _noop,
+        buildVersion: '1.2.3',
+      ),
+    ));
+
+    // 设置页很长，「关于」在底部，先滚过去（分区默认全部展开）。
+    await tester.scrollUntilVisible(find.text('关于'), 300);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('v1.2.3'),
+      findsOneWidget,
+      reason: '报障模板要求填版本号，App 内必须能直接看到',
+    );
+
+    await tester.tap(find.byKey(const ValueKey<String>('settingsAppVersion')));
+    await tester.pumpAndSettle();
+
+    final Iterable<MethodCall> clipboard = platformCalls.where(
+      (MethodCall call) => call.method == 'Clipboard.setData',
+    );
+    expect(clipboard, isNotEmpty, reason: '点一下应把版本号复制走');
+    expect(
+      (clipboard.last.arguments as Map<Object?, Object?>)['text'],
+      'v1.2.3',
+    );
+    expect(find.text('已复制版本号'), findsOneWidget);
+  });
+
 }
 
 /// 定位某个 ListTile 里的开关：按标题精确匹配，避免与说明文字混淆。
