@@ -1610,8 +1610,7 @@ void main() {
     expect(dyOf('主播乙'), lessThan(dyOf('主播丙')), reason: '直播中排在未知之前');
     expect(dyOf('主播丙'), lessThan(dyOf('主播甲')), reason: '未知排在未开播之前');
 
-    await tester.tap(find.byTooltip('搜索与排序'));
-    await tester.pump();
+    // 工具条还开着，直接切排序（图标是开关，再点会收起）。
     await tester.tap(find.text('最近刷新'));
     await tester.pump();
 
