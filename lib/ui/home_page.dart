@@ -1380,9 +1380,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 ),
               ],
             ),
+          // 开播状态是扫视重点，单独一行（#148）：跟 19 位 webRid 挤在一起时，窄屏上
+          // 这行会被从数字中间折断，把「直播中 / 未开播」推成孤儿行。
           Text(
-            '${room.webRid} · ${_livingLabel(living)}',
+            _livingLabel(living),
             style: const TextStyle(fontSize: 12),
+          ),
+          Text(
+            room.webRid,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              color: secondaryTextColor(Theme.of(context).brightness),
+            ),
           ),
           if (refreshedAgo.isNotEmpty)
             Text(
@@ -1411,24 +1422,29 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          TextButton(
+          if (refreshing)
             // 补刷期间也禁用：同一主播不能两路在飞（UX-13）；补刷不是用户点的，
             // 因此不转圈，避免「整列表突然都在刷」的视觉噪音。
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          // 行内只留图标按钮（#148）：原来「刷新」「连接弹幕」两个文字按钮把 360dp
+          // 机型的标题列压到 ~80dp（19 位 webRid 从中间折断、房间标题只剩几个字），
+          // 而且文字按钮的固有宽度会随系统字号继续变宽。图标宽度固定 48dp，
+          // 标题列回到 ~176dp；「刷新」的文字语义由 tooltip 提供（TalkBack 可读），
+          // 「连接弹幕」与整行点击本来就是同一个动作，已并入「更多操作」菜单。
+          IconButton(
+            tooltip: '刷新',
+            icon: const Icon(Icons.refresh),
             onPressed:
                 refreshing || _autoRefreshing.contains(room.webRid)
                 ? null
                 : () => _refreshRoom(room.webRid),
-            child: refreshing
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('刷新'),
-          ),
-          TextButton(
-            onPressed: () => _connectSingle(room),
-            child: const Text('连接弹幕'),
           ),
           IconButton(
             // 长按是隐藏操作：新用户看不到分组 / 凭证 /「移除主播」在哪，TalkBack
@@ -1493,6 +1509,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
             const Divider(height: 1),
             ListTile(
+              // 行内不再放「刷新」文字按钮（#148：两个文字按钮把标题列压到 ~80dp），
+              // 行内改图标按钮，菜单里也留一份显式文字入口。
+              leading: const Icon(Icons.refresh),
+              title: const Text('刷新'),
+              subtitle: _refreshing.contains(room.webRid)
+                  ? const Text('正在刷新…')
+                  : null,
+              enabled: !_refreshing.contains(room.webRid),
+              onTap: () => Navigator.of(context).pop('refresh'),
+            ),
+            ListTile(
+              // 「连接弹幕」原来独占行内约 80dp，动作与整行点击完全相同（都是
+              // _connectSingle）；挪进菜单，入口没少、宽度省了下来（#148）。
+              leading: const Icon(Icons.play_circle_outline),
+              title: const Text('连接弹幕'),
+              onTap: () => Navigator.of(context).pop('connect'),
+            ),
+            ListTile(
               leading: const Icon(Icons.folder_outlined),
               title: const Text('设置分组'),
               onTap: () => Navigator.of(context).pop('group'),
@@ -1515,6 +1549,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
     if (!mounted) return;
+    if (action == 'refresh') await _refreshRoom(room.webRid);
+    if (action == 'connect') await _connectSingle(room);
     if (action == 'group') await _editGroup(room);
     if (action == 'credential') await _editCredential(room);
     if (action == 'remove') await _confirmRemove(room);
