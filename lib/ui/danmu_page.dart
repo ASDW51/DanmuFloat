@@ -428,6 +428,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
         themeId: _prefs.themeId,
         colorOverrides: _prefs.colorOverrides,
         myThemes: _prefs.myThemes,
+        gridDirection: _prefs.gridDirection,
         contrastPolicy: _prefs.contrastPolicy,
         showTitleBar: _prefs.showTitleBar,
         focusBehavior: _prefs.focusBehavior,

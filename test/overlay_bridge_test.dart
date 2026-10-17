@@ -1102,5 +1102,24 @@ void main() {
       json.remove('gridDirection');
       expect(OverlayConfig.tryParse(json)!.gridDirection, overlayGridAuto);
     });
+
+    test('OverlayPrefsPatch 携带分栏方向：往返一致、缺字段为 null、未知值回落自动', () {
+      const OverlayPrefsPatch patch = OverlayPrefsPatch(
+        gridDirection: overlayGridVertical,
+      );
+      expect(
+        OverlayPrefsPatch.tryParse(patch.toJson())!.gridDirection,
+        overlayGridVertical,
+      );
+      // 未知取值回落自动而不是丢弃整个增量（#141）。
+      expect(
+        OverlayPrefsPatch.tryParse(<String, Object?>{
+          'gridDirection': 'diagonal',
+        })!.gridDirection,
+        overlayGridAuto,
+      );
+      // 没有这个键 = 这次不改，不能凭空造出一个 patch。
+      expect(OverlayPrefsPatch.tryParse(<String, Object?>{}), isNull);
+    });
   });
 }
