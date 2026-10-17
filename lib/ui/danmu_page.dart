@@ -19,6 +19,7 @@ import 'package:danmu_float/room/managed_room.dart';
 import 'package:danmu_float/storage/room_store.dart';
 import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
+import 'package:danmu_float/ui/danmu_display_sheet.dart';
 import 'package:danmu_float/ui/danmu_status_bar.dart';
 import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
@@ -185,6 +186,32 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     unawaited(_loadPrefs());
     unawaited(_loadFilter());
     unawaited(_connect());
+  }
+
+  /// 打开就地显示调节面板（#145）。
+  ///
+  /// 面板与设置页、悬浮窗共用同一份 [OverlayPrefs]：这里只把当前值交出去摆滑杆，
+  /// 真正的写回走 [_applyDisplayPatch] 的增量合并，面板不持有偏好快照。
+  Future<void> _openDisplaySheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (BuildContext context) => DanmuDisplaySheet(
+        initial: _prefs,
+        onChanged: _applyDisplayPatch,
+      ),
+    );
+  }
+
+  /// 面板的增量写回：拖动中只预览，松手才落盘（与设置页同一口径）。
+  ///
+  /// 用 [OverlayPrefs.appliedPatch] 而不是整份 copyWith：面板只回报动过的字段，
+  /// 别处（设置页 / 悬浮窗）同时改的值不会被这里的旧快照覆盖回去（#97）。
+  void _applyDisplayPatch(OverlayPrefsPatch patch, {required bool persist}) {
+    if (patch.isEmpty) return;
+    setState(() => _prefs = _prefs.appliedPatch(patch));
+    if (!persist) return;
+    unawaited(_prefsStore.save(_prefs));
   }
 
   @override
@@ -576,6 +603,13 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
       appBar: AppBar(
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: <Widget>[
+          // 就地调字号 / 透明度 / 滚动速度（#145）：不必退到设置页再回来。
+          // 只加一个图标，既有四个入口一个不动。
+          IconButton(
+            tooltip: '显示设置',
+            icon: const Icon(Icons.text_fields),
+            onPressed: _openDisplaySheet,
+          ),
           IconButton(
             tooltip: _overlayVisible ? '关闭悬浮窗' : '开启悬浮窗',
             icon: Icon(

@@ -244,7 +244,7 @@ class OverlayPrefs {
     webRids: webRids,
     opacity: patch.opacity ?? opacity,
     fontSize: patch.fontSize ?? fontSize,
-    scrollSpeed: scrollSpeed,
+    scrollSpeed: patch.scrollSpeed ?? scrollSpeed,
     windowWidth: patch.windowWidth ?? windowWidth,
     windowHeight: patch.windowHeight ?? windowHeight,
     paneStyles: paneStyles,
