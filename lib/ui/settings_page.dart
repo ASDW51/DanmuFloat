@@ -278,6 +278,13 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    // 折叠状态（#143）与页面内容无关，独立读回；失败按全部展开继续。
+    unawaited(_loadViewPrefs());
+  }
+
+  @override
   Widget build(BuildContext context) {
     // 窗口不能大于屏幕，滑杆上限按当前设备收紧；存量偏好超出时显示值也一并收敛。
     final Size screen = MediaQuery.sizeOf(context);
@@ -995,8 +1002,6 @@ class _CredentialSectionState extends State<_CredentialSection> {
     super.initState();
     // 读一次已保存的凭证，保证列表与实际一致（明文不落到界面）。
     unawaited(_refresh());
-    // 折叠状态（#143）与页面内容无关，独立读回，失败按全部展开继续。
-    unawaited(_loadViewPrefs());
   }
 
   Future<void> _refresh() async {
@@ -1428,7 +1433,7 @@ const Map<String, List<String>> settingsSectionKeywords = <String, List<String>>
 
 /// 可折叠的分区标题（#143）：点标题收起 / 展开该分区。
 ///
-/// 视觉上与原来的 [_SectionTitle] 一致（加粗小标题），右侧多一个朝向箭头表示状态；
+/// 视觉上与原来的一级小标题一致（加粗小字），右侧多一个朝向箭头表示状态；
 /// 整行可点，命中区比只点箭头大得多。
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
@@ -1468,18 +1473,6 @@ class _SectionHeader extends StatelessWidget {
       ),
     );
   }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-    child: Text(text, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-  );
 }
 
 /// 一条带说明文字的滑杆。
