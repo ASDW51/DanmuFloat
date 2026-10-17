@@ -1474,6 +1474,10 @@ void main() {
     expect(find.text('添加主播'), findsOneWidget);
     await tester.tap(find.text('取消'));
     await tester.pump(const Duration(milliseconds: 300));
+
+    // 排掉 initState 里悬浮窗状态探测的 1s 延时（_overlayAliveProbeDelay），
+    // 否则用例结束时会因悬挂定时器报「Pending timers」。
+    await tester.pump(const Duration(seconds: 2));
   });
 
   testWidgets('列表非空时不渲染空状态引导块（#142）', (WidgetTester tester) async {
