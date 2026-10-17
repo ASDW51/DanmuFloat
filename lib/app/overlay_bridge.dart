@@ -212,18 +212,50 @@ bool canAddPane(int currentCount) => currentCount < maxPaneCount;
 bool needsHighPerformanceConfirm(int paneCount) =>
     paneCount > maxStandardPaneCount;
 
-/// 悬浮窗分栏网格：不再限制栏位上限，列数按栏位数推导、行数向上取整。
+/// 分栏方向（#141）：作为 `OverlayConfig` 的可选字段下发；缺字段 = 自动 = 现有外观，
+/// 旧 payload 与旧备份语义完全不变。
 ///
-/// 布局完全由栏位数推导，没有额外选项，故不占用协议字段单独传递。
-/// 栏位过多时单格会变小，由用户自行配合窗口尺寸调整（悬浮球菜单里可增 / 减栏位）。
+/// 用字符串而不是 enum：这套协议全程走 JSON，未知取值的兜底必须是「回落自动」而不是
+/// 解析失败——字符串 + 白名单最直白（与 themeId / contrastPolicy 同款做法）。
+const String overlayGridAuto = 'auto';
+
+/// 纵向堆叠：单列 N 行。竖屏手机上每栏占满宽，弹幕正文不再被挤成半行。
+const String overlayGridVertical = 'vertical';
+
+/// 横向并排：单行 N 列。
+const String overlayGridHorizontal = 'horizontal';
+
+/// 全部合法取值，顺序即窗内菜单的展示顺序。
+const List<String> overlayGridDirections = <String>[
+  overlayGridAuto,
+  overlayGridVertical,
+  overlayGridHorizontal,
+];
+
+/// 解析分栏方向：缺失 / 非字符串 / 不认识都回落自动，绝不抛（#141）。
+String parseGridDirection(Object? raw) =>
+    raw is String && overlayGridDirections.contains(raw) ? raw : overlayGridAuto;
+
+/// 悬浮窗分栏网格：列数按栏位数与方向推导、行数向上取整。
+///
+/// 「自动」与历史行为逐字段一致（1 栏单列、2~4 栏 2 列、5 栏起 3 列）：旧 payload
+/// 缺方向字段即自动，所以升级后外观零突变（#141 的验收要求）。
 class OverlayGrid {
-  const OverlayGrid(this.count);
+  const OverlayGrid(this.count, {this.direction = overlayGridAuto});
 
   /// 栏位数，等于本次要连接的房间数。
   final int count;
 
-  /// 列数：1 栏单列铺满；2~4 栏 2 列；5 栏起 3 列。
-  int get columns => count <= 1 ? 1 : (count <= 4 ? 2 : 3);
+  /// 分栏方向：自动 / 纵向堆叠 / 横向并排。
+  final String direction;
+
+  /// 列数：纵向恒为 1；横向恒为 count；自动按栏位数推导。栏位为 0 时仍返回 1，
+  /// 与历史取值一致（只用于除零保护，不参与实际布局）。
+  int get columns {
+    if (direction == overlayGridVertical) return 1;
+    if (direction == overlayGridHorizontal) return count <= 0 ? 1 : count;
+    return count <= 1 ? 1 : (count <= 4 ? 2 : 3);
+  }
 
   /// 行数（向上取整）。
   int get rows => count <= 0 ? 0 : (count + columns - 1) ~/ columns;
@@ -401,6 +433,7 @@ class OverlayConfig {
     this.themeId,
     this.colorOverrides = const <String, int>{},
     this.myThemes = const <MyTheme>[],
+    this.gridDirection = overlayGridAuto,
     this.contrastPolicy = overlayStyleAdjustPolicy,
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
@@ -450,6 +483,9 @@ class OverlayConfig {
   /// 用户另存的具名主题（#147）：窗内配色弹窗据此列出「我的主题」chips。
   final List<MyTheme> myThemes;
 
+  /// 分栏方向（#141）：缺字段由 [parseGridDirection] 回落自动。
+  final String gridDirection;
+
   /// 对比度策略：adjust 校正到可读 / warn 提示但不改 / allow 原样渲染（#98）。
   final String contrastPolicy;
 
@@ -495,6 +531,7 @@ class OverlayConfig {
     'myThemes': <Object?>[
       for (final MyTheme theme in myThemes) theme.toJson(),
     ],
+    'gridDirection': parseGridDirection(gridDirection),
     'colorOverrides': colorOverrides,
     'contrastPolicy': contrastPolicy,
     'showTitleBar': showTitleBar,
@@ -543,6 +580,7 @@ class OverlayConfig {
         lightTheme: raw['lightTheme'] == true,
       ),
       colorOverrides: parseColorOverrides(raw['colorOverrides']),
+      gridDirection: parseGridDirection(raw['gridDirection']),
       myThemes: parseMyThemes(raw['myThemes']),
       contrastPolicy: clampOverlayStyleContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,
