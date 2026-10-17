@@ -123,6 +123,17 @@ GitHub 的标签接口**不是原子的 compare-and-set**：两个 Agent 同时�
 gh issue edit <n> --repo "$R" --remove-label "agent:in-progress"
 ```
 
+**例外：Issue 已关闭时可以直接摘。** `state=CLOSED` 的 Issue 上残留的 `in-progress` 是遗留
+标签而不是租约——活儿已经结束，不会再有并发认领，所以**任何 Agent（包括不是认领方、包括外部
+贡献者打的）都可以直接摘除**，不必等维护者人工处理。判断依据是一次 `gh issue view <n>` 的
+`state` 字段，不要去猜"看起来像收工了"：
+
+```bash
+# 仅当 state 为 CLOSED 时执行；开放中的 Issue 仍然只有认领方能摘
+gh issue view <n> --repo "$R" --json state -q .state   # 先确认是 CLOSED
+gh issue edit <n> --repo "$R" --remove-label "agent:in-progress"
+```
+
 ## 六、注意点（动手前逐条过）
 
 1. **`agent:read-comments` 是强制的**：正文之外的修复注意点（复现条件、指定方案、"这条先别按
@@ -189,10 +200,11 @@ gh issue edit <n> --repo "$R" --remove-label "agent:in-progress"
 | 1 | 无 `agent:*` 标签的 Issue | **完全无视**：不入队、不处理、不提示 | 未分诊 = 还没打算交给 Agent，宁可少做也不做错 |
 | 2 | 同优先级排序 | **最后更新最早者优先** | 老 Issue 不会被新 Issue 无限插队 |
 | 3 | 并发上限 | **一个 Agent 一次只认领 1 个** | `in-progress` 语义清晰，改动互不干扰 |
-| 4 | `in-progress` 超时回收 | **不做超时回收**，仅由维护者人工摘除 | 避免正常长任务被误判失效、误抢；代价是崩溃后需人工介入 |
+| 4 | `in-progress` 超时回收 | **不做超时回收**，仅由维护者人工摘除；**例外：Issue 已关闭时任何 Agent 都可摘** | 避免正常长任务被误判失效、误抢；关闭后不再有并发风险，遗留标签只是待清理的噪声 |
 | 5 | `done` 之后返工 | **维护者摘 `done` 并重新标 `ready`**，不新增 `agent:reopen` | 返工由人工控制，避免 Agent 自己给自己开单 |
 | 6 | `agent:*` 适用范围 | **只用于 Issue**，不用于 PR | PR 已有 CI / review / merge 状态，叠加标签会混淆语义 |
 | 7 | 文档挂载点 | 链进 [docs/labels.md](labels.md) 第四节与 [docs/dev-playbook.md](dev-playbook.md) 附录 A | 与现有文档地图一致，避免后来者重复造轮子 |
 
 **已知代价**（明确接受，不修）：决策 4 意味着某个 Agent 崩溃后 `in-progress` 会一直挂着，直到
-人工发现并摘除；决策 1 意味着未打标签的 Issue 会静默积压，需要维护者定期分诊。
+人工发现并摘除（Issue 关闭后由任意 Agent 清理，见第五节的例外条款）；决策 1 意味着未打标签的
+Issue 会静默积压，需要维护者定期分诊。
