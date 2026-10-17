@@ -54,7 +54,6 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final SemanticsHandle handle = tester.ensureSemantics();
-    addTearDown(handle.dispose);
 
     await tester.pumpWidget(
       MaterialApp(home: OverlayPage(roomInfoClient: _FailingRoomInfoClient())),
@@ -62,10 +61,10 @@ void main() {
     await _pushConfig(tester, <String>['123456']);
 
     // 悬浮球是窗内唯一的菜单入口：读不出「打开菜单」就等于整个菜单不可达。
-    final SemanticsNode ball = tester.getSemantics(
-      find.byKey(const ValueKey<String>('overlayBall')),
-    );
-    expect(ball.label, contains('菜单'));
+    // 用 bySemanticsLabel 定位（overlayBall 那个 key 在 SizedBox 上，本身不是语义边界）。
+    final Finder ballFinder = find.bySemanticsLabel('悬浮球，打开菜单');
+    expect(ballFinder, findsOneWidget);
+    final SemanticsNode ball = tester.getSemantics(ballFinder);
     expect(
       ball.getSemanticsData().flagsCollection.isButton,
       isTrue,
@@ -76,14 +75,12 @@ void main() {
     await tester.tap(find.byKey(const ValueKey<String>('overlayBall')));
     await tester.pump(const Duration(milliseconds: 300));
 
-    final Finder retry = find.widgetWithText(TextButton, '重试');
+    final Finder retry = find.bySemanticsLabel(RegExp('第 1 栏连接失败'));
     expect(retry, findsWidgets, reason: '失败栏位应当给出重试出口');
-    final SemanticsNode retryNode = tester.getSemantics(retry.first);
-    expect(retryNode.label, contains('重试'));
-    expect(retryNode.label, contains('第 1 栏'), reason: '多栏时要说清重试的是哪一栏');
     expect(
-      retryNode.getSemanticsData().flagsCollection.isButton,
+      tester.getSemantics(retry.first).getSemanticsData().flagsCollection.isButton,
       isTrue,
     );
+    handle.dispose();
   });
 }

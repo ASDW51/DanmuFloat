@@ -92,7 +92,6 @@ void main() {
     testWidgets('一条弹幕 = 一个语义节点，标签含昵称与正文',
         (WidgetTester tester) async {
       final SemanticsHandle handle = tester.ensureSemantics();
-      addTearDown(handle.dispose);
 
       final _FakeSocket socket = await _pumpDanmuPage(tester);
       socket.emitEvents(<DanmakuEvent>[
@@ -116,6 +115,9 @@ void main() {
         find.bySemanticsLabel(RegExp(r'第[一二]条正文$')),
         findsNWidgets(2),
       );
+      // 句柄必须在测试体内释放：addTearDown 晚于 flutter_test 的收尾校验，
+      // 否则会报「A SemanticsHandle was active at the end of the test」。
+      handle.dispose();
     });
   });
 }
