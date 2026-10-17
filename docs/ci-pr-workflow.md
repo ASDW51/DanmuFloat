@@ -1,7 +1,7 @@
 # PR + 远程 CI 检查流程
 
 本机没有 Flutter/Dart 环境时，靠 GitHub Actions 完成 `flutter analyze` / `flutter test`
-检查的标准流程。仓库已有 [.github/workflows/ci.yml](.github/workflows/ci.yml)，
+检查的标准流程。仓库已有 [.github/workflows/ci.yml](../.github/workflows/ci.yml)，
 对所有 PR 与 push 到 `main` 自动执行检查。
 
 ## 流程步骤
