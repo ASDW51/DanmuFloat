@@ -21,6 +21,7 @@ import 'package:danmu_float/storage/filter_store.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/ui/danmu_display_sheet.dart';
 import 'package:danmu_float/ui/danmu_status_bar.dart';
+import 'package:danmu_float/ui/danmaku_semantics.dart';
 import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -812,9 +813,16 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
     final Color? markColor = mark == null
         ? null
         : danmuTypeColor(event.kind, Theme.of(context).brightness);
-    return InkWell(
-      onTap: () => unawaited(_showEventMenu(event)),
-      child: Padding(
+    return Semantics(
+      // 一条弹幕 = 一个语义单位（#135）：否则屏幕阅读器把整页读成一长串无结构
+      // 文本，既不能按条导航，也分不清哪段是昵称、哪段是正文。
+      container: true,
+      button: true,
+      label: danmakuSemanticsLabel(event),
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: () => unawaited(_showEventMenu(event)),
+        child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         child: Text.rich(
           TextSpan(
@@ -874,6 +882,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
             ],
           ),
         ),
+      ),
       ),
     );
   }

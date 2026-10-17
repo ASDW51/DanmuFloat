@@ -1592,11 +1592,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return ListTile(
       onTap: () => _connectSingle(room),
       onLongPress: () => _showRoomActions(room),
-      leading: CircleAvatar(
-        backgroundColor: roomAvatarBackgroundColor(living: living),
-        child: Text(
-          room.displayName.characters.first,
-          style: TextStyle(color: roomAvatarForegroundColor()),
+      // 头像底色是开播状态的唯一编码（#135）：色觉障碍与屏幕阅读器用户拿不到
+      // 这层信息，补等价文本，视觉不变。
+      leading: Semantics(
+        label: living == true ? '直播中' : '未开播',
+        excludeSemantics: true,
+        child: CircleAvatar(
+          backgroundColor: roomAvatarBackgroundColor(living: living),
+          child: Text(
+            room.displayName.characters.first,
+            style: TextStyle(color: roomAvatarForegroundColor()),
+          ),
         ),
       ),
       title: Text(
