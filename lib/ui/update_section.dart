@@ -179,7 +179,9 @@ class _UpdateSectionState extends State<UpdateSection> {
               : const Icon(Icons.refresh),
           onTap: _state == UpdateCheckState.checking ? null : _check,
         ),
-        if (release != null) ...<Widget>[
+        // 只有真有新版本时才给更新日志 / 下载入口：已是最新版本时列一堆
+        // 「复制下载地址」只会让人以为还有东西要装（#166）。
+        if (release != null && _state == UpdateCheckState.available) ...<Widget>[
           ListTile(
             key: const ValueKey<String>('updateNotesTile'),
             leading: const Icon(Icons.article_outlined),
