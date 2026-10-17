@@ -610,6 +610,8 @@ void main() {
     expect(find.text('设置分组'), findsOneWidget);
     expect(find.text('使用凭证'), findsOneWidget);
     expect(find.text('移除主播'), findsOneWidget);
+    // 批量操作的入口也在这份菜单里（#140）：多选是「对这个主播还能做什么」的复数形式。
+    expect(find.text('多选'), findsOneWidget);
   });
 
   testWidgets('窄屏（360dp）下标题列仍有可用宽度，副标题不折断（#148 / UX-18）',
@@ -1768,12 +1770,17 @@ void main() {
       boundWebRids: boundWebRids,
     );
 
-    /// 长按行的「更多操作」→ 多选：入口挂在长按菜单里，不走 AppBar（#148）。
+    /// 走「搜索与排序 → 多选」进入多选。
+    ///
+    /// 这条入口在页面顶部、有固定 key，比底部菜单稳（菜单在 1600dp 视口里要
+    /// 等入场动画走完才点得到）；长按菜单里那个入口由「更多操作」用例单独断言存在。
     Future<void> enterSelection(WidgetTester tester) async {
-      await tester.tap(find.byTooltip('更多操作').first);
-      await tester.pump(const Duration(milliseconds: 500));
-      await tester.tap(find.text('多选'));
-      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.byTooltip('搜索与排序'));
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey<String>('homeEnterSelection')),
+      );
+      await tester.pump();
     }
 
     testWidgets('勾选两个主播批量移除：只删所选，栏位一并卸载并关窗', (
@@ -1859,7 +1866,14 @@ void main() {
 
       await tester.tap(find.byTooltip('设置分组'));
       await tester.pump(const Duration(milliseconds: 500));
-      await tester.enterText(find.byType(TextField).last, '游戏');
+      // 页面上还有搜索框，按 AlertDialog 缩小范围，别写到搜索框里。
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+        '游戏',
+      );
       await tester.pump();
       await tester.tap(find.text('保存'));
       await _pumpUntil(
