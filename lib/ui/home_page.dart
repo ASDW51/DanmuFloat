@@ -183,6 +183,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 收起的分组名（#140），与排序一起落盘在 home_view.json；缺省全部展开。
   Set<String> _collapsedGroups = <String>{};
 
+  /// 用户是否已经手动改过视图偏好。
+  ///
+  /// 读盘是异步的：如果用户在读完之前就点了折叠 / 排序，随后到达的读盘结果会把刚做
+  /// 的操作冲掉（表现为「点了没反应」）。一旦动过就不再接受读盘结果。
+  bool _viewPrefsTouched = false;
+
   /// 当前搜索词（仅本次会话有效，不落盘）。
   String _searchQuery = '';
 
@@ -358,7 +364,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 读回视图偏好（#139 / #140）；失败按默认值继续，不阻塞列表。
   Future<void> _loadViewPrefs() async {
     final HomeViewPrefs prefs = await _viewPrefsStore.load();
-    if (!mounted) return;
+    if (!mounted || _viewPrefsTouched) return;
     setState(() {
       _sortMode = prefs.sortMode;
       _collapsedGroups = prefs.collapsedGroups;
@@ -369,6 +375,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 失败也不该打断用户当前操作（下次进来回到默认而已）。
   void _setSortMode(String mode) {
     if (mode == _sortMode) return;
+    _viewPrefsTouched = true;
     setState(() => _sortMode = parseHomeSortMode(mode));
     unawaited(_saveViewPrefs());
   }
@@ -378,6 +385,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /// 与排序共用一份 home_view.json：两者都是「列表怎么展示」，一起写才不会出现
   /// 「改了排序把折叠状态冲掉」这类互相覆盖。
   void _toggleGroupCollapsed(String group) {
+    _viewPrefsTouched = true;
     setState(() {
       if (!_collapsedGroups.remove(group)) _collapsedGroups.add(group);
     });
