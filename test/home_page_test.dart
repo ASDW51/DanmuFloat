@@ -612,7 +612,92 @@ void main() {
     expect(find.text('移除主播'), findsOneWidget);
   });
 
-  testWidgets('窄屏（360dp）下 trailing 三个按钮不把主播行挤溢出（UX-18）',
+  testWidgets('窄屏（360dp）下标题列仍有可用宽度，副标题不折断（#148 / UX-18）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          // 19 位 webRid：room_link_parser 记录的网页端常见长度。
+          webRid: '7350000000000000001',
+          // 名字故意长到会被省略：这样标题的渲染框宽度就等于整列可用宽度，
+          // getRect 量到的才是「标题列」而不是文字本身。
+          name: '一个非常长的主播名字用来撑满整列宽度',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: true);
+    _mockMessengerReplies(tester);
+    _markOverlayShown();
+    // 360dp 是空间最紧的常见机型。原来的口径只要求「不溢出」，结果标题列被
+    // 两个文字按钮压到 ~80dp，19 位 webRid 从中间折断（#148）；这里改成宽度下限。
+    tester.view.physicalSize = const Size(360, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await _pumpHomeWithDir(tester, dir);
+
+    expect(tester.takeException(), isNull, reason: '不溢出是底线，不是全部口径');
+    expect(find.byTooltip('更多操作'), findsOneWidget);
+    expect(find.byTooltip('刷新'), findsOneWidget, reason: '行内刷新入口不能丢');
+
+    // 标题列（ListTile 给 title/subtitle 的宽度）必须够读：≥140dp。
+    final Rect titleRect =
+        tester.getRect(find.text('一个非常长的主播名字用来撑满整列宽度'));
+    expect(
+      titleRect.width,
+      greaterThanOrEqualTo(140),
+      reason: '「不溢出」不等于「还能读」：19 位 webRid 需要 ~127dp（#148）',
+    );
+
+    // 副标题里的 webRid 必须单行：从数字中间折断会把开播状态挤成孤儿行。
+    final Size webRidSize = tester.getSize(find.text('7350000000000000001'));
+    expect(
+      webRidSize.height,
+      lessThanOrEqualTo(20),
+      reason: 'webRid 一行放不下就省略，不能再折成两行（#148）',
+    );
+  });
+
+  testWidgets('系统大字号（1.5x）+ 360dp 下仍不溢出，标题列不被压垮（#148）',
+      (WidgetTester tester) async {
+    final Directory dir = await _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '111',
+          name: '一个非常长的主播名字用来撑满整列宽度',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      ],
+      boundWebRids: <String>[],
+    );
+    _mockPathProvider(tester, dir);
+    _mockOverlayChannels(tester, active: true);
+    _mockMessengerReplies(tester);
+    _markOverlayShown();
+    tester.view.physicalSize = const Size(360, 720);
+    tester.view.devicePixelRatio = 1.0;
+    // 行内改成图标按钮后，trailing 的固有宽度不再随字号增长——这是本条的做法能
+    // 扛住大字号的原因，用测试钉住它。
+    tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.view.reset);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+    await _pumpHomeWithDir(tester, dir);
+
+    expect(tester.takeException(), isNull, reason: '大字号下不能溢出（UX-17 同类风险）');
+    expect(
+      tester.getRect(find.text('一个非常长的主播名字用来撑满整列宽度')).width,
+      greaterThanOrEqualTo(140),
+      reason: '图标按钮宽度固定，标题列不该被系统字号进一步压缩',
+    );
+  });
+
+  testWidgets('「更多操作」菜单仍能到达刷新 / 连接弹幕 / 分组 / 凭证 / 移除（#148）',
       (WidgetTester tester) async {
     final Directory dir = await _seedRooms(
       tester,
@@ -629,16 +714,31 @@ void main() {
     _mockOverlayChannels(tester, active: true);
     _mockMessengerReplies(tester);
     _markOverlayShown();
-    // 多一个「更多」按钮后，360dp 机型是空间最紧的常见情况：刷新 + 连接弹幕 +
-    // 更多之后，标题只剩 ~80dp，必须仍然只有省略号、没有溢出条。
-    tester.view.physicalSize = const Size(360, 720);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
+    await _withTallViewport(tester);
 
     await _pumpHomeWithDir(tester, dir);
+    await _pumpUntil(
+      tester,
+      () => find.byTooltip('更多操作').evaluate().isNotEmpty,
+    );
+    await tester.tap(find.byTooltip('更多操作'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
-    expect(tester.takeException(), isNull);
-    expect(find.byTooltip('更多操作'), findsOneWidget);
+    // 收敛入口 ≠ 删入口：每个动作都还有可见入口（行内图标或本菜单）。
+    for (final String label in <String>[
+      '刷新',
+      '连接弹幕',
+      '设置分组',
+      '使用凭证',
+      '移除主播',
+    ]) {
+      expect(
+        find.text(label),
+        findsOneWidget,
+        reason: '「$label」必须仍能从可见入口到达（AGENTS.md 第 5 节）',
+      );
+    }
   });
 
   testWidgets('移除正在悬浮窗显示的主播时，重排栏位并不再绑定它（PM-002）',
@@ -1069,9 +1169,14 @@ void main() {
     expect(client.started, <String>['735']);
 
     // 行内刷新入口在补刷期间禁用：同一主播两路在飞会把风控风险翻倍。
+    // 行内入口在 #148 里由文字按钮改成了图标按钮（省宽度），语义不变；
+    // 用 tooltip 定位，避免和 AppBar 的「刷新全部」图标撞（FilledButton/IconButton 同名）。
     expect(
       tester
-          .widget<TextButton>(find.widgetWithText(TextButton, '刷新'))
+          .widget<IconButton>(find.ancestor(
+            of: find.byTooltip('刷新'),
+            matching: find.byType(IconButton),
+          ))
           .onPressed,
       isNull,
       reason: '补刷在飞时行内入口不该再发一条',
@@ -1316,7 +1421,12 @@ void main() {
     expect(tester.takeException(), isNull, reason: '加标识不能溢出（UX-07 的窄屏教训）');
     expect(find.text('悬浮窗显示中'), findsOneWidget);
     expect(
-      tester.widget<TextButton>(find.widgetWithText(TextButton, '刷新')).onPressed,
+      tester
+          .widget<IconButton>(find.ancestor(
+            of: find.byTooltip('刷新'),
+            matching: find.byType(IconButton),
+          ))
+          .onPressed,
       isNotNull,
       reason: '既有的刷新入口必须仍然可点（AGENTS.md 要求不删既有入口）',
     );
