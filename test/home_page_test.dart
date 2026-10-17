@@ -1799,9 +1799,11 @@ void main() {
       _overlayCalls.clear();
 
       await enterSelection(tester);
-      expect(find.text('已选 1 项'), findsOneWidget, reason: '进来的那行默认选中');
+      expect(find.text('已选 0 项'), findsOneWidget, reason: '刚进来一个都没勾');
 
       // 点整行切换勾选（多选模式下不再直接连接）。
+      await tester.tap(find.text('主播甲'));
+      await tester.pump();
       await tester.tap(find.text('主播乙'));
       await tester.pump();
       expect(find.text('已选 2 项'), findsOneWidget);
@@ -1859,6 +1861,8 @@ void main() {
       await _pumpHomeWithDir(tester, dir);
 
       await enterSelection(tester);
+      await tester.tap(find.text('主播甲'));
+      await tester.pump();
       await tester.tap(find.text('主播乙'));
       await tester.pump();
       expect(find.text('已选 2 项'), findsOneWidget);
