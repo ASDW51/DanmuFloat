@@ -49,8 +49,30 @@ void main() {
       expect(bundle.themeMode, ThemeMode.dark);
     });
 
-    test('备份里没有合规分区（#85）：同意状态不随备份搬运', () {
-      final Map<String, Object?> root = jsonDecode(
+    test('自定义主题随备份往返一致（#147）', () {
+      const MyTheme theme = MyTheme(
+        id: '1700000000000',
+        name: '夜间护眼',
+        baseThemeId: 'dark',
+        overrides: <String, int>{'menuBg': 0xFF101820},
+      );
+      final String raw = encodeDataBundle(
+        rooms: <ManagedRoom>[],
+        prefs: const OverlayPrefs(myThemes: <MyTheme>[theme]),
+        filter: const FilterPrefs(),
+        themeMode: ThemeMode.system,
+      );
+
+      final DataBundle bundle = decodeDataBundle(raw);
+
+      expect(bundle.prefs.myThemes, hasLength(1), reason: '备份必须保留用户另存的主题');
+      expect(bundle.prefs.myThemes.single.id, theme.id);
+      expect(bundle.prefs.myThemes.single.name, theme.name);
+      expect(bundle.prefs.myThemes.single.baseThemeId, theme.baseThemeId);
+      expect(bundle.prefs.myThemes.single.overrides, theme.overrides);
+    });
+
+    test('备份里没有合规分区（#85）：同意状态不随备份搬运', () {      final Map<String, Object?> root = jsonDecode(
         encodeDataBundle(
           rooms: const <ManagedRoom>[],
           prefs: const OverlayPrefs(),
