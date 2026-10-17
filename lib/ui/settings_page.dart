@@ -13,6 +13,7 @@ import 'package:danmu_float/credential/credential_store.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/storage/data_transfer.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
+import 'package:danmu_float/storage/settings_view_prefs.dart';
 import 'package:danmu_float/ui/overlay_color_section.dart';
 import 'package:danmu_float/ui/overlay_style_preview.dart';
 import 'package:danmu_float/storage/theme_store.dart';
@@ -33,6 +34,7 @@ class SettingsPage extends StatefulWidget {
     this.filter = const FilterPrefs(),
     this.onFilterChanged,
     this.themeStore,
+    this.viewPrefsStore,
     this.dataTransfer,
     this.onDataImported,
   });
@@ -62,6 +64,9 @@ class SettingsPage extends StatefulWidget {
   /// 主 App 主题偏好存储；单测可注入内存后端。
   final ThemeStore? themeStore;
 
+  /// 折叠状态存储可注入（单测用临时目录隔离，不依赖 path_provider 通道）。
+  final SettingsViewPrefsStore? viewPrefsStore;
+
   /// 备份 / 恢复本地数据（prd F26 侧能力）；单测可注入临时目录。
   final LocalDataTransfer? dataTransfer;
 
@@ -85,6 +90,62 @@ class _SettingsPageState extends State<SettingsPage> {
 
   /// 上一次构建时的屏幕逻辑尺寸，用于感知横竖屏切换。
   Size? _lastScreenSize;
+
+  /// 折叠的分区标识（#143）：缺省全部展开，读盘后按落盘值恢复。
+  Set<String> _collapsed = <String>{};
+
+  /// 设置项搜索词：只过滤「显示哪些分区」，不改任何设置值。
+  String _searchQuery = '';
+
+  /// 折叠状态的落盘存储（单独一个文件，避免与主题偏好互相覆盖）。
+  late final SettingsViewPrefsStore _viewPrefsStore =
+      widget.viewPrefsStore ?? SettingsViewPrefsStore();
+
+  /// 读回折叠状态；失败按「全部展开」继续，不阻塞页面。
+  Future<void> _loadViewPrefs() async {
+    final SettingsViewPrefs prefs = await _viewPrefsStore.load();
+    if (!mounted) return;
+    setState(() => _collapsed = prefs.collapsedSections);
+  }
+
+  Future<void> _saveCollapsed() async {
+    try {
+      await _viewPrefsStore.save(
+        SettingsViewPrefs(collapsedSections: _collapsed),
+      );
+    } on Object catch (exception) {
+      debugPrint('保存设置页折叠状态失败: $exception');
+    }
+  }
+
+  void _toggleSection(String id) {
+    setState(() {
+      if (!_collapsed.remove(id)) _collapsed.add(id);
+    });
+    unawaited(_saveCollapsed());
+  }
+
+  /// 搜索是否命中该分区：标题或关键词包含搜索词（大小写不敏感），空词恒命中。
+  ///
+  /// 关键词表让「透明度」能命中「悬浮窗样式」这种标题里没有该词的条目——只按
+  /// 标题匹配的话，用户最常搜的正是那些标题里看不见的词。
+  bool _sectionMatches(String id, String title) {
+    final String query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) return true;
+    if (title.toLowerCase().contains(query)) return true;
+    for (final String keyword
+        in settingsSectionKeywords[id] ?? const <String>[]) {
+      if (keyword.toLowerCase().contains(query)) return true;
+    }
+    return false;
+  }
+
+  /// 该分区此刻是否应当展开：搜索态一律展开，否则用户搜到了却看不见内容。
+  bool _sectionOpen(String id, String title) {
+    if (_searchQuery.trim().isNotEmpty) return _sectionMatches(id, title);
+    return _sectionMatches(id, title) && !_collapsed.contains(id);
+  }
+
 
   void _apply(OverlayPrefs next, {required bool persist}) {
     setState(() => _prefs = next);
@@ -241,7 +302,30 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: AppBar(title: const Text('设置')),
       body: ListView(
         children: <Widget>[
-          const _SectionTitle('悬浮窗样式'),
+          // 设置项搜索（#143）：14 个分区平铺到底，找「透明度」「导出」只能靠滚。
+          // 只过滤「显示哪些分区」，不改任何设置值；搜索态下一律展开，
+          // 否则用户搜到了却看不见内容。
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: TextField(
+              key: const ValueKey<String>('settingsSearchField'),
+              decoration: const InputDecoration(
+                isDense: true,
+                prefixIcon: Icon(Icons.search, size: 18),
+                hintText: '搜索设置项（如：透明度、凭证、导出）',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (String value) =>
+                  setState(() => _searchQuery = value),
+            ),
+          ),
+          if (_sectionMatches('style', '悬浮窗样式'))
+            _SectionHeader(
+              title: '悬浮窗样式',
+              expanded: _sectionOpen('style', '悬浮窗样式'),
+              onTap: () => _toggleSection('style'),
+            ),
+          if (_sectionOpen('style', '悬浮窗样式')) ...<Widget>[
           _SliderGroup(
             title: '弹幕背景透明度　${_prefs.opacity.toStringAsFixed(2)}',
             hint: '越低越透。只影响弹幕背景蒙版，不改变悬浮窗整体与文字。',
@@ -256,7 +340,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 _apply(_prefs.copyWith(opacity: value), persist: true),
           ),
           const Divider(height: 1),
-          const _SectionTitle('弹幕字号'),
+          ],
+          if (_sectionMatches('fontSize', '弹幕字号'))
+            _SectionHeader(
+              title: '弹幕字号',
+              expanded: _sectionOpen('fontSize', '弹幕字号'),
+              onTap: () => _toggleSection('fontSize'),
+            ),
+          if (_sectionOpen('fontSize', '弹幕字号')) ...<Widget>[
           _SliderGroup(
             title: '弹幕字号　${_prefs.fontSize.toStringAsFixed(0)}',
             hint: '悬浮窗与 App 内弹幕页都按此字号显示；多栏时按栏数自动缩小。',
@@ -270,7 +361,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 _apply(_prefs.copyWith(fontSize: value), persist: true),
           ),
           const Divider(height: 1),
-          const _SectionTitle('弹幕滚动速度'),
+          ],
+          if (_sectionMatches('scrollSpeed', '弹幕滚动速度'))
+            _SectionHeader(
+              title: '弹幕滚动速度',
+              expanded: _sectionOpen('scrollSpeed', '弹幕滚动速度'),
+              onTap: () => _toggleSection('scrollSpeed'),
+            ),
+          if (_sectionOpen('scrollSpeed', '弹幕滚动速度')) ...<Widget>[
           _SliderGroup(
             title: '滚动速度　${_prefs.scrollSpeed.toStringAsFixed(2)}x',
             hint: '越小滚得越慢、越好读；突发大量弹幕时列表按此速度平滑滚动，不再一帧跳到底。',
@@ -292,7 +390,14 @@ class _SettingsPageState extends State<SettingsPage> {
             fontSize: _prefs.fontSize,
           ),
           const Divider(height: 1),
-          const _SectionTitle('主题与皮肤'),
+          ],
+          if (_sectionMatches('theme', '主题与皮肤'))
+            _SectionHeader(
+              title: '主题与皮肤',
+              expanded: _sectionOpen('theme', '主题与皮肤'),
+              onTap: () => _toggleSection('theme'),
+            ),
+          if (_sectionOpen('theme', '主题与皮肤')) ...<Widget>[
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
             child: Text(
@@ -315,7 +420,14 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ),
           ),
-          const _SectionTitle('悬浮窗配色'),
+          ],
+          if (_sectionMatches('color', '悬浮窗配色'))
+            _SectionHeader(
+              title: '悬浮窗配色',
+              expanded: _sectionOpen('color', '悬浮窗配色'),
+              onTap: () => _toggleSection('color'),
+            ),
+          if (_sectionOpen('color', '悬浮窗配色')) ...<Widget>[
           // 主题是一组角色取值的整体，因此用预设 chips 取代原来的「浅色皮肤」单开关：
           // lightTheme 现在是派生值（themeId == 'light'），再留一个开关就是两处真相。
           OverlayColorSection(
@@ -354,7 +466,14 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const Divider(height: 1),
           const Divider(height: 1),
-          const _SectionTitle('屏蔽与高亮'),
+          ],
+          if (_sectionMatches('filter', '屏蔽与高亮'))
+            _SectionHeader(
+              title: '屏蔽与高亮',
+              expanded: _sectionOpen('filter', '屏蔽与高亮'),
+              onTap: () => _toggleSection('filter'),
+            ),
+          if (_sectionOpen('filter', '屏蔽与高亮')) ...<Widget>[
           ListTile(
             leading: const Icon(Icons.filter_alt_outlined),
             title: const Text('屏蔽词 / 屏蔽用户 / 高亮词'),
@@ -366,7 +485,14 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: _openFilterPage,
           ),
           const Divider(height: 1),
-          const _SectionTitle('悬浮窗尺寸（整体）'),
+          ],
+          if (_sectionMatches('size', '悬浮窗尺寸（整体）'))
+            _SectionHeader(
+              title: '悬浮窗尺寸（整体）',
+              expanded: _sectionOpen('size', '悬浮窗尺寸（整体）'),
+              onTap: () => _toggleSection('size'),
+            ),
+          if (_sectionOpen('size', '悬浮窗尺寸（整体）')) ...<Widget>[
           _SliderGroup(
             title: '整体宽度　${widthValue.toStringAsFixed(0)}',
             hint: '整个悬浮窗的宽度，多栏时各栏在内部自动平分，不需要按栏设置。',
@@ -414,7 +540,14 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const Divider(height: 1),
-          const _SectionTitle('按栏独立配置'),
+          ],
+          if (_sectionMatches('panes', '按栏独立配置'))
+            _SectionHeader(
+              title: '按栏独立配置',
+              expanded: _sectionOpen('panes', '按栏独立配置'),
+              onTap: () => _toggleSection('panes'),
+            ),
+          if (_sectionOpen('panes', '按栏独立配置')) ...<Widget>[
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
             child: Text(
@@ -429,7 +562,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 _apply(_prefs.copyWith(paneStyles: styles), persist: true),
           ),
           const Divider(height: 1),
-          const _SectionTitle('栏位与手势'),
+          ],
+          if (_sectionMatches('gestures', '栏位与手势'))
+            _SectionHeader(
+              title: '栏位与手势',
+              expanded: _sectionOpen('gestures', '栏位与手势'),
+              onTap: () => _toggleSection('gestures'),
+            ),
+          if (_sectionOpen('gestures', '栏位与手势')) ...<Widget>[
           ListTile(
             leading: const Icon(Icons.label_outline),
             title: const Text('显示栏目标识'),
@@ -494,13 +634,27 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const Divider(height: 1),
-          const _SectionTitle('连接与凭证'),
+          ],
+          if (_sectionMatches('connection', '连接与凭证'))
+            _SectionHeader(
+              title: '连接与凭证',
+              expanded: _sectionOpen('connection', '连接与凭证'),
+              onTap: () => _toggleSection('connection'),
+            ),
+          if (_sectionOpen('connection', '连接与凭证')) ...<Widget>[
           _CredentialSection(
             store: _credentialStore,
             onChanged: widget.onCredentialsChanged,
           ),
           const Divider(height: 1),
-          const _SectionTitle('数据与隐私'),
+          ],
+          if (_sectionMatches('data', '数据与隐私'))
+            _SectionHeader(
+              title: '数据与隐私',
+              expanded: _sectionOpen('data', '数据与隐私'),
+              onTap: () => _toggleSection('data'),
+            ),
+          if (_sectionOpen('data', '数据与隐私')) ...<Widget>[
           ListTile(
             leading: const Icon(Icons.upload_file_outlined),
             title: const Text('导出数据'),
@@ -526,7 +680,14 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: widget.onResetAll == null ? null : _clearAllData,
           ),
           const Divider(height: 1),
-          const _SectionTitle('权限'),
+          ],
+          if (_sectionMatches('permission', '权限'))
+            _SectionHeader(
+              title: '权限',
+              expanded: _sectionOpen('permission', '权限'),
+              onTap: () => _toggleSection('permission'),
+            ),
+          if (_sectionOpen('permission', '权限')) ...<Widget>[
           ListTile(
             leading: const Icon(Icons.verified_user_outlined),
             title: const Text('权限申请引导'),
@@ -538,7 +699,14 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: _openOnboarding,
           ),
           const Divider(height: 1),
-          const _SectionTitle('合规'),
+          ],
+          if (_sectionMatches('compliance', '合规'))
+            _SectionHeader(
+              title: '合规',
+              expanded: _sectionOpen('compliance', '合规'),
+              onTap: () => _toggleSection('compliance'),
+            ),
+          if (_sectionOpen('compliance', '合规')) ...<Widget>[
           ListTile(
             leading: const Icon(Icons.gavel_outlined),
             title: const Text('查看免责声明'),
@@ -549,7 +717,14 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: _openDisclaimer,
           ),
           const Divider(height: 1),
-          const _SectionTitle('诊断'),
+          ],
+          if (_sectionMatches('diagnostics', '诊断'))
+            _SectionHeader(
+              title: '诊断',
+              expanded: _sectionOpen('diagnostics', '诊断'),
+              onTap: () => _toggleSection('diagnostics'),
+            ),
+          if (_sectionOpen('diagnostics', '诊断')) ...<Widget>[
           ListTile(
             leading: const Icon(Icons.content_copy_outlined),
             title: const Text('复制诊断信息'),
@@ -557,6 +732,7 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: _copyDiagnostics,
           ),
           const Divider(height: 1),
+          ],
         ],
       ),
     );
@@ -819,6 +995,8 @@ class _CredentialSectionState extends State<_CredentialSection> {
     super.initState();
     // 读一次已保存的凭证，保证列表与实际一致（明文不落到界面）。
     unawaited(_refresh());
+    // 折叠状态（#143）与页面内容无关，独立读回，失败按全部展开继续。
+    unawaited(_loadViewPrefs());
   }
 
   Future<void> _refresh() async {
@@ -1225,6 +1403,71 @@ class _ImportDialogState extends State<_ImportDialog> {
       ),
     ],
   );
+}
+
+/// 分区关键词表（#143）：设置项搜索用。
+///
+/// 只按分区标题匹配是不够的——用户搜「透明度」「导出」这类词时，标题里根本没有
+/// 它们。这里给每个分区列出用户可能输入的词，命中任一即显示该分区。
+const Map<String, List<String>> settingsSectionKeywords = <String, List<String>>{
+  'style': <String>['透明度', '蒙版', '样式', '背景'],
+  'fontSize': <String>['字号', '字体', '大小'],
+  'scrollSpeed': <String>['速度', '滚动', '快慢'],
+  'theme': <String>['主题', '深色', '浅色', '皮肤'],
+  'color': <String>['配色', '颜色', '预设', '我的主题'],
+  'filter': <String>['屏蔽', '高亮', '关键词', '过滤'],
+  'size': <String>['尺寸', '宽度', '高度', '大小'],
+  'panes': <String>['栏位', '分栏', '独立'],
+  'gestures': <String>['手势', '拖动', '锁定', '点击穿透', '悬浮球'],
+  'connection': <String>['凭证', '连接', 'cookie', '账号'],
+  'data': <String>['数据', '导出', '导入', '清除', '重置'],
+  'permission': <String>['权限', '通知', '电池', '白名单'],
+  'compliance': <String>['合规', '免责声明', '引导', '隐私'],
+  'diagnostics': <String>['诊断', '日志', '复制'],
+};
+
+/// 可折叠的分区标题（#143）：点标题收起 / 展开该分区。
+///
+/// 视觉上与原来的 [_SectionTitle] 一致（加粗小标题），右侧多一个朝向箭头表示状态；
+/// 整行可点，命中区比只点箭头大得多。
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.title,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final String title;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      key: ValueKey<String>('settingsSection_$title'),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            Icon(
+              expanded ? Icons.expand_less : Icons.expand_more,
+              size: 18,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _SectionTitle extends StatelessWidget {
