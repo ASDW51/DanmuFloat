@@ -714,8 +714,12 @@ void main() {
       ),
     ));
 
-    // 设置页很长，「关于」在底部，先滚过去（分区默认全部展开）。
-    await tester.scrollUntilVisible(find.text('关于'), 300);
+    // 「关于」在页面最底部，直接滚过去要赌懒加载窗口够大；用设置页搜索框筛出
+    // 它更稳，顺带钉住 #166 要求的「搜索 版本 / 更新 能命中该分区」。
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('settingsSearchField')),
+      '版本',
+    );
     await tester.pumpAndSettle();
 
     expect(
