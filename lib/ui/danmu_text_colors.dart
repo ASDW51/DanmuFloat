@@ -48,3 +48,35 @@ Color stageTextColor(LiveSessionStage stage, Brightness brightness) {
     _ => dark ? const Color(0xFF90CAF9) : const Color(0xFF0D47A1),
   };
 }
+
+/// 常驻提示条（悬浮窗权限被拒 / 主播列表损坏）的成对取色（#137）。
+///
+/// 返回记录而不是三个独立函数：底色与前景必须成对使用——分开写就容易重演旧问题
+/// 「底色换了、文字仍继承 onSurface」，深色主题下浅字压浅底实测只有 1.13~1.18:1。
+/// 浅色沿用原有底色（`orange.shade50` / `red.shade50`），只把前景压深到 ≥4.5:1；
+/// 深色改成深底浅字，避免近白底直接压在深色界面上。
+({Color background, Color foreground}) bannerColors({
+  required Brightness brightness,
+  required bool danger,
+}) {
+  if (brightness == Brightness.dark) {
+    return danger
+        ? (
+            background: const Color(0xFF4A1C1C),
+            foreground: const Color(0xFFFFDAD6),
+          )
+        : (
+            background: const Color(0xFF4A2800),
+            foreground: const Color(0xFFFFD5B0),
+          );
+  }
+  return danger
+      ? (
+          background: const Color(0xFFFFEBEE),
+          foreground: const Color(0xFFB71C1C),
+        )
+      : (
+          background: const Color(0xFFFFF3E0),
+          foreground: const Color(0xFFB33A00),
+        );
+}

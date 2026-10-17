@@ -1174,71 +1174,92 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
       );
 
+  /// 两条常驻提示条（权限被拒 prd 4.10 / 主播列表损坏 #82）的共同外观。
+  ///
+  /// 底色与前景按 brightness 成对取自 [bannerColors]（#137）：若只换底色、正文继续
+  /// 继承 onSurface，深色主题下就是浅字压浅底（实测 1.13~1.18:1）。这里把正文、
+  /// 图标、按钮文字一次钉到同一前景色上，不依赖「继承的主题色刚好对」这种巧合。
+  Widget _banner({
+    required bool danger,
+    required IconData icon,
+    required String text,
+    required List<Widget> actions,
+  }) {
+    final ({Color background, Color foreground}) colors = bannerColors(
+      brightness: Theme.of(context).brightness,
+      danger: danger,
+    );
+    return Material(
+      color: colors.background,
+      child: DefaultTextStyle.merge(
+        style: TextStyle(fontSize: 13, color: colors.foreground),
+        child: IconTheme.merge(
+          data: IconThemeData(color: colors.foreground),
+          child: Theme(
+            // 按钮文字同样是「浅色主题下恰好可读」的重灾区（深色 primary 压在
+            // shade50 上只有 1.5:1），所以在这里统一覆盖，而不是逐个按钮传 style。
+            data: Theme.of(context).copyWith(
+              textButtonTheme: TextButtonThemeData(
+                style: TextButton.styleFrom(
+                  foregroundColor: colors.foreground,
+                ),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
+              child: Row(
+                children: <Widget>[
+                  Icon(icon),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(text)),
+                  ...actions,
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 悬浮窗权限被拒时的常驻提示（prd 4.10 权限拒绝降级）。
   ///
   /// 用普通容器而不是 MaterialBanner：MaterialBanner 需要 ScaffoldMessenger
   /// 且会被后续 SnackBar 顶掉，这里的提示应当一直可见。
-  Widget _buildPermissionBanner() => Material(
-        color: Colors.orange.shade50,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
-          child: Row(
-            children: <Widget>[
-              Icon(Icons.warning_amber_rounded, color: Colors.orange.shade900),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  '悬浮窗权限未授予，当前仅能在 App 内查看',
-                  style: TextStyle(fontSize: 13),
-                ),
-              ),
-              TextButton(
-                onPressed: _retryOverlayPermission,
-                child: const Text('重试授权'),
-              ),
-              // 重试仍被拒（系统不再弹框）时给一条真能走通的出口（UX-16）。
-              if (_overlayRetryFailed)
-                TextButton(
-                  onPressed: () => unawaited(_openSystemSettings()),
-                  child: const Text('去系统设置'),
-                ),
-            ],
-          ),
+  Widget _buildPermissionBanner() => _banner(
+    danger: false,
+    icon: Icons.warning_amber_rounded,
+    text: '悬浮窗权限未授予，当前仅能在 App 内查看',
+    actions: <Widget>[
+      TextButton(onPressed: _retryOverlayPermission, child: const Text('重试授权')),
+      // 重试仍被拒（系统不再弹框）时给一条真能走通的出口（UX-16）。
+      if (_overlayRetryFailed)
+        TextButton(
+          onPressed: () => unawaited(_openSystemSettings()),
+          child: const Text('去系统设置'),
         ),
-      );
+    ],
+  );
 
   /// 主播列表文件损坏时的常驻提示（#82）。
   ///
   /// 与权限 banner 同样用普通容器：这条提示直接关系到用户数据是否还在，
   /// 不能让后续 SnackBar 顶掉；文案本身已给出找回副本与导出备份的出路。
-  Widget _buildRoomsLoadWarning() => Material(
-        color: Colors.red.shade50,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
-          child: Row(
-            children: <Widget>[
-              Icon(Icons.error_outline, color: Colors.red.shade900),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _roomsLoadWarning ?? '',
-                  style: const TextStyle(fontSize: 13),
-                ),
-              ),
-              TextButton(
-                onPressed: _openSettings,
-                child: const Text('去设置'),
-              ),
-              // 留存失败时不给「知道了」：保存仍被暂停，提示必须一直在（#82）。
-              if (!_roomsSaveBlocked)
-                TextButton(
-                  onPressed: () => setState(() => _roomsLoadWarning = null),
-                  child: const Text('知道了'),
-                ),
-            ],
-          ),
+  Widget _buildRoomsLoadWarning() => _banner(
+    danger: true,
+    icon: Icons.error_outline,
+    text: _roomsLoadWarning ?? '',
+    actions: <Widget>[
+      TextButton(onPressed: _openSettings, child: const Text('去设置')),
+      // 留存失败时不给「知道了」：保存仍被暂停，提示必须一直在（#82）。
+      if (!_roomsSaveBlocked)
+        TextButton(
+          onPressed: () => setState(() => _roomsLoadWarning = null),
+          child: const Text('知道了'),
         ),
-      );
+    ],
+  );
+
 
   Widget _buildBody() {
     if (_loading) return const Center(child: CircularProgressIndicator());
