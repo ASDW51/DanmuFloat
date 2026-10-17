@@ -31,10 +31,11 @@ class _FakeTransport implements HttpTransport {
 
 /// 内存偏好存储：widget 测试不碰真实文件。
 class _MemoryPrefsStore extends UpdatePrefsStore {
-  _MemoryPrefsStore({this.initial = const UpdatePrefs()})
+  _MemoryPrefsStore()
     : super(directoryResolver: () async => Directory.systemTemp);
 
-  final UpdatePrefs initial;
+  /// 读盘返回值：用例按需改，默认是「从没查过、自动检查关闭」。
+  UpdatePrefs initial = const UpdatePrefs();
   UpdatePrefs saved = const UpdatePrefs();
   int saves = 0;
 
