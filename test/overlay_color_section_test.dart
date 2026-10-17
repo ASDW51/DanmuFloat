@@ -357,5 +357,65 @@ void main() {
       await tester.pumpAndSettle();
       expect(savedName, '夜间护眼', reason: '首尾空白由弹窗 trim 掉');
     });
+
+    testWidgets('窗内配色弹窗列出「我的主题」，确定后带回基础预设 + 覆盖表（#147）',
+        (WidgetTester tester) async {
+      OverlayColorChoice? choice;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (BuildContext context) => TextButton(
+                onPressed: () async {
+                  choice = await showOverlayColorDialog(
+                    context,
+                    themeId: 'dark',
+                    overrideCount: 1,
+                    myThemes: const <MyTheme>[
+                      MyTheme(
+                        id: 'a',
+                        name: '夜间护眼',
+                        baseThemeId: 'sepia',
+                        overrides: <String, int>{'body': 0xFF102030},
+                      ),
+                    ],
+                  );
+                },
+                child: const Text('打开'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey<String>('overlayColorMyTheme_a')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('overlayColorMyTheme_a')),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey<String>('overlayColorConfirm')));
+      await tester.pumpAndSettle();
+
+      expect(choice, isNotNull);
+      expect(choice!.themeId, 'sepia', reason: '基础预设取自主题快照，不是写死的 dark');
+      expect(choice!.overrides, <String, int>{'body': 0xFF102030});
+      expect(choice!.resetOverrides, isFalse);
+
+      // 同源：窗内与设置页都按 preset(基础).resolve(覆盖).toPalette() 解析，
+      // 所以窗内拿到这份选择后渲染出的正文色必须就是主题里存的那个色。
+      expect(
+        OverlayTheme.preset(choice!.themeId)
+            .resolve(choice!.overrides)
+            .toPalette()
+            .body
+            .toARGB32(),
+        0xFF102030,
+      );
+    });
   });
 }

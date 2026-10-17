@@ -9,6 +9,7 @@
 //                    / filter（屏蔽与高亮）/ credential（手动粘贴的凭证）/ close（关闭悬浮窗）
 //   悬浮窗 → 主 App：state（阶段、已收条数、错误摘要）
 import 'package:danmu_float/app/live_danmu_session.dart';
+import 'package:danmu_float/storage/my_theme.dart';
 import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/danmu/model/danmaku_event.dart';
 
@@ -399,6 +400,7 @@ class OverlayConfig {
     this.lightTheme = false,
     this.themeId,
     this.colorOverrides = const <String, int>{},
+    this.myThemes = const <MyTheme>[],
     this.contrastPolicy = overlayStyleAdjustPolicy,
     this.showTitleBar = true,
     this.focusBehavior = defaultFocusBehavior,
@@ -445,6 +447,9 @@ class OverlayConfig {
   /// 角色级颜色覆盖：角色名 → 不透明 ARGB（#98，与 [OverlayStyle] 同口径）。
   final Map<String, int> colorOverrides;
 
+  /// 用户另存的具名主题（#147）：窗内配色弹窗据此列出「我的主题」chips。
+  final List<MyTheme> myThemes;
+
   /// 对比度策略：adjust 校正到可读 / warn 提示但不改 / allow 原样渲染（#98）。
   final String contrastPolicy;
 
@@ -487,6 +492,9 @@ class OverlayConfig {
     // 与 style 消息同口径写出皮肤字段（#98）：新字段旧进程读到会忽略，不会解析失败。
     'themeId':
         themeId ?? (lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId),
+    'myThemes': <Object?>[
+      for (final MyTheme theme in myThemes) theme.toJson(),
+    ],
     'colorOverrides': colorOverrides,
     'contrastPolicy': contrastPolicy,
     'showTitleBar': showTitleBar,
@@ -535,6 +543,7 @@ class OverlayConfig {
         lightTheme: raw['lightTheme'] == true,
       ),
       colorOverrides: parseColorOverrides(raw['colorOverrides']),
+      myThemes: parseMyThemes(raw['myThemes']),
       contrastPolicy: clampOverlayStyleContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
@@ -699,6 +708,7 @@ class OverlayStyle {
     required this.opacity,
     this.themeId,
     this.colorOverrides = const <String, int>{},
+    this.myThemes = const <MyTheme>[],
     this.contrastPolicy = overlayStyleAdjustPolicy,
     this.fontSize = defaultDanmuFontSize,
     this.scrollSpeed = defaultDanmuScrollSpeed,
@@ -748,6 +758,9 @@ class OverlayStyle {
   /// 对比度策略：adjust 校正到可读 / warn 提示但不改 / allow 原样渲染。
   final String contrastPolicy;
 
+  /// 用户另存的具名主题（#147）：设置页新增 / 删除主题后随 style 消息同步给窗内。
+  final List<MyTheme> myThemes;
+
   Map<String, Object?> toJson() => <String, Object?>{
     'type': overlayStyleType,
     'opacity': clampOverlayOpacity(opacity),
@@ -757,6 +770,9 @@ class OverlayStyle {
     'lightTheme': lightTheme,
     // 新字段照旧写出来：旧版悬浮窗进程读到不认识的键会忽略，不会因此解析失败。
     'themeId': themeId ?? (lightTheme ? overlayStyleLightThemeId : overlayStyleDarkThemeId),
+    'myThemes': <Object?>[
+      for (final MyTheme theme in myThemes) theme.toJson(),
+    ],
     'colorOverrides': colorOverrides,
     'contrastPolicy': contrastPolicy,
     'showTitleBar': showTitleBar,
@@ -791,6 +807,7 @@ class OverlayStyle {
         lightTheme: raw['lightTheme'] == true,
       ),
       colorOverrides: parseColorOverrides(raw['colorOverrides']),
+      myThemes: parseMyThemes(raw['myThemes']),
       contrastPolicy: clampOverlayStyleContrastPolicy(raw['contrastPolicy']),
       showTitleBar: raw['showTitleBar'] != false,
       focusBehavior: clampFocusBehavior(raw['focusBehavior']),
