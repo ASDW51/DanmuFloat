@@ -90,6 +90,61 @@ class _SettingsPageState extends State<SettingsPage> {
     widget.onChanged(next, persist: persist);
   }
 
+  /// 保存当前配色为具名主题：id 用毫秒时间戳，之后重命名 / 更新都不改它（#147）。
+  void _saveMyTheme(String name) {
+    _applyMyThemeResult(
+      _prefs.saveAsMyTheme(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: name,
+      ),
+      okMessage: '已保存为「$name」',
+    );
+  }
+
+  void _renameMyTheme(String id, String name) {
+    _applyMyThemeResult(
+      _prefs.renameMyTheme(id: id, name: name),
+      okMessage: '已重命名为「$name」',
+    );
+  }
+
+  void _updateMyTheme(String id) {
+    _applyMyThemeResult(
+      _prefs.updateMyThemeWithCurrent(id),
+      okMessage: '已用当前配色更新该主题',
+    );
+  }
+
+  void _applyMyTheme(String id) {
+    final OverlayPrefs? next = _prefs.applyMyTheme(id);
+    if (next == null) {
+      _snack('这个主题已经不在了');
+      return;
+    }
+    _apply(next, persist: true);
+    _snack('已应用该主题');
+  }
+
+  void _removeMyTheme(String id) {
+    _apply(_prefs.removeMyTheme(id), persist: true);
+    _snack('已删除该主题');
+  }
+
+  /// 统一处理偏好层的 `(prefs, error)` 返回值：失败弹原因、成功落盘并确认（#147）。
+  /// 规则只写在偏好层一处，本页只负责把结论变成提示。
+  void _applyMyThemeResult(
+    ({OverlayPrefs? prefs, String? error}) result, {
+    required String okMessage,
+  }) {
+    final OverlayPrefs? next = result.prefs;
+    if (next == null) {
+      _snack(result.error ?? '操作失败');
+      return;
+    }
+    _apply(next, persist: true);
+    _snack(okMessage);
+  }
+
   /// 过滤偏好改动的转发：本页不落盘，由首页合并后统一落盘（#97）。
   void _applyFilter(FilterPrefs next) {
     setState(() => _filter = next);
@@ -259,6 +314,12 @@ class _SettingsPageState extends State<SettingsPage> {
             themeId: _prefs.themeId,
             overrides: _prefs.colorOverrides,
             recentColors: _prefs.recentColors,
+            myThemes: _prefs.myThemes,
+            onSaveMyTheme: _saveMyTheme,
+            onApplyMyTheme: _applyMyTheme,
+            onRenameMyTheme: _renameMyTheme,
+            onUpdateMyTheme: _updateMyTheme,
+            onRemoveMyTheme: _removeMyTheme,
             contrastPolicy: _prefs.contrastPolicy,
             onThemeChanged: (String id) =>
                 _apply(_prefs.copyWith(themeId: id), persist: true),
