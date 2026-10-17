@@ -1,3 +1,5 @@
+import 'package:danmu_float/danmu/model/danmaku_event.dart';
+import 'package:danmu_float/ui/overlay_theme.dart';
 import 'package:danmu_float/app/live_danmu_session.dart';
 import 'package:flutter/material.dart';
 
@@ -80,3 +82,63 @@ Color stageTextColor(LiveSessionStage stage, Brightness brightness) {
           foreground: const Color(0xFFB33A00),
         );
 }
+
+/// 弹幕行 / 主播行的语义色（#138）。
+///
+/// 为什么放在这里：UX-19 已把本文件定为主 App 文字色的唯一口径，而弹幕行此前
+/// 直接写死 Material 色板——浅色下 4 处、深色下 6 处跌破 4.5:1，同一类弹幕在
+/// 窗内与 App 内还是两个色系。这里按 Brightness 成对取值，由
+/// `test/danmu_semantic_colors_test.dart` 对真实底色用 computeLuminance() 钉住。
+
+/// 7 类类型前缀色：**直接复用**悬浮窗已下沉的 `OverlayTheme` 角色表（#138）。
+///
+/// 不在这里维护第二份 switch：主 App 深色主题取 `dark` 预设、浅色主题取 `light`
+/// 预设，与窗内完全同源（`sepia` / 对比度修正的取值也一并跟着走）。
+Color danmuTypeColor(DanmakuKind kind, Brightness brightness) {
+  final OverlayTheme theme = OverlayTheme.preset(
+    brightness == Brightness.dark
+        ? defaultOverlayThemeId
+        : overlayStyleLightThemeId,
+  );
+  return switch (kind) {
+    DanmakuKind.screenChat => theme.typeScreenChat,
+    DanmakuKind.privilegeScreenChat => theme.typePrivilegeScreenChat,
+    DanmakuKind.gift => theme.typeGift,
+    DanmakuKind.member => theme.typeMember,
+    DanmakuKind.like => theme.typeLike,
+    DanmakuKind.social => theme.typeSocial,
+    DanmakuKind.roomRank => theme.typeRoomRank,
+    // 其余类型本来就不显示前缀（danmakuTypeLabel 返回 null），走到这里只是兜底。
+    _ => secondaryTextColor(brightness),
+  };
+}
+
+/// 昵称（加粗显示）：浅色下 `indigo.shade400` 对白底 4.86:1 勉强及格、深色下
+/// 只有 3.82:1，所以两套都重新取。
+Color nicknameColor(Brightness brightness) => brightness == Brightness.dark
+    ? const Color(0xFFB4A7FF)
+    : const Color(0xFF3949AB);
+
+/// 等级 `Lv.N`：原来两处都写死 `orange.shade800`（白底 3.08:1）。
+Color levelTextColor(Brightness brightness) => brightness == Brightness.dark
+    ? const Color(0xFFFFB74D)
+    : const Color(0xFFB33A00);
+
+/// 粉丝灯牌 `灯牌N`：`purple.shade400` 深色下只有 3.86:1。
+Color fanBadgeColor(Brightness brightness) => brightness == Brightness.dark
+    ? const Color(0xFFE0B3FF)
+    : const Color(0xFF7B1FA2);
+
+/// 首页行内的「凭证：xxx」：`Colors.orange` 对白底只有 2.16:1。
+Color credentialTextColor(Brightness brightness) =>
+    brightness == Brightness.dark ? const Color(0xFFFFB68C) : const Color(0xFFB33A00);
+
+/// 首页开播头像的底色与前景（白字是文字，按 4.5:1 要求）。
+///
+/// 深浅两套共用同一组底色：这两个底色本身就是深色，白字在浅色 / 深色主题下
+/// 分别有 5.1:1 与 5.0:1，无需再分叉。`living == null` 是「未知」，按离线处理。
+Color roomAvatarBackgroundColor({required bool? living}) =>
+    living == true ? const Color(0xFF2E7D32) : const Color(0xFF757575);
+
+/// 头像里的首字：两组底色都够深，白字恒达标。
+Color roomAvatarForegroundColor() => Colors.white;

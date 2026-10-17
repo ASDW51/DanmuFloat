@@ -742,19 +742,23 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
               TextSpan(
                 text: user.nickName,
                 style: TextStyle(
-                  color: Colors.indigo.shade400,
+                  color: nicknameColor(Theme.of(context).brightness),
                   fontWeight: FontWeight.bold,
                 ),
               ),
             if (user.level > 0)
               TextSpan(
                 text: ' Lv.${user.level}',
-                style: TextStyle(color: Colors.orange.shade800),
+                style: TextStyle(
+                  color: levelTextColor(Theme.of(context).brightness),
+                ),
               ),
             if (user.fanLevel > 0)
               TextSpan(
                 text: ' 灯牌${user.fanLevel}',
-                style: TextStyle(color: Colors.purple.shade400),
+                style: TextStyle(
+                  color: fanBadgeColor(Theme.of(context).brightness),
+                ),
               ),
             TextSpan(text: ' ${event.text}'),
           ],
@@ -771,16 +775,9 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
   Widget _buildEventTile(DanmakuEvent event) {
     final DanmakuUser user = event.user;
     final String? mark = danmakuTypeLabel(event.kind);
-    final Color? markColor = switch (event.kind) {
-      DanmakuKind.screenChat => Colors.orange.shade800,
-      DanmakuKind.privilegeScreenChat => Colors.green.shade700,
-      DanmakuKind.gift => Colors.pink.shade700,
-      DanmakuKind.member => Colors.teal.shade700,
-      DanmakuKind.like => Colors.red.shade700,
-      DanmakuKind.social => Colors.blue.shade700,
-      DanmakuKind.roomRank => Colors.amber.shade800,
-      _ => null,
-    };
+    final Color? markColor = mark == null
+        ? null
+        : danmuTypeColor(event.kind, Theme.of(context).brightness);
     return InkWell(
       onTap: () => unawaited(_showEventMenu(event)),
       child: Padding(
@@ -808,7 +805,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
                 TextSpan(
                   text: 'Lv.${user.level} ',
                   style: TextStyle(
-                    color: Colors.orange.shade800,
+                    color: levelTextColor(Theme.of(context).brightness),
                     fontSize: smallerFontSize(_prefs.fontSize, 2),
                   ),
                 ),
@@ -816,7 +813,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
                 TextSpan(
                   text: '灯牌${user.fanLevel} ',
                   style: TextStyle(
-                    color: Colors.purple.shade400,
+                    color: fanBadgeColor(Theme.of(context).brightness),
                     fontSize: smallerFontSize(_prefs.fontSize, 2),
                   ),
                 ),
@@ -824,7 +821,7 @@ class _DanmuPageState extends State<DanmuPage> with WidgetsBindingObserver {
                 TextSpan(
                   text: '${user.nickName}: ',
                   style: TextStyle(
-                    color: Colors.indigo.shade400,
+                    color: nicknameColor(Theme.of(context).brightness),
                     fontWeight: FontWeight.bold,
                   ),
                 ),

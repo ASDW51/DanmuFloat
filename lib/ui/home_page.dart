@@ -1417,10 +1417,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       onTap: () => _connectSingle(room),
       onLongPress: () => _showRoomActions(room),
       leading: CircleAvatar(
-        backgroundColor: living == true ? Colors.green : Colors.grey.shade400,
+        backgroundColor: roomAvatarBackgroundColor(living: living),
         child: Text(
           room.displayName.characters.first,
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: roomAvatarForegroundColor()),
         ),
       ),
       title: Text(
@@ -1491,7 +1491,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               '凭证：$credentialName',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: Colors.orange),
+              style: TextStyle(
+                fontSize: 12,
+                color: credentialTextColor(Theme.of(context).brightness),
+              ),
             ),
         ],
       ),

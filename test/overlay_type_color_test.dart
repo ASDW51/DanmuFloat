@@ -23,7 +23,7 @@ void main() {
     Colors.redAccent, Colors.lightBlueAccent, Colors.amberAccent,
   ];
   const List<int> lightRef = <int>[
-    0xFFE65100, 0xFF2E7D32, 0xFFC2185B, 0xFF00695C, 0xFFC62828, 0xFF1565C0, 0xFF8D6E00,
+    0xFFB33A00, 0xFF2E7D32, 0xFFC2185B, 0xFF00695C, 0xFFC62828, 0xFF1565C0, 0xFF8D6E00,
   ];
 
   List<Color?> colorsOf(OverlayPalette p) => kinds.keys
