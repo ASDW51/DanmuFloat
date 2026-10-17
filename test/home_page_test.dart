@@ -270,6 +270,26 @@ Future<void> _pumpHome(WidgetTester tester) async {
 /// save/load 是真实文件 I/O：testWidgets 的用例体跑在 FakeAsync zone 里，
 /// 直接 await 永远等不到完成回调（10 分钟超时的根因），必须经
 /// [WidgetTester.runAsync] 逃出 FakeAsync 真实执行。
+/// 打开「搜索与排序」菜单（#139）。
+///
+/// 弹出菜单是路由动画：只 pump 一次大跨度时间时动画虽然走完，但 AbsorbPointer
+/// 要到下一帧才撤，紧接着的点击会落在遮罩上（实测点击位置命中 _RenderTheater）。
+/// 所以统一「起一帧 → 推进动画 → 再补一帧」。
+Future<void> _openListMenu(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('搜索与排序'));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+  await tester.pump();
+}
+
+/// 点菜单项并等它关闭（同上，关闭动画也要两帧）。
+Future<void> _tapMenuItem(WidgetTester tester, String label) async {
+  await tester.tap(find.text(label));
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+  await tester.pump();
+}
+
 Future<Directory> _seedRooms(
   WidgetTester tester, {
   required List<ManagedRoom> rooms,
@@ -1522,10 +1542,8 @@ void main() {
     expect(find.text('主播甲'), findsOneWidget);
 
     // 搜索与排序共用一个 AppBar 入口（不挤占既有五个动作）。
-    await tester.tap(find.byTooltip('搜索与排序'));
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('搜索直播间'));
-    await tester.pump(const Duration(milliseconds: 400));
+    await _openListMenu(tester);
+    await _tapMenuItem(tester, '搜索直播间');
 
     await tester.enterText(
       find.byKey(const ValueKey<String>('homeSearchField')),
@@ -1562,10 +1580,8 @@ void main() {
     _mockMessengerReplies(tester);
     await _pumpHomeWithDir(tester, dir);
 
-    await tester.tap(find.byTooltip('搜索与排序'));
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('搜索直播间'));
-    await tester.pump(const Duration(milliseconds: 400));
+    await _openListMenu(tester);
+    await _tapMenuItem(tester, '搜索直播间');
     await tester.enterText(
       find.byKey(const ValueKey<String>('homeSearchField')),
       '不存在的房间',
@@ -1606,18 +1622,14 @@ void main() {
 
     double dyOf(String name) => tester.getTopLeft(find.text(name)).dy;
 
-    await tester.tap(find.byTooltip('搜索与排序'));
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('直播中优先'));
-    await tester.pump(const Duration(milliseconds: 400));
+    await _openListMenu(tester);
+    await _tapMenuItem(tester, '直播中优先');
 
     expect(dyOf('主播乙'), lessThan(dyOf('主播丙')), reason: '直播中排在未知之前');
     expect(dyOf('主播丙'), lessThan(dyOf('主播甲')), reason: '未知排在未开播之前');
 
-    await tester.tap(find.byTooltip('搜索与排序'));
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('最近刷新'));
-    await tester.pump(const Duration(milliseconds: 400));
+    await _openListMenu(tester);
+    await _tapMenuItem(tester, '最近刷新');
 
     expect(dyOf('主播丙'), lessThan(dyOf('主播甲')), reason: '3000 比 1000 新');
     expect(dyOf('主播甲'), lessThan(dyOf('主播乙')), reason: '从未刷新的排最后');
