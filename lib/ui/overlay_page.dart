@@ -143,6 +143,10 @@ class OverlayPalette {
   /// 高亮词样式（prd F11）：浅色皮肤下换成深色字 + 浅黄底，否则看不见。
   final TextStyle highlightStyle;
 
+  /// 旧参照常量（仅测试比对用，生产走 `OverlayTheme`）：与预设逐位相等。
+  ///
+  /// 取值来自 #68 之前这几处内联三元表达式：球/胶囊 `isLight ? white70 : black54`、
+  /// 菜单 `isLight ? white@0.94 : black@0.9`（#146 修正了原来写反的 dark/light 取值）。
   static const OverlayPalette darkPalette = OverlayPalette(
     isLight: false,
     body: Colors.white,
@@ -151,8 +155,8 @@ class OverlayPalette {
     divider: Colors.white24,
     bannerBg: Colors.white10,
     maskColor: Colors.black,
-    chromeBg: Colors.white70,
-    menuBg: Color(0xF0FFFFFF),
+    chromeBg: Colors.black54,
+    menuBg: Color(0xE6000000),
     typeScreenChat: Colors.orangeAccent,
     typePrivilegeScreenChat: Colors.lightGreenAccent,
     typeGift: Colors.pinkAccent,
@@ -180,8 +184,8 @@ class OverlayPalette {
     divider: Colors.black26,
     bannerBg: Colors.black12,
     maskColor: Colors.white,
-    chromeBg: Colors.black54,
-    menuBg: Color(0xE6000000),
+    chromeBg: Colors.white70,
+    menuBg: Color(0xF0FFFFFF),
     typeScreenChat: Color(0xFFE65100),
     typePrivilegeScreenChat: Color(0xFF2E7D32),
     typeGift: Color(0xFFC2185B),

@@ -122,6 +122,11 @@ class OverlayTheme {
   ];
 
   /// 深邃（默认）：逐字段等于原有 `darkPalette`。
+  ///
+  /// 底色两个角色取的是 #68 之前那几句内联三元表达式在 `isLight = false` 下的值
+  /// （球/胶囊 `white70 : black54`、菜单 `white@0.94 : black@0.9`）。#68 拆角色时把这
+  /// 两组 dark/light 取值写反了，默认深色下菜单面板成了近白底配纯白字（1.14:1），
+  /// 悬浮球底色 2.10:1，对比度守卫又只比 `maskColor` 所以查不出来（#146）。
   static const OverlayTheme dark = OverlayTheme(
     id: 'dark',
     isLight: false,
@@ -131,8 +136,8 @@ class OverlayTheme {
     divider: Colors.white24,
     bannerBg: Colors.white10,
     maskColor: Colors.black,
-    chromeBg: Colors.white70,
-    menuBg: Color(0xF0FFFFFF),
+    chromeBg: Colors.black54,
+    menuBg: Color(0xE6000000),
     typeScreenChat: Colors.orangeAccent,
     typePrivilegeScreenChat: Colors.lightGreenAccent,
     typeGift: Colors.pinkAccent,
@@ -153,6 +158,8 @@ class OverlayTheme {
   );
 
   /// 清爽：逐字段等于原有 `lightPalette`。
+  ///
+  /// 同理（#146）：浅色下球/胶囊是 `white70`、菜单面板是 `white@0.94`，与 dark 相反。
   static const OverlayTheme light = OverlayTheme(
     id: 'light',
     isLight: true,
@@ -162,8 +169,8 @@ class OverlayTheme {
     divider: Colors.black26,
     bannerBg: Colors.black12,
     maskColor: Colors.white,
-    chromeBg: Colors.black54,
-    menuBg: Color(0xE6000000),
+    chromeBg: Colors.white70,
+    menuBg: Color(0xF0FFFFFF),
     typeScreenChat: Color(0xFFE65100),
     typePrivilegeScreenChat: Color(0xFF2E7D32),
     typeGift: Color(0xFFC2185B),

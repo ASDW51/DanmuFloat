@@ -722,11 +722,16 @@ git checkout main && git pull --ff-only
 
 取值要求：
 
-- `dark`：`chromeBg = Colors.white70`、`menuBg = Colors.white.withValues(alpha: 0.94)`；
-- `light`：`chromeBg = Colors.black54`、`menuBg = Colors.black.withValues(alpha: 0.9)`。这两组必须与现行字面量**逐位相等**（零外观突变），单测直接断言；
+- `dark`：`chromeBg = Colors.black54`、`menuBg = Colors.black.withValues(alpha: 0.9)`；
+- `light`：`chromeBg = Colors.white70`、`menuBg = Colors.white.withValues(alpha: 0.94)`。这两组必须与现行字面量**逐位相等**（零外观突变），单测直接断言；
 - `contrast`：两者取**不透明** `maskColor`（最大化面板内文字对比）；
 - `sepia`：与 `maskColor` 同色相（暖暗 `0xE6` 级黑）；
 - 统一约束：面板不透明度 ≥0.9、球对 `maskColor` ≥3:1。
+
+**勘误（#146）**：本节初稿把 dark / light 两组取值写反了（深色给白底、浅色给黑底），第 7 轮 ①
+的实现照着互换，于是默认深色下菜单面板变成近白底配纯白字（1.14:1）、悬浮球 2.10:1，用户报告
+「一个悬浮窗上有两套颜色 / 看不见设置小窗的字体」。已按 `git show 1243180^` 的原始三元表达式更正，
+并把测试从「新常量对比新常量」改成对照语义 + 底色对前景的实测对比度。
 
 | 文件 | 位置 | 改法 |
 | --- | --- | --- |
