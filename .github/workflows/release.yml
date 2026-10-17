@@ -126,23 +126,42 @@ jobs:
         shell: bash
         env:
           TAG: ${{ steps.ver.outputs.tag }}
+          VERSION_NAME: ${{ steps.ver.outputs.version_name }}
         run: |
           set -euo pipefail
           mkdir -p dist
+          # 版本号注入（#166）：App 运行时读不到 pubspec.yaml，用 dart-define 把
+          # release.yml 已经解析出的 version_name 传进去；真相源仍然只有 pubspec。
+          APP_VERSION_DEFINE="--dart-define=DANMU_APP_VERSION=${VERSION_NAME}"
           # 两个产物只能分别构建：--split-per-abi 产出的是按 ABI 拆分的包
           # （app-arm64-v8a-release.apk），通用包必须走不带 --split-per-abi 的构建
           # （app-release.apk）——Flutter 没有「一条命令同时出两者」的选项，
           # 所以这里合并的是「步骤」，不是构建命令。
           echo "::group::构建 arm64 精简包"
           # 限定 android-arm64 + split-per-abi：只编 arm64 一个 ABI，避免白编另外两个拆分包的产物
-          flutter build apk --release --target-platform android-arm64 --split-per-abi
+          flutter build apk --release --target-platform android-arm64 --split-per-abi "$APP_VERSION_DEFINE"
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "dist/DanmuFloat-${TAG}-arm64-v8a.apk"
           echo "::endgroup::"
           echo "::group::构建通用包"
-          flutter build apk --release
+          flutter build apk --release "$APP_VERSION_DEFINE"
           cp build/app/outputs/flutter-apk/app-release.apk "dist/DanmuFloat-${TAG}-universal.apk"
           echo "::endgroup::"
           ls -lh dist
+
+      - name: 校验注入的版本号
+        shell: bash
+        env:
+          VERSION_NAME: ${{ steps.ver.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          # dart-define 有没有真的进到产物里，只有看编译后的 libapp.so 才知道
+          # （#166：版本号写错或漏传时，App 里显示的是 dev，用户报障就没了依据）。
+          found="$(unzip -p dist/DanmuFloat-${{ steps.ver.outputs.tag }}-universal.apk lib/arm64-v8a/libapp.so | strings | grep -Fx "$VERSION_NAME" | head -n1 || true)"
+          if [[ "$found" != "$VERSION_NAME" ]]; then
+            echo "::error::APK 里找不到注入的版本号 $VERSION_NAME，dart-define 没有生效"
+            exit 1
+          fi
+          echo "APK 内版本号：$found（与 pubspec.yaml 一致）"
 
       - name: 生成校验和
         shell: bash

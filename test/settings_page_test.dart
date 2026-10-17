@@ -688,6 +688,59 @@ void main() {
       );
     });
   });
+
+  testWidgets('关于分区显示注入的版本号，点一下可复制（#166）', (WidgetTester tester) async {
+    _useLongScreen(tester);
+    final List<MethodCall> platformCalls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall call) async {
+        platformCalls.add(call);
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: SettingsPage(
+        prefs: const OverlayPrefs(),
+        onChanged: _noop,
+        buildVersion: '1.2.3',
+      ),
+    ));
+
+    // 「关于」在页面最底部，直接滚过去要赌懒加载窗口够大；用设置页搜索框筛出
+    // 它更稳，顺带钉住 #166 要求的「搜索 版本 / 更新 能命中该分区」。
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('settingsSearchField')),
+      '版本',
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('v1.2.3'),
+      findsOneWidget,
+      reason: '报障模板要求填版本号，App 内必须能直接看到',
+    );
+
+    await tester.tap(find.byKey(const ValueKey<String>('settingsAppVersion')));
+    await tester.pumpAndSettle();
+
+    final Iterable<MethodCall> clipboard = platformCalls.where(
+      (MethodCall call) => call.method == 'Clipboard.setData',
+    );
+    expect(clipboard, isNotEmpty, reason: '点一下应把版本号复制走');
+    expect(
+      (clipboard.last.arguments as Map<Object?, Object?>)['text'],
+      'v1.2.3',
+    );
+    expect(find.text('已复制版本号'), findsOneWidget);
+  });
 }
 
 /// 假的备份器：widget 测试跑在 FakeAsync 下，真实文件 IO 无法完成，
@@ -730,6 +783,7 @@ class FakeDataTransfer implements LocalDataTransfer {
       regexEnabled: false,
     );
   }
+
 }
 
 /// 测试环境的逻辑屏幕尺寸（Flutter 测试默认 800×600）。
