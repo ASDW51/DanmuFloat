@@ -9,6 +9,7 @@ import 'package:danmu_float/danmu/model/danmaku_display.dart';
 import 'package:danmu_float/storage/data_transfer.dart';
 import 'package:danmu_float/storage/overlay_prefs_store.dart';
 import 'package:danmu_float/storage/theme_store.dart';
+import 'package:danmu_float/storage/settings_view_prefs.dart';
 import 'package:danmu_float/ui/settings_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -574,6 +575,119 @@ void main() {
     expect(find.byType(CheckboxListTile), findsNothing);
     expect(find.text('同意并继续'), findsNothing);
   });
+  group('分区折叠与设置项搜索（#143）', () {
+    testWidgets('点分区标题收起内容，再点恢复', (WidgetTester tester) async {
+      _useTallScreen(tester);
+      final Directory dir =
+          Directory.systemTemp.createTempSync('danmu_settings_view');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await tester.pumpWidget(
+        _wrapWithStore(
+          const OverlayPrefs(),
+          _noop,
+          SettingsViewPrefsStore(directoryResolver: () async => dir),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('弹幕背景透明度　0.80'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey<String>('settingsSection_悬浮窗样式')));
+      await tester.pump();
+
+      expect(
+        find.text('弹幕背景透明度　0.80'),
+        findsNothing,
+        reason: '收起后该分区内容不该再渲染',
+      );
+      expect(
+        find.byKey(const ValueKey<String>('settingsSection_悬浮窗样式')),
+        findsOneWidget,
+        reason: '标题必须留着，否则没法再展开',
+      );
+
+      await tester.tap(find.byKey(const ValueKey<String>('settingsSection_悬浮窗样式')));
+      await tester.pump();
+      expect(find.text('弹幕背景透明度　0.80'), findsOneWidget);
+    });
+
+    testWidgets('搜索「透明度」只留下样式分区，清空后恢复全部（#143）',
+        (WidgetTester tester) async {
+      _useTallScreen(tester);
+      final Directory dir =
+          Directory.systemTemp.createTempSync('danmu_settings_search');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      await tester.pumpWidget(
+        _wrapWithStore(
+          const OverlayPrefs(),
+          _noop,
+          SettingsViewPrefsStore(directoryResolver: () async => dir),
+        ),
+      );
+      await tester.pump();
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('settingsSearchField')),
+        '透明度',
+      );
+      await tester.pump();
+
+      // 命中样式分区（关键词里有「透明度」，标题里没有）。
+      expect(find.text('弹幕背景透明度　0.80'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey<String>('settingsSection_弹幕字号')),
+        findsNothing,
+        reason: '不相关的分区要被过滤掉',
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('settingsSearchField')),
+        '',
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey<String>('settingsSection_弹幕字号')),
+        findsOneWidget,
+        reason: '清空搜索后恢复全部分区',
+      );
+    });
+
+    testWidgets('折叠状态会落盘，且只记录真正收起的那个分区（#143）',
+        (WidgetTester tester) async {
+      _useTallScreen(tester);
+      final Directory dir =
+          Directory.systemTemp.createTempSync('danmu_settings_persist');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final SettingsViewPrefsStore store =
+          SettingsViewPrefsStore(directoryResolver: () async => dir);
+
+      await tester.pumpWidget(_wrapWithStore(const OverlayPrefs(), _noop, store));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey<String>('settingsSection_悬浮窗样式')));
+      await tester.pump();
+
+      // 落盘是真实文件 I/O：先给真实事件循环时间完成写操作，再 pump 一帧让
+      // FakeAsync 里的续接跑起来，最后才读回来（少了 pump 会读到空集合）。
+      for (int i = 0; i < 3; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)),
+        );
+        await tester.pump();
+      }
+      final SettingsViewPrefs saved = await tester.runAsync(store.load) ??
+          const SettingsViewPrefs();
+      expect(
+        saved.collapsedSections,
+        contains('style'),
+        reason: '收起「悬浮窗样式」后必须落盘，重进页面才能保持',
+      );
+      expect(
+        saved.collapsedSections,
+        isNot(contains('fontSize')),
+        reason: '没碰过的分区不该被顺手记成收起',
+      );
+    });
+  });
 }
 
 /// 假的备份器：widget 测试跑在 FakeAsync 下，真实文件 IO 无法完成，
@@ -702,3 +816,15 @@ Widget _wrap(
   void Function(OverlayPrefs prefs, {required bool persist}) onChanged,
 ) =>
     MaterialApp(home: SettingsPage(prefs: prefs, onChanged: onChanged));
+/// 带折叠状态存储注入的挂载（#143）：单测用临时目录隔离，不碰 path_provider。
+Widget _wrapWithStore(
+  OverlayPrefs prefs,
+  void Function(OverlayPrefs prefs, {required bool persist}) onChanged,
+  SettingsViewPrefsStore store,
+) => MaterialApp(
+  home: SettingsPage(
+    prefs: prefs,
+    onChanged: onChanged,
+    viewPrefsStore: store,
+  ),
+);
