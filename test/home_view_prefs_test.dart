@@ -64,4 +64,44 @@ void main() {
       expect((await store.load()).sortMode, homeSortAdded);
     });
   });
+  group('分组收起状态（#140）', () {
+    test('缺字段回落「全部展开」，非法项逐条丢弃', () {
+      expect(HomeViewPrefs.tryParse(<String, Object?>{}).collapsedGroups, isEmpty);
+      expect(
+        HomeViewPrefs.tryParse(<String, Object?>{
+          'collapsedGroups': <Object?>['游戏', 42, '', null, '音乐'],
+        }).collapsedGroups,
+        <String>{'游戏', '音乐'},
+      );
+      expect(
+        HomeViewPrefs.tryParse(<String, Object?>{'collapsedGroups': 'oops'})
+            .collapsedGroups,
+        isEmpty,
+      );
+    });
+
+    test('与排序一起往返落盘，互不覆盖', () async {
+      final Directory dir =
+          Directory.systemTemp.createTempSync('danmu_float_home_view_groups');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final HomeViewPrefsStore store =
+          HomeViewPrefsStore(directoryResolver: () async => dir);
+
+      await store.save(
+        const HomeViewPrefs(
+          sortMode: homeSortLivingFirst,
+          collapsedGroups: <String>{'游戏', '音乐'},
+        ),
+      );
+      final HomeViewPrefs loaded = await store.load();
+      expect(loaded.sortMode, homeSortLivingFirst);
+      expect(loaded.collapsedGroups, <String>{'游戏', '音乐'});
+
+      // 只改排序也必须把折叠状态带回去：整份覆盖写，漏字段就等于清空。
+      await store.save(loaded.copyWith(sortMode: homeSortAdded));
+      final HomeViewPrefs again = await store.load();
+      expect(again.sortMode, homeSortAdded);
+      expect(again.collapsedGroups, <String>{'游戏', '音乐'});
+    });
+  });
 }

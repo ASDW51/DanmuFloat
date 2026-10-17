@@ -1637,4 +1637,108 @@ void main() {
 
     await tester.pump(const Duration(seconds: 2));
   });
+
+  group('分组管理（#140）', () {
+    Future<Directory> seedThreeGroups(WidgetTester tester) => _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '111',
+          name: '主播甲',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+          group: '游戏',
+        ),
+        ManagedRoom(
+          webRid: '222',
+          name: '主播乙',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+          group: '游戏',
+        ),
+        ManagedRoom(
+          webRid: '333',
+          name: '主播丙',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+          group: '音乐',
+        ),
+      ],
+      boundWebRids: <String>[],
+    );
+
+    testWidgets('分组标题显示数量，点击折叠后成员行不再渲染', (WidgetTester tester) async {
+      final Directory dir = await seedThreeGroups(tester);
+      _mockPathProvider(tester, dir);
+      _mockOverlayChannels(tester, active: false);
+      _mockMessengerReplies(tester);
+      // 首页在 600dp 高时分组标题会落在视口外，先放大视口再挂载。
+      await _withTallViewport(tester);
+      await _pumpHomeWithDir(tester, dir);
+
+      final Finder header =
+          find.byKey(const ValueKey<String>('groupHeader_游戏'));
+      expect(find.text('游戏 · 2 个直播间'), findsOneWidget);
+      expect(find.text('主播甲'), findsOneWidget);
+      // 展开态是「收起」箭头。
+      expect(
+        find.descendant(of: header, matching: find.byIcon(Icons.expand_less)),
+        findsOneWidget,
+      );
+
+      await tester.tap(header);
+      await tester.pump();
+
+      // 先钉状态真的变了（箭头翻转），再钉渲染结果——两者分开断言，
+      // 出问题时能立刻看出是「没点到」还是「收起后没少渲染」。
+      expect(
+        find.descendant(of: header, matching: find.byIcon(Icons.expand_more)),
+        findsOneWidget,
+        reason: '点标题应当切到收起态',
+      );
+      expect(
+        find.text('主播甲'),
+        findsNothing,
+        reason: '收起后成员行不再渲染',
+      );
+      expect(
+        find.text('游戏 · 2 个直播间'),
+        findsOneWidget,
+        reason: '标题必须留着，否则没法再展开',
+      );
+      expect(find.text('主播丙'), findsOneWidget, reason: '别的分组不受影响');
+
+      await tester.tap(header);
+      await tester.pump();
+      expect(find.text('主播甲'), findsOneWidget, reason: '再点一次恢复渲染');
+
+      // 折叠状态会落盘（真实文件写），收尾前给它时间跑完。
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('长按分组标题给出重命名 / 合并 / 解散三个入口', (WidgetTester tester) async {
+      final Directory dir = await seedThreeGroups(tester);
+      _mockPathProvider(tester, dir);
+      _mockOverlayChannels(tester, active: false);
+      _mockMessengerReplies(tester);
+      await _withTallViewport(tester);
+      await _pumpHomeWithDir(tester, dir);
+
+      await tester.ensureVisible(
+        find.byKey(const ValueKey<String>('groupHeader_游戏')),
+      );
+      await tester.pump();
+      await tester.longPress(
+        find.byKey(const ValueKey<String>('groupHeader_游戏')),
+      );
+      await tester.pump(const Duration(milliseconds: 500));
+
+      // 分组操作入口都在：具体怎么改由 regroupRooms 的单测覆盖，
+      // 这里只钉「长按标题能到达这三个操作」这层接线。
+      expect(find.text('游戏'), findsWidgets);
+      expect(find.text('重命名分组'), findsOneWidget);
+      expect(find.text('合并到其他分组'), findsOneWidget);
+      expect(find.text('解散分组'), findsOneWidget);
+      expect(find.textContaining('2 个直播间'), findsWidgets);
+
+      await tester.pump(const Duration(seconds: 10));
+    });
+  });
 }

@@ -27,6 +27,7 @@ import 'package:danmu_float/system/system_permissions.dart';
 import 'package:danmu_float/ui/add_room_dialog.dart';
 import 'package:danmu_float/ui/danmu_page.dart';
 import 'package:danmu_float/ui/high_performance_dialog.dart';
+import 'package:danmu_float/ui/home_group_ops.dart';
 import 'package:danmu_float/ui/settings_page.dart';
 import 'package:danmu_float/ui/danmu_text_colors.dart';
 import 'package:flutter/material.dart';
@@ -178,6 +179,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /// 首页列表排序方式（#139），落盘在 home_view.json；默认添加顺序。
   String _sortMode = homeSortAdded;
+
+  /// 收起的分组名（#140），与排序一起落盘在 home_view.json；缺省全部展开。
+  Set<String> _collapsedGroups = <String>{};
+
+  /// 用户是否已经手动改过视图偏好。
+  ///
+  /// 读盘是异步的：如果用户在读完之前就点了折叠 / 排序，随后到达的读盘结果会把刚做
+  /// 的操作冲掉（表现为「点了没反应」）。一旦动过就不再接受读盘结果。
+  bool _viewPrefsTouched = false;
 
   /// 当前搜索词（仅本次会话有效，不落盘）。
   String _searchQuery = '';
@@ -351,26 +361,52 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return sorted;
   }
 
-  /// 读回视图偏好（#139）；失败按默认值继续，不阻塞列表。
+  /// 读回视图偏好（#139 / #140）；失败按默认值继续，不阻塞列表。
   Future<void> _loadViewPrefs() async {
     final HomeViewPrefs prefs = await _viewPrefsStore.load();
-    if (!mounted) return;
-    setState(() => _sortMode = prefs.sortMode);
+    if (!mounted || _viewPrefsTouched) return;
+    setState(() {
+      _sortMode = prefs.sortMode;
+      // 复制成可变集合：解析结果可能是 const 空集，直接持有会在下次折叠时抛
+      // 「Cannot change an unmodifiable set」。
+      _collapsedGroups = <String>{...prefs.collapsedGroups};
+    });
   }
 
   /// 切换排序并落盘（#139）。落盘失败只记日志：排序是纯视图偏好，
   /// 失败也不该打断用户当前操作（下次进来回到默认而已）。
   void _setSortMode(String mode) {
     if (mode == _sortMode) return;
+    _viewPrefsTouched = true;
     setState(() => _sortMode = parseHomeSortMode(mode));
-    unawaited(_saveSortMode());
+    unawaited(_saveViewPrefs());
   }
 
-  Future<void> _saveSortMode() async {
+  /// 折叠 / 展开某个分组（#140），并落盘。
+  ///
+  /// 与排序共用一份 home_view.json：两者都是「列表怎么展示」，一起写才不会出现
+  /// 「改了排序把折叠状态冲掉」这类互相覆盖。
+  void _toggleGroupCollapsed(String group) {
+    _viewPrefsTouched = true;
+    setState(() {
+      // 始终基于副本改动：_collapsedGroups 可能来自不可变集合（默认值或解析结果）。
+      final Set<String> next = <String>{..._collapsedGroups};
+      if (!next.remove(group)) next.add(group);
+      _collapsedGroups = next;
+    });
+    unawaited(_saveViewPrefs());
+  }
+
+  Future<void> _saveViewPrefs() async {
     try {
-      await _viewPrefsStore.save(HomeViewPrefs(sortMode: _sortMode));
+      await _viewPrefsStore.save(
+        HomeViewPrefs(
+          sortMode: _sortMode,
+          collapsedGroups: _collapsedGroups,
+        ),
+      );
     } on Object catch (exception) {
-      debugPrint('保存首页排序偏好失败: $exception');
+      debugPrint('保存首页视图偏好失败: $exception');
     }
   }
 
@@ -983,6 +1019,161 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (mounted) _snack(group.isEmpty ? '已移出分组' : '已归入「$group」');
   }
 
+  /// 分组操作菜单（#140）：重命名 / 合并 / 解散。
+  ///
+  /// 分组在数据层是从各主播的 `group` 推导出来的，没有独立实体——所以这三个操作
+  /// 都必须**一次落盘**改完全部成员，中途失败就会出现「同一批人一半在旧组、一半
+  /// 在新组」的两个分组并存状态。
+  Future<void> _showGroupActions(String group) async {
+    final int count = _rooms.where((ManagedRoom room) => room.group == group).length;
+    final String? action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (BuildContext context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            ListTile(
+              title: Text(
+                group,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: Text('$count 个直播间'),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline),
+              title: const Text('重命名分组'),
+              subtitle: const Text('同步更新该组全部直播间，一次落盘'),
+              onTap: () => Navigator.of(context).pop('rename'),
+            ),
+            if (_groups.length > 1)
+              ListTile(
+                leading: const Icon(Icons.merge_type),
+                title: const Text('合并到其他分组'),
+                subtitle: const Text('并入后原分组消失，成员一个不少'),
+                onTap: () => Navigator.of(context).pop('merge'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.folder_off_outlined),
+              title: const Text('解散分组'),
+              subtitle: const Text('只清空分组，直播间保留'),
+              onTap: () => Navigator.of(context).pop('dissolve'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case 'rename':
+        await _renameGroup(group);
+      case 'merge':
+        await _mergeGroup(group);
+      case 'dissolve':
+        await _dissolveGroup(group);
+    }
+  }
+
+  Future<void> _renameGroup(String group) async {
+    final TextEditingController controller = TextEditingController(text: group);
+    final String? name = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('重命名分组'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: '分组名'),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name == null || !mounted) return;
+    final String trimmed = name.trim();
+    if (trimmed.isEmpty || trimmed == group) return;
+    await _regroupAll(from: group, to: trimmed, message: '已把「$group」重命名为「$trimmed」');
+  }
+
+  Future<void> _mergeGroup(String group) async {
+    final List<String> targets = <String>[
+      for (final String other in _groups)
+        if (other != group) other,
+    ];
+    if (targets.isEmpty) return;
+    final String? target = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => SimpleDialog(
+        title: Text('把「$group」合并到'),
+        children: <Widget>[
+          for (final String other in targets)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(other),
+              child: Text(other),
+            ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(context).pop(''),
+            child: const Text('未分组（移出所有分组）'),
+          ),
+        ],
+      ),
+    );
+    if (target == null || !mounted) return;
+    await _regroupAll(
+      from: group,
+      to: target,
+      message: target.isEmpty ? '已解散「$group」' : '已把「$group」并入「$target」',
+    );
+  }
+
+  Future<void> _dissolveGroup(String group) async {
+    final int count = _rooms.where((ManagedRoom room) => room.group == group).length;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('解散分组'),
+        content: Text('「$group」里的 $count 个直播间会移出分组，但不会被删除。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('解散'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _regroupAll(from: group, to: '', message: '已解散「$group」');
+  }
+
+  /// 把 [from] 组的全部成员改到 [to]（空串 = 移出分组），**只落盘一次**。
+  ///
+  /// 重命名、合并、解散共用这一条路径：它们的差别只在目标名，落盘语义必须一致，
+  /// 否则又会出现「改到一半中断 → 两个分组并存」。
+  Future<void> _regroupAll({
+    required String from,
+    required String to,
+    required String message,
+  }) async {
+    final List<ManagedRoom> next = regroupRooms(_rooms, from: from, to: to);
+    setState(() => _rooms = next);
+    await _persistRooms(next);
+    _syncOverlayRooms();
+    if (mounted) _snack(message);
+  }
+
   /// 指定 / 取消某主播连接时使用的凭证（prd F27）。
   ///
   /// 弹窗返回空串表示改回匿名自动获取，null 表示取消；凭证在设置页统一管理。
@@ -1537,11 +1728,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     ];
     final List<Widget> children = <Widget>[];
     for (final String group in groups) {
-      children.add(_buildGroupHeader(group));
       final List<ManagedRoom> members = _sortedInGroup(<ManagedRoom>[
         for (final ManagedRoom room in visible)
           if (room.group == group) room,
       ]);
+      final bool collapsed = _collapsedGroups.contains(group);
+      children.add(
+        _buildGroupHeader(group, members.length, collapsed: collapsed),
+      );
+      // 收起时成员行不再渲染（不是藏起来）：列表短了、语义节点也少一半。
+      if (collapsed) continue;
       for (final ManagedRoom room in members) {
         children.add(_buildRoomTile(room));
         children.add(const Divider(height: 1));
@@ -1552,7 +1748,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         if (room.group.isEmpty) room,
     ]);
     if (ungrouped.isNotEmpty) {
-      if (groups.isNotEmpty) children.add(_buildGroupHeader('未分组'));
+      if (groups.isNotEmpty) {
+        children.add(
+          _buildGroupHeader('未分组', ungrouped.length, manageable: false),
+        );
+      }
       for (final ManagedRoom room in ungrouped) {
         children.add(_buildRoomTile(room));
         children.add(const Divider(height: 1));
@@ -1561,16 +1761,43 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return children;
   }
 
-  /// 分组标题行；长按整行不生效，仅作为分隔标识。
-  Widget _buildGroupHeader(String title) => Container(
-        width: double.infinity,
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        child: Text(
-          title,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-      );
+  /// 分组标题行（#140）：显示「分组名 · N 个直播间」。
+  ///
+  /// 可管理的分组点标题折叠 / 展开、长按进分组操作（重命名 / 合并 / 解散）；
+  /// 「未分组」只是个分隔标识，不能折叠也没有操作——它不是一个真实分组。
+  Widget _buildGroupHeader(
+    String title,
+    int count, {
+    bool collapsed = false,
+    bool manageable = true,
+  }) => InkWell(
+    key: ValueKey<String>('groupHeader_$title'),
+    onTap: manageable ? () => _toggleGroupCollapsed(title) : null,
+    onLongPress: manageable ? () => unawaited(_showGroupActions(title)) : null,
+    child: Container(
+      width: double.infinity,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              manageable ? '$title · $count 个直播间' : title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+          ),
+          if (manageable)
+            Icon(
+              collapsed ? Icons.expand_more : Icons.expand_less,
+              size: 16,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+        ],
+      ),
+    ),
+  );
 
   /// 单行主播：整行点击 = 单栏连接；行内提供「刷新」「连接弹幕」，
   /// 长按弹出「设置分组 / 移除」。
