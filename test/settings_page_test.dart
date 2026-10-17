@@ -666,10 +666,14 @@ void main() {
       await tester.tap(find.byKey(const ValueKey<String>('settingsSection_悬浮窗样式')));
       await tester.pump();
 
-      // 落盘是真实文件 I/O：给真实事件循环一点时间写完，再用同一份存储读回来。
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 200)),
-      );
+      // 落盘是真实文件 I/O：先给真实事件循环时间完成写操作，再 pump 一帧让
+      // FakeAsync 里的续接跑起来，最后才读回来（少了 pump 会读到空集合）。
+      for (int i = 0; i < 3; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)),
+        );
+        await tester.pump();
+      }
       final SettingsViewPrefs saved = await tester.runAsync(store.load) ??
           const SettingsViewPrefs();
       expect(
