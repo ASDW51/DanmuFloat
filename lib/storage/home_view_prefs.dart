@@ -44,21 +44,43 @@ String parseHomeSortMode(Object? raw) =>
 /// 首页视图偏好。
 @immutable
 class HomeViewPrefs {
-  const HomeViewPrefs({this.sortMode = homeSortAdded});
+  const HomeViewPrefs({
+    this.sortMode = homeSortAdded,
+    this.collapsedGroups = const <String>{},
+  });
 
   final String sortMode;
 
-  HomeViewPrefs copyWith({String? sortMode}) =>
-      HomeViewPrefs(sortMode: sortMode ?? this.sortMode);
+  /// 收起的分组名（#140）：缺省全部展开，与改造前的平铺列表一致。
+  final Set<String> collapsedGroups;
+
+  HomeViewPrefs copyWith({String? sortMode, Set<String>? collapsedGroups}) =>
+      HomeViewPrefs(
+        sortMode: sortMode ?? this.sortMode,
+        collapsedGroups: collapsedGroups ?? this.collapsedGroups,
+      );
 
   Map<String, Object?> toJson() => <String, Object?>{
     'sortMode': parseHomeSortMode(sortMode),
+    'collapsedGroups': collapsedGroups.toList()..sort(),
   };
 
   /// 解析：非对象或损坏一律回落默认值（列表能开出来比记住排序更要紧）。
+  ///
+  /// 分组收起状态是逐项容错的：非列表回落空集，非字符串项单条丢弃，
+  /// 不让一个手改过的文件把整个列表卡住（#140）。
   static HomeViewPrefs tryParse(Object? raw) {
     if (raw is! Map) return const HomeViewPrefs();
-    return HomeViewPrefs(sortMode: parseHomeSortMode(raw['sortMode']));
+    final Object? collapsed = raw['collapsedGroups'];
+    return HomeViewPrefs(
+      sortMode: parseHomeSortMode(raw['sortMode']),
+      collapsedGroups: collapsed is List
+          ? <String>{
+              for (final Object? item in collapsed)
+                if (item is String && item.isNotEmpty) item,
+            }
+          : const <String>{},
+    );
   }
 }
 

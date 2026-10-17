@@ -349,6 +349,26 @@ Future<void> _pumpHomeWithDir(WidgetTester tester, Directory dir) async {
   );
 }
 
+/// 挂到指定目录并注入可计数的 room store（#140：要断言「只落盘一次」）。
+///
+/// 不等待「关闭悬浮窗」入口：那由窗口探测驱动，分组用例并不建窗。
+Future<void> _pumpHomeWithStore(
+  WidgetTester tester,
+  Directory dir,
+  RoomStore store,
+) async {
+  await tester.pumpWidget(MaterialApp(
+    home: HomePage(
+      directoryResolver: () async => dir,
+      credentialStore: CredentialStore(backend: _MemoryCredentialBackend()),
+      store: store,
+    ),
+  ));
+  await _pumpUntil(tester, () => find.text('主播甲').evaluate().isNotEmpty);
+  // 排掉 initState 里的悬浮窗存活探测延时常量（1s）。
+  await tester.pump(const Duration(seconds: 2));
+}
+
 /// 模拟「已建窗」的全局状态：真实取值来自建窗动作，测试里直接置位。
 void _markOverlayShown() {
   setOverlayShownForTest(true);
@@ -1637,4 +1657,162 @@ void main() {
 
     await tester.pump(const Duration(seconds: 2));
   });
+
+  group('分组管理（#140）', () {
+    Future<Directory> seedThreeGroups(WidgetTester tester) => _seedRooms(
+      tester,
+      rooms: <ManagedRoom>[
+        ManagedRoom(
+          webRid: '111',
+          name: '主播甲',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+          group: '游戏',
+        ),
+        ManagedRoom(
+          webRid: '222',
+          name: '主播乙',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+          group: '游戏',
+        ),
+        ManagedRoom(
+          webRid: '333',
+          name: '主播丙',
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+          group: '音乐',
+        ),
+      ],
+      boundWebRids: <String>[],
+    );
+
+    testWidgets('分组标题显示数量，点击折叠后成员行不再渲染', (WidgetTester tester) async {
+      final Directory dir = await seedThreeGroups(tester);
+      _mockPathProvider(tester, dir);
+      _mockOverlayChannels(tester, active: false);
+      _mockMessengerReplies(tester);
+      await _pumpHomeWithDir(tester, dir);
+
+      expect(find.text('游戏 · 2 个直播间'), findsOneWidget);
+      expect(find.text('主播甲'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey<String>('groupHeader_游戏')));
+      await tester.pump();
+
+      expect(
+        find.text('主播甲'),
+        findsNothing,
+        reason: '收起后成员行不再渲染',
+      );
+      expect(
+        find.text('游戏 · 2 个直播间'),
+        findsOneWidget,
+        reason: '标题必须留着，否则没法再展开',
+      );
+      expect(find.text('主播丙'), findsOneWidget, reason: '别的分组不受影响');
+
+      await tester.tap(find.byKey(const ValueKey<String>('groupHeader_游戏')));
+      await tester.pump();
+      expect(find.text('主播甲'), findsOneWidget);
+
+      // 折叠状态会落盘（真实文件写），收尾前给它时间跑完。
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('重命名分组同步更新全部成员，且只落盘一次', (WidgetTester tester) async {
+      final Directory dir = await seedThreeGroups(tester);
+      _mockPathProvider(tester, dir);
+      _mockOverlayChannels(tester, active: false);
+      _mockMessengerReplies(tester);
+      final _CountingRoomStore store = _CountingRoomStore(
+        directoryResolver: () async => dir,
+      );
+      await _withTallViewport(tester);
+      await _pumpHomeWithStore(tester, dir, store);
+
+      await tester.longPress(
+        find.byKey(const ValueKey<String>('groupHeader_游戏')),
+      );
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text('重命名分组'));
+      await tester.pump(const Duration(milliseconds: 500));
+
+      await tester.enterText(find.byType(TextField), '游戏区');
+      await tester.tap(find.text('确定'));
+      await _pumpUntil(
+        tester,
+        () => find.text('游戏区 · 2 个直播间').evaluate().isNotEmpty,
+      );
+
+      expect(
+        store.saves,
+        1,
+        reason: '整组改名必须一次落盘，中途写两次会出现两个分组并存',
+      );
+      final List<ManagedRoom> saved =
+          await tester.runAsync(
+            () => RoomStore(directoryResolver: () async => dir).load(),
+          ) ??
+          const <ManagedRoom>[];
+      expect(
+        saved.where((ManagedRoom room) => room.group == '游戏区').length,
+        2,
+      );
+      expect(
+        saved.where((ManagedRoom room) => room.group == '游戏').isEmpty,
+        isTrue,
+        reason: '旧分组名不能残留',
+      );
+      expect(
+        saved.where((ManagedRoom room) => room.group == '音乐').length,
+        1,
+        reason: '别的分组不受影响',
+      );
+
+      await tester.pump(const Duration(seconds: 10));
+    });
+
+    testWidgets('解散分组后直播间保留，只是移出分组', (WidgetTester tester) async {
+      final Directory dir = await seedThreeGroups(tester);
+      _mockPathProvider(tester, dir);
+      _mockOverlayChannels(tester, active: false);
+      _mockMessengerReplies(tester);
+      final _CountingRoomStore store = _CountingRoomStore(
+        directoryResolver: () async => dir,
+      );
+      await _withTallViewport(tester);
+      await _pumpHomeWithStore(tester, dir, store);
+
+      await tester.longPress(
+        find.byKey(const ValueKey<String>('groupHeader_游戏')),
+      );
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text('解散分组'));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text('解散'));
+      await _pumpUntil(
+        tester,
+        () => find.text('游戏 · 2 个直播间').evaluate().isEmpty,
+      );
+
+      expect(find.text('主播甲'), findsOneWidget, reason: '解散分组不删直播间');
+      expect(find.text('主播乙'), findsOneWidget);
+
+      final List<ManagedRoom> saved =
+          await tester.runAsync(
+            () => RoomStore(directoryResolver: () async => dir).load(),
+          ) ??
+          const <ManagedRoom>[];
+      expect(saved.length, 3);
+      expect(
+        saved.where((ManagedRoom room) => room.group == '游戏').isEmpty,
+        isTrue,
+      );
+      expect(
+        saved.where((ManagedRoom room) => room.group.isEmpty).length,
+        2,
+      );
+
+      await tester.pump(const Duration(seconds: 10));
+    });
+  });
+
 }
