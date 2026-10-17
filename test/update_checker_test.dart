@@ -2,8 +2,6 @@
 //
 // 这里钉的是「查不到更新时 App 必须一切照旧」：限流、超时、畸形 JSON、非 200 都只能
 // 变成 null，绝不能把异常抛给设置页或启动链路。
-import 'dart:async';
-
 import 'package:danmu_float/net/http_transport.dart';
 import 'package:danmu_float/net/update_checker.dart';
 import 'package:flutter_test/flutter_test.dart';
