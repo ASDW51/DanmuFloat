@@ -132,11 +132,13 @@ void main() {
         '{"tag_name":"v1.0.0","html_url":"https://example.com/r"}',
       );
       expect(info, isNotNull);
-      expect(info.apkAssets, isEmpty);
-      expect(info.selectApk('arm64-v8a'), isNull);
-      expect(info.sha256Url, isNull);
-      expect(info.notes, isEmpty);
-      expect(info.publishedAt, isNull);
+      // matcher 不做类型提升，取一次非空引用再用。
+      final ReleaseInfo parsed = info!;
+      expect(parsed.apkAssets, isEmpty);
+      expect(parsed.selectApk('arm64-v8a'), isNull);
+      expect(parsed.sha256Url, isNull);
+      expect(parsed.notes, isEmpty);
+      expect(parsed.publishedAt, isNull);
     });
   });
 
