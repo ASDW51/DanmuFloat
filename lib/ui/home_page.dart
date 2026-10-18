@@ -407,7 +407,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     )) {
       return;
     }
-    final ReleaseInfo? release = await _updateChecker.fetchLatest();
+    final ReleaseInfo? release = (await _updateChecker.check()).release;
     if (!mounted) return;
     // 成功失败都记时间：失败不写会退化成「每次回前台重试」。
     await _updatePrefsStore.save(prefs.copyWith(lastCheckedAt: now));
