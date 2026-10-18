@@ -57,6 +57,7 @@ const String _releaseBody = '''
   "body": "- 修复悬浮窗白底白字\\n- 新增检查更新",
   "html_url": "https://github.com/ASDW51/DanmuFloat/releases/tag/v0.2.0",
   "assets": [
+    {"name": "DanmuFloat-v0.2.0-arm64-v8a.apk", "browser_download_url": "https://example.com/arm64.apk", "digest": "sha256:armhash"},
     {"name": "DanmuFloat-v0.2.0-universal.apk", "browser_download_url": "https://example.com/universal.apk", "digest": "sha256:abcdef"},
     {"name": "SHA256SUMS.txt", "browser_download_url": "https://example.com/SHA256SUMS.txt"}
   ]
@@ -99,6 +100,11 @@ void main() {
     expect(find.text('更新日志'), findsOneWidget, reason: 'App 内要能看到更新日志');
     expect(find.text('打开发布页'), findsOneWidget);
     expect(find.text('复制 APK 下载地址'), findsOneWidget);
+    expect(
+      find.textContaining('DanmuFloat-v0.2.0-universal.apk'),
+      findsOneWidget,
+      reason: '测试跑在桌面 VM 上，ABI 未知时应回落通用包并写明选的是哪个包',
+    );
     expect(find.text('复制 SHA256'), findsOneWidget);
     expect(
       store.saved.lastCheckedAt,
@@ -163,13 +169,38 @@ void main() {
     await tester.tap(find.byKey(const ValueKey<String>('updateCheckTile')));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('检查失败'), findsOneWidget);
     expect(find.textContaining('限流'), findsOneWidget);
+    expect(
+      find.textContaining('网络不可用'),
+      findsNothing,
+      reason: '限流不是网络故障，文案要分开',
+    );
     expect(
       store.saved.lastCheckedAt,
       1700000000000,
       reason: '失败也要记时间戳，否则弱网下每次进来都重试',
     );
+  });
+
+  testWidgets('仓库只有草稿（404）时说「还没发布版本」，不说网络故障（#166）', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        UpdateSection(
+          checker: UpdateChecker(transport: _FakeTransport(statusCode: 404)),
+          prefsStore: _MemoryPrefsStore(),
+          currentVersion: '0.1.0',
+          openUrl: (Uri uri) async => true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey<String>('updateCheckTile')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('还没有发布任何版本'), findsOneWidget);
+    expect(find.textContaining('网络不可用'), findsNothing);
   });
 
   testWidgets('自动检查开关默认关闭，打开后落盘（#166）', (WidgetTester tester) async {

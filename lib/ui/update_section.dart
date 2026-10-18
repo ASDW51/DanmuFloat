@@ -46,6 +46,9 @@ class _UpdateSectionState extends State<UpdateSection> {
   UpdateCheckState _state = UpdateCheckState.idle;
   ReleaseInfo? _release;
 
+  /// 上一次失败的原因：文案要说实话（404 = 还没发布版本，不是网络坏了）。
+  UpdateCheckFailure _failure = UpdateCheckFailure.none;
+
   /// 只在第一次 build 之后读盘：偏好文件很小，但也没必要和首帧抢时间。
   bool _loaded = false;
 
@@ -79,15 +82,20 @@ class _UpdateSectionState extends State<UpdateSection> {
   Future<void> _check() async {
     if (_state == UpdateCheckState.checking) return;
     setState(() => _state = UpdateCheckState.checking);
-    final ReleaseInfo? release = await widget.checker.fetchLatest();
+    final UpdateCheckResult result = await widget.checker.check();
     if (!mounted) return;
     await _persist(_prefs.copyWith(lastCheckedAt: _now));
     if (!mounted) return;
+    final ReleaseInfo? release = result.release;
     if (release == null) {
-      setState(() => _state = UpdateCheckState.failed);
+      setState(() {
+        _failure = result.failure;
+        _state = UpdateCheckState.failed;
+      });
       return;
     }
     setState(() {
+      _failure = UpdateCheckFailure.none;
       _release = release;
       _state = hasNewerVersion(release.version, widget.currentVersion)
           ? UpdateCheckState.available
@@ -162,6 +170,8 @@ class _UpdateSectionState extends State<UpdateSection> {
   @override
   Widget build(BuildContext context) {
     final ReleaseInfo? release = _release;
+    // 按当前设备的 ABI 挑包（#166 修正）：同 ABI 的拆分包优先，通用包兜底。
+    final ReleaseAsset? apk = release?.selectApk(androidAbiTag());
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -196,28 +206,27 @@ class _UpdateSectionState extends State<UpdateSection> {
             subtitle: const Text('在浏览器里查看 Release 与下载产物'),
             onTap: () => _openExternal(release.pageUrl),
           ),
-          if (release.apkUrl != null)
+          if (apk != null)
             ListTile(
               key: const ValueKey<String>('updateCopyApkTile'),
               leading: const Icon(Icons.download_outlined),
               title: const Text('复制 APK 下载地址'),
-              subtitle: const Text('通用包；复制后到浏览器下载'),
-              onTap: () => _copy(release.apkUrl!, '下载地址已复制'),
+              // 把选中的是哪个包写出来：用户才知道下的是 arm64 拆分包还是通用包。
+              subtitle: Text('${apk.name}（按本机 ABI 选择）'),
+              onTap: () => _copy(apk.url, '下载地址已复制'),
             ),
-          if (release.sha256Url != null || release.apkSha256 != null)
+          if (apk?.sha256 != null || release.sha256Url != null)
             ListTile(
               key: const ValueKey<String>('updateCopyShaTile'),
               leading: const Icon(Icons.verified_outlined),
               title: const Text('复制 SHA256'),
               subtitle: Text(
-                release.apkSha256 == null
+                apk?.sha256 == null
                     ? '校验值清单地址（SHA256SUMS.txt）'
                     : '下载后可用它核对安装包是否完整',
               ),
-              onTap: () => _copy(
-                release.apkSha256 ?? release.sha256Url!,
-                'SHA256 已复制',
-              ),
+              onTap: () =>
+                  _copy(apk?.sha256 ?? release.sha256Url!, 'SHA256 已复制'),
             ),
         ],
         const Divider(height: 1),
@@ -243,11 +252,28 @@ class _UpdateSectionState extends State<UpdateSection> {
       case UpdateCheckState.available:
         return '发现新版本 v${_release?.version ?? ''}，当前 ${appVersionLabel(widget.currentVersion)}';
       case UpdateCheckState.failed:
-        return '检查失败，可能是网络或 GitHub 限流；可稍后重试';
+        return _failureText(_failure);
       case UpdateCheckState.idle:
         final int? last = _prefs.lastCheckedAt;
         if (last == null) return '从没检查过；当前 ${appVersionLabel(widget.currentVersion)}';
         return '上次检查：${_formatTime(last)}；当前 ${appVersionLabel(widget.currentVersion)}';
+    }
+  }
+
+  /// 失败文案：把「还没发布版本」「限流」「网络」分开说，别让用户白等。
+  static String _failureText(UpdateCheckFailure failure) {
+    switch (failure) {
+      case UpdateCheckFailure.noRelease:
+        return '还没有发布任何版本（仓库里只有草稿）；可先点「打开发布页」看看';
+      case UpdateCheckFailure.rateLimited:
+        return 'GitHub 限流了，过一会儿再试';
+      case UpdateCheckFailure.serverError:
+        return 'GitHub 服务端出错，稍后再试';
+      case UpdateCheckFailure.malformed:
+        return '响应无法解析（可能被网络中间层改写），稍后再试';
+      case UpdateCheckFailure.network:
+      case UpdateCheckFailure.none:
+        return '网络不可用，检查一下连接后重试';
     }
   }
 
