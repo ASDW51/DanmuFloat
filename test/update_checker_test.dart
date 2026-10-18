@@ -101,20 +101,20 @@ void main() {
       expect(info.notes, contains('检查更新'));
       expect(info.pageUrl, contains('/releases/tag/v0.2.0'));
       expect(info.apkAssets, hasLength(2), reason: 'SHA256SUMS.txt 不算安装包');
+      // 解析层只负责把产物拆出来；「挑哪个包」由 chooseApk 决定（下面单独一组）。
       expect(
-        info.selectApk('arm64-v8a')?.url,
-        'https://example.com/arm64.apk',
-        reason: 'arm64 机器该下拆分包，不是几十 MB 的通用包',
+        info.apkAssets.map((ReleaseAsset a) => a.name),
+        containsAll(<String>[
+          'DanmuFloat-v0.2.0-arm64-v8a.apk',
+          'DanmuFloat-v0.2.0-universal.apk',
+        ]),
       );
       expect(
-        info.selectApk('arm64-v8a')?.sha256,
+        info.apkAssets
+            .firstWhere((ReleaseAsset a) => a.name.contains('arm64'))
+            .sha256,
         'armhash',
         reason: 'digest 的 sha256: 前缀要去掉',
-      );
-      expect(
-        info.selectApk('armeabi-v7a')?.url,
-        'https://example.com/universal.apk',
-        reason: '32 位机器装不了 arm64 拆分包，回落到通用包',
       );
       expect(info.sha256Url, 'https://example.com/SHA256SUMS.txt');
     });
@@ -135,7 +135,10 @@ void main() {
       // matcher 不做类型提升，取一次非空引用再用。
       final ReleaseInfo parsed = info!;
       expect(parsed.apkAssets, isEmpty);
-      expect(parsed.selectApk('arm64-v8a'), isNull);
+      expect(
+        parsed.chooseApk(buildAbi: '', deviceAbi: 'arm64-v8a').asset,
+        isNull,
+      );
       expect(parsed.sha256Url, isNull);
       expect(parsed.notes, isEmpty);
       expect(parsed.publishedAt, isNull);
