@@ -177,11 +177,9 @@ class _UpdateSectionState extends State<UpdateSection> {
     final ReleaseInfo? release = _release;
     // 挑包优先看「打包时写死的标识」，其次才是设备 ABI（#175）：
     // 标识能说出用户当初装的是拆分包还是通用包，设备 ABI 说不出来。
+    final String buildAbi = widget.buildAbi ?? buildMarkerAbi();
     final ApkChoice choice =
-        release?.chooseApk(
-          buildAbi: widget.buildAbi ?? buildMarkerAbi(),
-          deviceAbi: androidAbiTag(),
-        ) ??
+        release?.chooseApk(buildAbi: buildAbi, deviceAbi: androidAbiTag()) ??
         const ApkChoice(null, ApkMatch.none);
     final ReleaseAsset? apk = choice.asset;
     return Column(
@@ -224,7 +222,7 @@ class _UpdateSectionState extends State<UpdateSection> {
               leading: const Icon(Icons.download_outlined),
               title: const Text('复制 APK 下载地址'),
               // 把选中的是哪个包、凭什么选它写出来：用户才知道下的是不是自己那份。
-              subtitle: Text('${apk.name}（${_matchLabel(choice)}）'),
+              subtitle: Text('${apk.name}（${_matchLabel(choice, buildAbi)}）'),
               onTap: () => _copy(apk.url, '下载地址已复制'),
             ),
           if (apk?.sha256 != null || release.sha256Url != null)
@@ -273,10 +271,10 @@ class _UpdateSectionState extends State<UpdateSection> {
   }
 
   /// 挑包依据的说明文案。
-  static String _matchLabel(ApkChoice choice) {
+  static String _matchLabel(ApkChoice choice, String buildAbi) {
     switch (choice.match) {
       case ApkMatch.buildMarker:
-        return '按打包标识 ${buildMarkerLabel()}';
+        return '按打包标识 $buildAbi';
       case ApkMatch.deviceAbi:
         return '按本机 ABI';
       case ApkMatch.universal:
