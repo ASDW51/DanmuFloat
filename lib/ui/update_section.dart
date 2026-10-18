@@ -5,6 +5,7 @@
 import 'dart:async';
 
 import 'package:danmu_float/app/app_version.dart';
+import 'package:danmu_float/app/build_marker.dart';
 import 'package:danmu_float/net/update_checker.dart';
 import 'package:danmu_float/storage/update_prefs.dart';
 import 'package:flutter/material.dart';
@@ -23,6 +24,7 @@ class UpdateSection extends StatefulWidget {
     this.currentVersion = appVersion,
     this.openUrl,
     this.now,
+    this.buildAbi,
   });
 
   final UpdateChecker checker;
@@ -36,6 +38,9 @@ class UpdateSection extends StatefulWidget {
 
   /// 当前时间（毫秒）；单测可注入固定值。
   final int Function()? now;
+
+  /// 打包标识里的产物 ABI（#175）；默认取构建注入值，单测可覆盖。
+  final String? buildAbi;
 
   @override
   State<UpdateSection> createState() => _UpdateSectionState();
@@ -170,8 +175,13 @@ class _UpdateSectionState extends State<UpdateSection> {
   @override
   Widget build(BuildContext context) {
     final ReleaseInfo? release = _release;
-    // 按当前设备的 ABI 挑包（#166 修正）：同 ABI 的拆分包优先，通用包兜底。
-    final ReleaseAsset? apk = release?.selectApk(androidAbiTag());
+    // 挑包优先看「打包时写死的标识」，其次才是设备 ABI（#175）：
+    // 标识能说出用户当初装的是拆分包还是通用包，设备 ABI 说不出来。
+    final String buildAbi = widget.buildAbi ?? buildMarkerAbi();
+    final ApkChoice choice =
+        release?.chooseApk(buildAbi: buildAbi, deviceAbi: androidAbiTag()) ??
+        const ApkChoice(null, ApkMatch.none);
+    final ReleaseAsset? apk = choice.asset;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -211,8 +221,8 @@ class _UpdateSectionState extends State<UpdateSection> {
               key: const ValueKey<String>('updateCopyApkTile'),
               leading: const Icon(Icons.download_outlined),
               title: const Text('复制 APK 下载地址'),
-              // 把选中的是哪个包写出来：用户才知道下的是 arm64 拆分包还是通用包。
-              subtitle: Text('${apk.name}（按本机 ABI 选择）'),
+              // 把选中的是哪个包、凭什么选它写出来：用户才知道下的是不是自己那份。
+              subtitle: Text('${apk.name}（${_matchLabel(choice, buildAbi)}）'),
               onTap: () => _copy(apk.url, '下载地址已复制'),
             ),
           if (apk?.sha256 != null || release.sha256Url != null)
@@ -257,6 +267,22 @@ class _UpdateSectionState extends State<UpdateSection> {
         final int? last = _prefs.lastCheckedAt;
         if (last == null) return '从没检查过；当前 ${appVersionLabel(widget.currentVersion)}';
         return '上次检查：${_formatTime(last)}；当前 ${appVersionLabel(widget.currentVersion)}';
+    }
+  }
+
+  /// 挑包依据的说明文案。
+  static String _matchLabel(ApkChoice choice, String buildAbi) {
+    switch (choice.match) {
+      case ApkMatch.buildMarker:
+        return '按打包标识 $buildAbi';
+      case ApkMatch.deviceAbi:
+        return '按本机 ABI';
+      case ApkMatch.universal:
+        return '通用包';
+      case ApkMatch.onlyOne:
+        return '唯一产物';
+      case ApkMatch.none:
+        return '无可用产物';
     }
   }
 

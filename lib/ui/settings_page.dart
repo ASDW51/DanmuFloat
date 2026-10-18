@@ -7,6 +7,7 @@
 import 'dart:async';
 
 import 'package:danmu_float/app/app_version.dart';
+import 'package:danmu_float/app/build_marker.dart';
 import 'package:danmu_float/net/update_checker.dart';
 import 'package:danmu_float/app/overlay_bridge.dart';
 import 'package:danmu_float/app/overlay_launcher.dart';
@@ -785,7 +786,13 @@ class _SettingsPageState extends State<SettingsPage> {
             key: const ValueKey<String>('settingsAppVersion'),
             leading: const Icon(Icons.info_outline),
             title: const Text('版本'),
-            subtitle: Text(appVersionLabel(widget.buildVersion)),
+            // 带上打包标识（#175）：报障时能直接说出装的是拆分包还是通用包，
+            // 「检查更新推错了包」这类问题一眼就能定位。未注入时不显示。
+            subtitle: Text(
+              hasBuildMarker
+                  ? '${appVersionLabel(widget.buildVersion)} · ${buildMarkerLabel()}'
+                  : appVersionLabel(widget.buildVersion),
+            ),
             onTap: () => _copyVersion(),
             trailing: const Icon(Icons.content_copy_outlined, size: 18),
           ),

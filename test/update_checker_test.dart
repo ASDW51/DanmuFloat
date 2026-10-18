@@ -101,20 +101,20 @@ void main() {
       expect(info.notes, contains('检查更新'));
       expect(info.pageUrl, contains('/releases/tag/v0.2.0'));
       expect(info.apkAssets, hasLength(2), reason: 'SHA256SUMS.txt 不算安装包');
+      // 解析层只负责把产物拆出来；「挑哪个包」由 chooseApk 决定（下面单独一组）。
       expect(
-        info.selectApk('arm64-v8a')?.url,
-        'https://example.com/arm64.apk',
-        reason: 'arm64 机器该下拆分包，不是几十 MB 的通用包',
+        info.apkAssets.map((ReleaseAsset a) => a.name),
+        containsAll(<String>[
+          'DanmuFloat-v0.2.0-arm64-v8a.apk',
+          'DanmuFloat-v0.2.0-universal.apk',
+        ]),
       );
       expect(
-        info.selectApk('arm64-v8a')?.sha256,
+        info.apkAssets
+            .firstWhere((ReleaseAsset a) => a.name.contains('arm64'))
+            .sha256,
         'armhash',
         reason: 'digest 的 sha256: 前缀要去掉',
-      );
-      expect(
-        info.selectApk('armeabi-v7a')?.url,
-        'https://example.com/universal.apk',
-        reason: '32 位机器装不了 arm64 拆分包，回落到通用包',
       );
       expect(info.sha256Url, 'https://example.com/SHA256SUMS.txt');
     });
@@ -135,7 +135,10 @@ void main() {
       // matcher 不做类型提升，取一次非空引用再用。
       final ReleaseInfo parsed = info!;
       expect(parsed.apkAssets, isEmpty);
-      expect(parsed.selectApk('arm64-v8a'), isNull);
+      expect(
+        parsed.chooseApk(buildAbi: '', deviceAbi: 'arm64-v8a').asset,
+        isNull,
+      );
       expect(parsed.sha256Url, isNull);
       expect(parsed.notes, isEmpty);
       expect(parsed.publishedAt, isNull);
@@ -217,7 +220,7 @@ void main() {
     });
   });
 
-  group('按 ABI 挑安装包（#166 修正）', () {
+  group('挑安装包：打包标识优先（#175）', () {
     const List<ReleaseAsset> assets = <ReleaseAsset>[
       ReleaseAsset(
         name: 'DanmuFloat-v0.2.0-arm64-v8a.apk',
@@ -243,22 +246,56 @@ void main() {
       assets: assets,
     );
 
-    test('arm64 设备选拆分包，不是通用包', () {
-      expect(release.selectApk('arm64-v8a')?.url, 'https://example.com/arm64.apk');
-    });
-
-    test('32 位设备装不了 arm64 拆分包，回落通用包', () {
-      expect(
-        release.selectApk('armeabi-v7a')?.url,
-        'https://example.com/universal.apk',
+    test('装了通用包就继续给通用包，不被设备 ABI 带跑', () {
+      final ApkChoice choice = release.chooseApk(
+        buildAbi: 'universal',
+        deviceAbi: 'arm64-v8a',
       );
+      expect(
+        choice.asset?.url,
+        'https://example.com/universal.apk',
+        reason: '这就是「检测不准」的根因：设备是 arm64，但用户装的是通用包',
+      );
+      expect(choice.match, ApkMatch.buildMarker);
     });
 
-    test('ABI 未知（非 Android / 桌面单测）时回落通用包', () {
-      expect(release.selectApk('')?.url, 'https://example.com/universal.apk');
+    test('装了 arm64 拆分包就给拆分包', () {
+      final ApkChoice choice = release.chooseApk(
+        buildAbi: 'arm64-v8a',
+        deviceAbi: 'universal',
+      );
+      expect(choice.asset?.url, 'https://example.com/arm64.apk');
+      expect(choice.match, ApkMatch.buildMarker);
     });
 
-    test('只有单一产物时就用它，没有产物时返回 null', () {
+    test('没有标识（老版本）时退回设备 ABI', () {
+      final ApkChoice choice = release.chooseApk(
+        buildAbi: '',
+        deviceAbi: 'arm64-v8a',
+      );
+      expect(choice.asset?.url, 'https://example.com/arm64.apk');
+      expect(choice.match, ApkMatch.deviceAbi);
+    });
+
+    test('设备 ABI 也没有对应产物时给通用包', () {
+      final ApkChoice choice = release.chooseApk(
+        buildAbi: '',
+        deviceAbi: 'armeabi-v7a',
+      );
+      expect(choice.asset?.url, 'https://example.com/universal.apk');
+      expect(choice.match, ApkMatch.universal);
+    });
+
+    test('标识写了产物里没有的值，仍然按设备 ABI 兜底', () {
+      final ApkChoice choice = release.chooseApk(
+        buildAbi: 'x86_64',
+        deviceAbi: 'arm64-v8a',
+      );
+      expect(choice.asset?.url, 'https://example.com/arm64.apk');
+      expect(choice.match, ApkMatch.deviceAbi);
+    });
+
+    test('只有单一产物时就用它；没有产物时返回 none', () {
       const ReleaseInfo single = ReleaseInfo(
         version: '0.2.0',
         name: 'x',
@@ -269,7 +306,12 @@ void main() {
           ReleaseAsset(name: 'DanmuFloat-v0.2.0.apk', url: 'https://example.com/a.apk'),
         ],
       );
-      expect(single.selectApk('arm64-v8a')?.url, 'https://example.com/a.apk');
+      final ApkChoice onlyOne = single.chooseApk(
+        buildAbi: '',
+        deviceAbi: 'arm64-v8a',
+      );
+      expect(onlyOne.asset?.url, 'https://example.com/a.apk');
+      expect(onlyOne.match, ApkMatch.onlyOne);
 
       const ReleaseInfo none = ReleaseInfo(
         version: '0.2.0',
@@ -278,7 +320,9 @@ void main() {
         notes: '',
         pageUrl: 'https://example.com/r',
       );
-      expect(none.selectApk('arm64-v8a'), isNull);
+      final ApkChoice empty = none.chooseApk(buildAbi: '', deviceAbi: '');
+      expect(empty.asset, isNull);
+      expect(empty.match, ApkMatch.none);
     });
 
     test('androidAbiTag 把 FFI 的 Abi 映射成 ABI 目录名', () {
