@@ -117,6 +117,33 @@ String androidAbiTag([Abi? abi]) {
   }
 }
 
+/// 挑中安装包的依据（界面据此说明「为什么给你这个包」）。
+enum ApkMatch {
+  /// 按打包时注入的标识（最准：知道用户当初装的是哪个产物）。
+  buildMarker,
+
+  /// 按设备 ABI（老版本没有标识时的退路）。
+  deviceAbi,
+
+  /// 通用包兜底。
+  universal,
+
+  /// 只有一个产物，直接用。
+  onlyOne,
+
+  /// 没有可用产物。
+  none,
+}
+
+/// 挑包结果：产物 + 依据。
+@immutable
+class ApkChoice {
+  const ApkChoice(this.asset, this.match);
+
+  final ReleaseAsset? asset;
+  final ApkMatch match;
+}
+
 /// 一个 Release 里对用户有意义的信息。
 @immutable
 class ReleaseInfo {
@@ -160,25 +187,47 @@ class ReleaseInfo {
     return null;
   }
 
-  /// 按当前设备的 ABI 挑安装包（#166 修正）。
+  /// 挑安装包（#175 起按打包标识优先）。
   ///
-  /// 顺序：**同 ABI 的拆分包 → 通用包 → 唯一的那个包**。
-  /// 之前一律优先通用包是错的：arm64 机器装 `universal` 要多下几十 MB，
-  /// 而 32 位机器又装不了 arm64 拆分包——必须按 ABI 判断。
-  ReleaseAsset? selectApk(String abiTag) {
+  /// 顺序：**打包标识 → 设备 ABI → 通用包 → 唯一产物**。
+  ///
+  /// - 打包标识来自构建时的 `--dart-define`（[buildMarkerAbi]）：它能说出「这个
+  ///   App 是 arm64 拆分包还是通用包装的」，而设备 ABI 只能说「这台机器能跑什么」。
+  ///   用户装了通用包却拿到拆分包，正是「检测不准」的来源，所以标识优先。
+  /// - 老版本没有标识，退回设备 ABI：arm64 机器装 `universal` 要多下几十 MB，
+  ///   而 32 位机器又装不了 arm64 拆分包。
+  ApkChoice chooseApk({required String buildAbi, required String deviceAbi}) {
     final List<ReleaseAsset> apks = apkAssets;
-    if (apks.isEmpty) return null;
-    final String tag = abiTag.trim();
-    if (tag.isNotEmpty) {
+    if (apks.isEmpty) return const ApkChoice(null, ApkMatch.none);
+
+    final String marked = buildAbi.trim();
+    if (marked.isNotEmpty) {
+      // 标识为 universal 时优先通用包：保持「装什么就更新什么」。
       for (final ReleaseAsset asset in apks) {
-        if (asset.name.contains(tag)) return asset;
+        if (asset.name.contains(marked)) {
+          return ApkChoice(asset, ApkMatch.buildMarker);
+        }
       }
     }
+
+    final String device = deviceAbi.trim();
+    if (device.isNotEmpty) {
+      for (final ReleaseAsset asset in apks) {
+        if (asset.name.contains(device)) {
+          return ApkChoice(asset, ApkMatch.deviceAbi);
+        }
+      }
+    }
+
     for (final ReleaseAsset asset in apks) {
-      if (asset.name.contains('universal')) return asset;
+      if (asset.name.contains('universal')) {
+        return ApkChoice(asset, ApkMatch.universal);
+      }
     }
     // 只剩一个产物时（或命名不规范），装它总比不给入口强。
-    return apks.length == 1 ? apks.first : null;
+    return apks.length == 1
+        ? ApkChoice(apks.first, ApkMatch.onlyOne)
+        : const ApkChoice(null, ApkMatch.none);
   }
 
   /// 从 GitHub API 的响应体解析；任何畸形都返回 null，不抛。

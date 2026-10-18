@@ -182,6 +182,30 @@ void main() {
     );
   });
 
+  testWidgets('按打包标识取包，并把依据写进副标题（#175）', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        UpdateSection(
+          checker: UpdateChecker(transport: _FakeTransport(body: _releaseBody)),
+          prefsStore: _MemoryPrefsStore(),
+          currentVersion: '0.1.0',
+          buildAbi: 'arm64-v8a',
+          openUrl: (Uri uri) async => true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey<String>('updateCheckTile')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('DanmuFloat-v0.2.0-arm64-v8a.apk'),
+      findsOneWidget,
+      reason: '标识说装的是拆分包，就该给拆分包，而不是按设备 ABI 猜',
+    );
+    expect(find.textContaining('按打包标识 arm64-v8a'), findsOneWidget);
+  });
+
   testWidgets('仓库只有草稿（404）时说「还没发布版本」，不说网络故障（#166）', (
     WidgetTester tester,
   ) async {
