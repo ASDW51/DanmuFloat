@@ -905,6 +905,18 @@ class _OverlayPageState extends State<OverlayPage> {
               (maxDanmuFontSize - minDanmuFontSize).round(),
               _setGlobalFontSize,
             ),
+            // 滚动速度（#178）：最典型的「边看边调」参数——太快看不清、太慢追不上，
+            // 要切回主 App 再改就等于打断观看。与字号同组，步进 0.05。
+            _menuSlider(
+              palette,
+              label,
+              '滚动速度　${_scrollSpeed.toStringAsFixed(2)}',
+              _scrollSpeed,
+              minDanmuScrollSpeed,
+              maxDanmuScrollSpeed,
+              ((maxDanmuScrollSpeed - minDanmuScrollSpeed) * 20).round(),
+              _setGlobalScrollSpeed,
+            ),
             _menuSlider(
               palette,
               label,
@@ -1219,6 +1231,7 @@ class _OverlayPageState extends State<OverlayPage> {
     Map<String, int>? colorOverrides,
     double? opacity,
     double? fontSize,
+    double? scrollSpeed,
     double? windowWidth,
     double? windowHeight,
     bool? dragLocked,
@@ -1236,6 +1249,7 @@ class _OverlayPageState extends State<OverlayPage> {
       colorOverrides: colorOverrides ?? base.colorOverrides,
       opacity: opacity ?? base.opacity,
       fontSize: fontSize ?? base.fontSize,
+      scrollSpeed: scrollSpeed ?? base.scrollSpeed,
       windowWidth: windowWidth ?? base.windowWidth,
       windowHeight: windowHeight ?? base.windowHeight,
       dragLocked: dragLocked ?? base.dragLocked,
@@ -1284,6 +1298,19 @@ class _OverlayPageState extends State<OverlayPage> {
     setState(() {
       _opacity = clampOverlayOpacity(value);
       _mergePatch(opacity: _opacity);
+    });
+    _scheduleReport();
+  }
+
+  /// 悬浮球菜单里调全局滚动速度（#178）。
+  ///
+  /// 与字号同口径：拖动实时改 `_scrollSpeed`（各栏 didUpdateWidget 立刻改
+  /// `_autoScroller.speed`），松手才落盘并回报主 App——主 App 的设置页曾持一次性
+  /// 快照（#97），必须走同一条 `_mergePatch` + `_scheduleReport` 通路才不会写回旧值。
+  void _setGlobalScrollSpeed(double value) {
+    setState(() {
+      _scrollSpeed = clampDanmuScrollSpeed(value);
+      _mergePatch(scrollSpeed: _scrollSpeed);
     });
     _scheduleReport();
   }
