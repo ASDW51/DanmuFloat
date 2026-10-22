@@ -121,6 +121,25 @@ class OverlayApp extends StatelessWidget {
   );
 }
 
+/// 分隔线与边框的绘制色（#177）。
+///
+/// chrome 色本身带 alpha（dark 下 `white24` ≈ 9%），所以透明度拉满时圆角与网格线上
+/// 仍留着细缝，用户看到的就是「设到 1.00 还是透的」。满不透明时改用「与窗口底色混合
+/// 后的等效不透明色」：观感一致，但 alpha 是 255，符合「1.00 = 真正不透明」。
+Color overlayChromeColor(OverlayPalette palette, double opacity) {
+  if (clampOverlayOpacity(opacity) < maxOverlayOpacity) return palette.divider;
+  return Color.alphaBlend(palette.divider, palette.maskColor);
+}
+
+/// 单栏实际渲染的透明度（#177）：窗内手势覆盖 > 设置页的按栏持久覆盖 > 全局值。
+///
+/// 抽成纯函数是为了能直接单测这条优先级——它是「全局滑块被静默忽略」的根源。
+double paneOpacityFor({
+  required double? gesture,
+  required double? persisted,
+  required double global,
+}) => clampOverlayOpacity(gesture ?? persisted ?? global);
+
 class OverlayPage extends StatefulWidget {
   const OverlayPage({super.key, this.roomInfoClient});
 
@@ -638,13 +657,12 @@ class _OverlayPageState extends State<OverlayPage> {
       child: Container(
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
-          // 有栏位时背景由各栏自己画（prd F5 每栏透明度可不同）；
-          // 无栏位（等待配置）时退回全局透明度，避免窗口完全透明看不见。
-          color: _webRids.isEmpty
-              ? palette.maskColor.withValues(alpha: _opacity)
-              : Colors.transparent,
+          // 窗口底色始终按全局透明度铺一层（#177）：原来「有栏位就透明」会让栏位之间
+          // 的缝隙直接透出底下画面，透明度拉到 1.00 时看起来仍是「透的」。
+          // 各栏仍按自己的透明度叠在这层之上（prd F5 每栏透明度可不同）。
+          color: palette.maskColor.withValues(alpha: _opacity),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: palette.border),
+          border: Border.all(color: overlayChromeColor(palette, _opacity)),
         ),
         child: Stack(
           children: <Widget>[
@@ -888,13 +906,17 @@ class _OverlayPageState extends State<OverlayPage> {
             _menuSlider(
               palette,
               label,
-              '透明度　${_opacity.toStringAsFixed(2)}',
+              // 标「全局」不是啰嗦：有单栏覆盖时这一格只决定没覆盖的栏，
+              // 不写清楚就成了「标签 1.00 / 实际 0.50」的自相矛盾界面（#177 C）。
+              '透明度（全局）　${_opacity.toStringAsFixed(2)}',
               _opacity,
               minOverlayOpacity,
               maxOverlayOpacity,
               20,
               _setGlobalOpacity,
             ),
+            if (_overriddenOpacityPanes > 0)
+              _buildOpacityOverrideHint(palette, label),
             _menuSlider(
               palette,
               label,
@@ -1293,6 +1315,56 @@ class _OverlayPageState extends State<OverlayPage> {
   /// 重新显示悬浮球（隐藏态下的双击唤回）。
   void _revealBall() => setState(() => _ballHidden = false);
 
+  /// 有多少栏的透明度被「单栏覆盖」接管了（#177）。
+  ///
+  /// 会话内的手势覆盖与设置页的持久覆盖都算：两者都会让全局滑块对那一栏失效，
+  /// 用户看到的现象完全一样，提示必须一起算。
+  int get _overriddenOpacityPanes {
+    int count = 0;
+    for (int index = 0; index < _webRids.length; index++) {
+      final PaneStyle? style = _paneStyles[_webRids[index]];
+      if (_gestureOpacity.containsKey(index) || style?.opacity != null) count++;
+    }
+    return count;
+  }
+
+  /// 「全局透明度被单栏覆盖」的说明行（#177 A）：不再静默忽略。
+  ///
+  /// 只提供清除**本窗手势覆盖**的入口：设置页的按栏持久覆盖要回设置页改，
+  /// 窗内没有对应协议字段，硬塞一个「清除」只会让人以为改了其实没落盘。
+  Widget _buildOpacityOverrideHint(OverlayPalette palette, double fontSize) {
+    final bool hasGesture = _gestureOpacity.isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.only(left: 8, right: 8, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            hasGesture
+                ? '$_overriddenOpacityPanes 个栏位已单独调整，全局值对它们不生效'
+                : '$_overriddenOpacityPanes 个栏位使用「按栏独立配置」的透明度',
+            style: TextStyle(color: palette.secondary, fontSize: fontSize - 2),
+          ),
+          if (hasGesture)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _menuButton(
+                palette,
+                fontSize,
+                '全部跟随全局',
+                _clearGestureOpacity,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 清掉本窗的手势透明度覆盖，让各栏回到全局值 / 设置页覆盖（#177）。
+  void _clearGestureOpacity() {
+    setState(_gestureOpacity.clear);
+  }
+
   /// 悬浮球菜单里调全局透明度（只影响没有单栏覆盖的栏）。
   void _setGlobalOpacity(double value) {
     setState(() {
@@ -1561,7 +1633,12 @@ class _OverlayPageState extends State<OverlayPage> {
     return Column(
       children: <Widget>[
         for (int row = 0; row < rows; row++) ...<Widget>[
-          if (row > 0) Divider(height: 1, thickness: 1, color: palette.divider),
+          if (row > 0)
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: overlayChromeColor(palette, _opacity),
+            ),
           Expanded(
             flex: rowFlex(row),
             child: Row(
@@ -1572,7 +1649,7 @@ class _OverlayPageState extends State<OverlayPage> {
                       VerticalDivider(
                         width: 1,
                         thickness: 1,
-                        color: palette.divider,
+                        color: overlayChromeColor(palette, _opacity),
                       ),
                     Expanded(
                       flex: columnFlex(row, column),
@@ -1608,7 +1685,11 @@ class _OverlayPageState extends State<OverlayPage> {
       retryToken: _retryTokens[index] ?? 0,
       roomInfoClient: widget.roomInfoClient,
       fontSize: paneFontSize(style?.fontSize ?? _fontSize, _webRids.length),
-      opacity: _gestureOpacity[index] ?? style?.opacity ?? _opacity,
+      opacity: paneOpacityFor(
+        gesture: _gestureOpacity[index],
+        persisted: style?.opacity,
+        global: _opacity,
+      ),
       textColor: style?.textColor,
       scrollSpeed: _scrollSpeed,
       filter: _filter,
@@ -2048,7 +2129,10 @@ class _OverlayPaneState extends State<_OverlayPane> {
           // 隐藏栏目标识（prd F6）时连分隔线一起省掉，弹幕占满整栏。
           if (widget.showTitleBar) ...<Widget>[
             _buildTitleBar(),
-            Divider(height: 1, color: palette.divider),
+            Divider(
+              height: 1,
+              color: overlayChromeColor(palette, widget.opacity),
+            ),
           ],
           Expanded(
             child: GestureDetector(
@@ -2374,7 +2458,11 @@ class _OverlayPaneState extends State<_OverlayPane> {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
         color: palette.bannerBg,
-        border: Border(top: BorderSide(color: palette.divider)),
+        border: Border(
+          top: BorderSide(
+            color: overlayChromeColor(palette, widget.opacity),
+          ),
+        ),
       ),
       child: Text.rich(
         TextSpan(
