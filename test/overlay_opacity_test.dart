@@ -47,7 +47,7 @@ Future<void> _pushConfig(
       const JSONMessageCodec().encodeMessage(<String, Object?>{
         'type': 'config',
         'webRids': webRids,
-        if (paneStyles != null) 'paneStyles': paneStyles,
+        'paneStyles': ?paneStyles,
       }),
       (ByteData? _) {},
     ),
